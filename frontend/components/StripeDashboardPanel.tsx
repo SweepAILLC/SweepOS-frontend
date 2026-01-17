@@ -367,7 +367,7 @@ export default function StripeDashboardPanel() {
                     <li>All connections are logged for security audit</li>
                   </ul>
                 </div>
-                <p className="text-xs text-gray-400 mb-2">Use this if you can't install the Stripe app on the publisher account. Get your API key from Stripe Dashboard → Developers → API keys.</p>
+                <p className="text-xs text-gray-400 mb-2">Use this if you can&apos;t install the Stripe app on the publisher account. Get your API key from Stripe Dashboard → Developers → API keys.</p>
                 <button
                   onClick={() => {
                     setShowDirectApiKey(!showDirectApiKey);

@@ -706,7 +706,6 @@ export default function AdminPanel() {
                           <p className="font-medium text-gray-900">{funnel.name}</p>
                           <div className="flex space-x-4 mt-1 text-sm text-gray-500">
                             {funnel.domain && <span>Domain: {funnel.domain}</span>}
-                            {funnel.slug && <span>Slug: {funnel.slug}</span>}
                           </div>
                         </div>
                         <div className="flex space-x-2">
@@ -717,7 +716,7 @@ export default function AdminPanel() {
                               setFunnelFormData({
                                 name: funnel.name,
                                 client_id: '',
-                                slug: funnel.slug || '',
+                                slug: '',
                                 domain: funnel.domain || '',
                                 env: ''
                               });

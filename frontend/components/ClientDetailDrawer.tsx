@@ -133,7 +133,7 @@ export default function ClientDetailDrawer({
 
   if (!client) return null;
 
-  const formatDate = (date: string | null) => {
+  const formatDate = (date: string | null | undefined) => {
     if (!date) return 'Never';
     return new Date(date).toLocaleDateString();
   };

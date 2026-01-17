@@ -16,7 +16,7 @@ export default function FunnelDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'steps' | 'health' | 'analytics'>('overview');
 
-  const handleNavbarTabChange = (tab: 'brevo' | 'clients' | 'stripe' | 'funnels') => {
+  const handleNavbarTabChange = (tab: 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner') => {
     // Navigate to main dashboard with the selected tab as query parameter
     router.push(`/?tab=${tab}`);
   };

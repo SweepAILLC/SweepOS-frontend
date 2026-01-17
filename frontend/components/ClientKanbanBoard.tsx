@@ -279,7 +279,7 @@ export default function ClientKanbanBoard() {
     try {
       // Update all underlying clients on server
       await Promise.all(
-        clientIdsToUpdate.map((id) =>
+        clientIdsToUpdate.map((id: string) =>
           apiClient.updateClient(id, {
             lifecycle_state: newColumnId,
           })
@@ -458,8 +458,9 @@ export default function ClientKanbanBoard() {
 
   const handleDeleteClient = async (client: Client) => {
     // Check if this is a merged client
-    const isMerged = client.meta?.merged_client_ids && client.meta.merged_client_ids.length > 1;
-    const clientCount = isMerged ? client.meta.merged_client_ids.length : 1;
+    const mergedIds = client.meta?.merged_client_ids;
+    const isMerged = mergedIds && mergedIds.length > 1;
+    const clientCount = isMerged ? (client.meta?.merged_client_ids?.length || 1) : 1;
     
     const confirmMessage = isMerged
       ? `This will delete ${clientCount} merged client(s) with email "${client.email}". Are you sure?`
@@ -478,7 +479,7 @@ export default function ClientKanbanBoard() {
       
       // Close drawer if the deleted client was selected
       if (selectedClient && (selectedClient.id === client.id || 
-          (isMerged && client.meta.merged_client_ids.includes(selectedClient.id)))) {
+          (isMerged && mergedIds?.includes(selectedClient.id)))) {
         setIsDrawerOpen(false);
         setSelectedClient(null);
       }
@@ -506,6 +507,7 @@ export default function ClientKanbanBoard() {
         phone: '',
         lifecycle_state: 'cold_lead',
         notes: '',
+        program_duration_days: undefined,
       });
       // Optionally open the new client in the drawer
       setSelectedClient(newClient);
@@ -569,7 +571,7 @@ export default function ClientKanbanBoard() {
         </div>
         {searchQuery && (
           <div className="text-sm text-gray-600">
-            Found {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} matching "{searchQuery}"
+            Found {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} matching &quot;{searchQuery}&quot;
           </div>
         )}
       </div>
