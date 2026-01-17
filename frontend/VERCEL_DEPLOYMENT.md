@@ -97,11 +97,28 @@ Every push to a branch creates a preview deployment. Preview deployments:
 
 ## Troubleshooting
 
+### "No Next.js version detected" Error
+
+If you see this error:
+1. **Check Root Directory Setting**: 
+   - Go to Project Settings → General
+   - Ensure **Root Directory** is set to `.` (root) or left empty
+   - If your repo was split from a monorepo, the frontend files should be at the root
+   
+2. **Verify package.json location**:
+   - The `package.json` with `next` dependency should be at the root of your repository
+   - Check that `next` is in `dependencies` (not just `devDependencies`)
+
+3. **Clear build cache**:
+   - In Vercel dashboard, go to Settings → General
+   - Click "Clear Build Cache" and redeploy
+
 ### Build Fails
 
 - Check that all environment variables are set
 - Verify `NEXT_PUBLIC_API_BASE_URL` is correct
 - Check build logs in Vercel dashboard
+- Ensure `package.json` has `next` in `dependencies`
 
 ### API Connection Issues
 
