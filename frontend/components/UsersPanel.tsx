@@ -16,15 +16,27 @@ export default function UsersPanel() {
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string>('');
   const [formData, setFormData] = useState({
     email: '',
-    password: ''
+    password: '',
+    role: 'member' as 'owner' | 'admin' | 'member'
   });
   const [newUserCredentials, setNewUserCredentials] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
+    loadCurrentUser();
     loadUsers();
   }, []);
+
+  const loadCurrentUser = async () => {
+    try {
+      const user = await apiClient.getCurrentUser();
+      setCurrentUserRole(user.role || '');
+    } catch (err) {
+      console.error('Failed to load current user:', err);
+    }
+  };
 
   const loadUsers = async () => {
     try {
@@ -42,9 +54,16 @@ export default function UsersPanel() {
   const handleCreateUser = async () => {
     if (!formData.email.trim()) return;
 
+    // Prevent admins from creating owner users
+    if (currentUserRole !== 'owner' && formData.role === 'owner') {
+      setError('Only owners can assign the owner role');
+      return;
+    }
+
     try {
       const data: any = {
-        email: formData.email
+        email: formData.email,
+        role: formData.role
       };
       
       if (formData.password) {
@@ -57,7 +76,7 @@ export default function UsersPanel() {
         password: newUser.password || formData.password
       });
       setShowCreateForm(false);
-      setFormData({ email: '', password: '' });
+      setFormData({ email: '', password: '', role: 'member' });
       await loadUsers();
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to create user');
@@ -75,11 +94,21 @@ export default function UsersPanel() {
       if (formData.password) {
         data.password = formData.password;
       }
+      
+      // Only allow role updates if current user is owner, or if not trying to set owner role
+      if (formData.role) {
+        // If current user is not owner and trying to set owner role, prevent it
+        if (currentUserRole !== 'owner' && formData.role === 'owner') {
+          setError('Only owners can assign the owner role');
+          return;
+        }
+        data.role = formData.role;
+      }
 
       await apiClient.updateUser(userId, data);
       setEditingUser(null);
       setShowCreateForm(false);
-      setFormData({ email: '', password: '' });
+      setFormData({ email: '', password: '', role: 'member' });
       await loadUsers();
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to update user');
@@ -116,7 +145,7 @@ export default function UsersPanel() {
           onClick={() => {
             setShowCreateForm(true);
             setEditingUser(null);
-            setFormData({ email: '', password: '' });
+            setFormData({ email: '', password: '', role: 'member' });
             setNewUserCredentials(null);
           }}
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
@@ -183,6 +212,24 @@ export default function UsersPanel() {
                 placeholder={editingUser ? 'Leave blank to keep current' : 'Auto-generated if blank'}
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Role *</label>
+              <select
+                value={formData.role}
+                onChange={(e) => setFormData({ ...formData, role: e.target.value as 'owner' | 'admin' | 'member' })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                required
+              >
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+                {currentUserRole === 'owner' && (
+                  <option value="owner">Owner</option>
+                )}
+              </select>
+              {currentUserRole !== 'owner' && formData.role === 'owner' && (
+                <p className="mt-1 text-sm text-red-600">Only owners can assign the owner role</p>
+              )}
+            </div>
             <div className="flex space-x-2">
               <button
                 onClick={editingUser ? () => handleUpdateUser(editingUser) : handleCreateUser}
@@ -194,7 +241,7 @@ export default function UsersPanel() {
                 onClick={() => {
                   setShowCreateForm(false);
                   setEditingUser(null);
-                  setFormData({ email: '', password: '' });
+                  setFormData({ email: '', password: '', role: 'member' });
                   setNewUserCredentials(null);
                 }}
                 className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
@@ -238,7 +285,11 @@ export default function UsersPanel() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <span className="px-2 py-1 text-xs font-medium rounded-full bg-blue-100 text-blue-800 capitalize">
+                    <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize ${
+                      user.role === 'owner' ? 'bg-purple-100 text-purple-800' :
+                      user.role === 'admin' ? 'bg-blue-100 text-blue-800' :
+                      'bg-gray-100 text-gray-800'
+                    }`}>
                       {user.role}
                     </span>
                   </td>
@@ -250,7 +301,11 @@ export default function UsersPanel() {
                       onClick={() => {
                         setEditingUser(user.id);
                         setShowCreateForm(true);
-                        setFormData({ email: user.email, password: '' });
+                        // If current user is not owner and editing user is owner, prevent editing role
+                        const userRole = (user.role as 'owner' | 'admin' | 'member') || 'member';
+                        // If user is owner and current user is not owner, default to member (can't change owner role)
+                        const editableRole = (currentUserRole !== 'owner' && userRole === 'owner') ? 'member' : userRole;
+                        setFormData({ email: user.email, password: '', role: editableRole });
                       }}
                       className="text-blue-600 hover:text-blue-900 mr-4"
                     >

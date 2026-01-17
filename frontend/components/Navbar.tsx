@@ -4,18 +4,18 @@ import Cookies from 'js-cookie';
 import UserSettingsModal from './UserSettingsModal';
 
 interface NavbarProps {
-  activeTab: 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'admin';
-  onTabChange: (tab: 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'admin') => void;
-  isAdmin?: boolean;
+  activeTab: 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner';
+  onTabChange: (tab: 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner') => void;
+  isOwner?: boolean;
   tabPermissions?: Record<string, boolean>;
 }
 
-export default function Navbar({ activeTab, onTabChange, isAdmin = false, tabPermissions = {} }: NavbarProps) {
+export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPermissions = {} }: NavbarProps) {
   // Helper to check if tab should be shown
   const shouldShowTab = (tab: string): boolean => {
-    // Admin tab only for main org admins
-    if (tab === 'admin') {
-      return isAdmin;
+    // Owner tab only for owners
+    if (tab === 'owner') {
+      return isOwner;
     }
     // Other tabs: show if permission is not explicitly false
     return tabPermissions[tab] !== false;
@@ -101,16 +101,16 @@ export default function Navbar({ activeTab, onTabChange, isAdmin = false, tabPer
                   Users
                 </button>
               )}
-              {shouldShowTab('admin') && (
+              {shouldShowTab('owner') && (
                 <button
-                  onClick={() => onTabChange('admin')}
+                  onClick={() => onTabChange('owner')}
                   className={`inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium ${
-                    activeTab === 'admin'
+                    activeTab === 'owner'
                       ? 'border-primary-500 text-gray-900'
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  Admin
+                  Owner
                 </button>
               )}
             </div>

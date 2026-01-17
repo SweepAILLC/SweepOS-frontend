@@ -12,9 +12,9 @@ import RestrictedTabView from '@/components/RestrictedTabView';
 
 export default function Dashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'admin'>('clients');
+  const [activeTab, setActiveTab] = useState<'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner'>('clients');
   const [loading, setLoading] = useState(true);
-  const [isAdmin, setIsAdmin] = useState(false);
+  const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -29,9 +29,9 @@ export default function Dashboard() {
         
         if (!isMounted) return;
         
-        // Check if user is admin (role is 'admin' or 'owner', or is_admin is true)
-        const userIsAdmin = user.role === 'admin' || user.role === 'owner' || user.is_admin === true;
-        setIsAdmin(userIsAdmin);
+        // Check if user is owner (only 'owner' role)
+        const userIsOwner = user.role === 'owner';
+        setIsOwner(userIsOwner);
         
         // Check if user is in main org (Sweep Internal)
         // Main org ID is: 00000000-0000-0000-0000-000000000001
@@ -103,8 +103,8 @@ export default function Dashboard() {
 
     const { tab, stripe_connected, stripe_error, error_description, brevo_connected, brevo_error } = router.query;
     
-    if (tab && typeof tab === 'string' && ['brevo', 'clients', 'stripe', 'funnels', 'users', 'admin'].includes(tab)) {
-      setActiveTab(tab as 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'admin');
+    if (tab && typeof tab === 'string' && ['brevo', 'clients', 'stripe', 'funnels', 'users', 'owner'].includes(tab)) {
+      setActiveTab(tab as 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner');
       // Clear the query parameter after setting the tab
       router.replace('/', undefined, { shallow: true });
       return; // Don't process OAuth params if we're handling tab navigation
@@ -153,9 +153,9 @@ export default function Dashboard() {
 
   // Check if current tab is accessible
   const hasTabAccess = (tab: string): boolean => {
-    // Admin tab only for main org users
-    if (tab === 'admin') {
-      return isMainOrg && isAdmin;
+    // Owner tab only for owners
+    if (tab === 'owner') {
+      return isOwner;
     }
     // Check permissions for other tabs
     return tabPermissions[tab] !== false; // Default to true if not set
@@ -166,7 +166,7 @@ export default function Dashboard() {
       <Navbar 
         activeTab={activeTab} 
         onTabChange={setActiveTab} 
-        isAdmin={isMainOrg && isAdmin}
+        isOwner={isOwner}
         tabPermissions={tabPermissions}
       />
 
@@ -242,9 +242,9 @@ export default function Dashboard() {
           )
         )}
 
-        {activeTab === 'admin' && isMainOrg && isAdmin && (
+        {activeTab === 'owner' && isOwner && (
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Admin Panel</h2>
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Owner Panel</h2>
             <AdminPanel />
           </div>
         )}
