@@ -651,7 +651,7 @@ export default function ClientDetailDrawer({
                           ) : (
                             <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
                               <p className="text-sm text-gray-600 dark:text-gray-400">
-                                No upcoming check-ins. Click "View Calendar" to sync with your calendar and view check-in history.
+                                No upcoming check-ins. Click &quot;View Calendar&quot; to sync with your calendar and view check-in history.
                               </p>
                             </div>
                           )}

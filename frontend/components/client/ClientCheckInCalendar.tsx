@@ -515,7 +515,7 @@ export default function ClientCheckInCalendar({
                     {monthCheckIns.length === 0 ? (
                       <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                         <p>No check-ins found for this month.</p>
-                        <p className="text-sm mt-2">Click "Sync Calendar" to sync with your calendar.</p>
+                        <p className="text-sm mt-2">Click &quot;Sync Calendar&quot; to sync with your calendar.</p>
                       </div>
                     ) : (
                       <div className="space-y-3">
