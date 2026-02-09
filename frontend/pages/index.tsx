@@ -1,23 +1,46 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
-import Navbar from '@/components/Navbar';
-import ClientKanbanBoard from '@/components/ClientKanbanBoard';
+import Navbar from '@/components/ui/Navbar';
+import TerminalDashboard from '@/components/TerminalDashboard';
 import BrevoConsolePanel from '@/components/BrevoConsolePanel';
-import StripeDashboardPanel from '@/components/StripeDashboardPanel';
+import StripeDashboardPanel from '@/components/stripe/StripeDashboardPanel';
+import CalendarConsolePanel from '@/components/calendar/CalendarConsolePanel';
 import FunnelListPanel from '@/components/FunnelListPanel';
 import AdminPanel from '@/components/AdminPanel';
 import UsersPanel from '@/components/UsersPanel';
-import RestrictedTabView from '@/components/RestrictedTabView';
+import RestrictedTabView from '@/components/ui/RestrictedTabView';
+import { useLoading } from '@/contexts/LoadingContext';
 
 export default function Dashboard() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner'>('clients');
-  const [loading, setLoading] = useState(true);
+  const { setLoading: setGlobalLoading } = useLoading();
+  
+  // Initialize activeTab from localStorage or default to 'terminal'
+  const getInitialTab = (): 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' => {
+    if (typeof window === 'undefined') return 'terminal';
+    const savedTab = localStorage.getItem('activeTab');
+    const validTabs = ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'];
+    if (savedTab && validTabs.includes(savedTab)) {
+      return savedTab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
+    }
+    return 'terminal';
+  };
+  
+  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom'>(getInitialTab());
+  const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
+  const [userRole, setUserRole] = useState<string>('member'); // Track user role for permission checks
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  
+  // Save activeTab to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeTab', activeTab);
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     let isMounted = true;
@@ -32,6 +55,10 @@ export default function Dashboard() {
         // Check if user is owner (only 'owner' role)
         const userIsOwner = user.role === 'owner';
         setIsOwner(userIsOwner);
+        
+        // Store user role for permission checks (normalize to lowercase)
+        const normalizedRole = String(user.role || 'member').toLowerCase().trim();
+        setUserRole(normalizedRole);
         
         // Check if user is in main org (Sweep Internal)
         // Main org ID is: 00000000-0000-0000-0000-000000000001
@@ -54,36 +81,53 @@ export default function Dashboard() {
         } catch (permError: any) {
           // If permissions endpoint fails (e.g., endpoint doesn't exist yet or migration not run), default to all enabled
           console.warn('Failed to load tab permissions, using defaults:', permError);
+          const defaultPermissions = {
+            brevo: true,
+            terminal: true,
+            stripe: true,
+            funnels: true,
+            users: true,
+            calcom: true
+          };
           if (isMounted) {
-            setTabPermissions({
-              brevo: true,
-              clients: true,
-              stripe: true,
-              funnels: true,
-              users: true
-            });
+            setTabPermissions(defaultPermissions);
           }
         }
         
         if (isMounted) {
-          setLoading(false);
+          setLoadingState(false);
         }
       } catch (error: any) {
-        console.error('Auth check failed:', error);
+        // Suppress console errors for auth failures - they're handled gracefully
+        const isAuthError = error.response?.status === 401 || error.code === 'ERR_NETWORK' || error.response?.status === 403;
+        
+        if (!isAuthError) {
+          console.error('Auth check failed:', error);
+        }
+        
         if (isMounted) {
-          // Only redirect if it's actually an auth error, not a network error
-          if (error.response?.status === 401 || error.code === 'ERR_NETWORK') {
-            router.push('/login');
+          // Handle auth errors gracefully - redirect without showing errors
+          if (isAuthError) {
+            // Clear any stale token
+            const Cookies = require('js-cookie');
+            Cookies.remove('access_token');
+            // Redirect to login immediately
+            if (typeof window !== 'undefined') {
+              window.location.href = '/login';
+            }
+            return; // Don't update state, just redirect
           } else {
             // For other errors, still show the UI but with defaults
-            setTabPermissions({
+            const defaultPermissions = {
               brevo: true,
-              clients: true,
+              terminal: true,
               stripe: true,
               funnels: true,
-              users: true
-            });
-            setLoading(false);
+              users: true,
+              calcom: true
+            };
+            setTabPermissions(defaultPermissions);
+            setLoadingState(false);
           }
         }
       }
@@ -103,17 +147,13 @@ export default function Dashboard() {
 
     const { tab, stripe_connected, stripe_error, error_description, brevo_connected, brevo_error } = router.query;
     
-    if (tab && typeof tab === 'string' && ['brevo', 'clients', 'stripe', 'funnels', 'users', 'owner'].includes(tab)) {
-      setActiveTab(tab as 'brevo' | 'clients' | 'stripe' | 'funnels' | 'users' | 'owner');
-      // Clear the query parameter after setting the tab
-      router.replace('/', undefined, { shallow: true });
-      return; // Don't process OAuth params if we're handling tab navigation
-    }
-
-    // Handle OAuth callback parameters
+    // Handle OAuth callback parameters first (they may also set the tab)
     if (stripe_connected === 'true') {
       setNotification({ type: 'success', message: 'Stripe connected successfully! Syncing customers...' });
       setActiveTab('stripe');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeTab', 'stripe');
+      }
       // Clear query params
       router.replace('/', undefined, { shallow: true });
       // Dispatch event to refresh clients list
@@ -123,30 +163,54 @@ export default function Dashboard() {
         // Force reload to refresh both Stripe dashboard and clients
         window.location.reload();
       }, 6000); // Increased to 6 seconds to allow sync to complete
+      return;
     } else if (stripe_error) {
       const errorMsg = error_description || 'Failed to connect Stripe';
       setNotification({ type: 'error', message: `Stripe connection error: ${errorMsg}` });
       setActiveTab('stripe');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeTab', 'stripe');
+      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
+      return;
     } else if (brevo_connected === 'true') {
       setNotification({ type: 'success', message: 'Brevo connected successfully!' });
       setActiveTab('brevo');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeTab', 'brevo');
+      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
+      return;
     } else if (brevo_error) {
       const errorMsg = error_description || 'Failed to connect Brevo';
       setNotification({ type: 'error', message: `Brevo connection error: ${errorMsg}` });
       setActiveTab('brevo');
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeTab', 'brevo');
+      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
+      return;
+    }
+    
+    // Handle standalone tab navigation (only if no OAuth params)
+    if (tab && typeof tab === 'string' && ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'].includes(tab)) {
+      const tabValue = tab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
+      setActiveTab(tabValue);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('activeTab', tabValue);
+      }
+      // Clear the query parameter after setting the tab
+      router.replace('/', undefined, { shallow: true });
     }
   }, [router.isReady, router.query]);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-500">Loading...</div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+        <div className="text-gray-500 dark:text-gray-400">Loading...</div>
       </div>
     );
   }
@@ -157,30 +221,52 @@ export default function Dashboard() {
     if (tab === 'owner') {
       return isOwner;
     }
+    // Users tab: not accessible to members (check role directly)
+    if (tab === 'users') {
+      const roleLower = String(userRole || 'member').toLowerCase().trim();
+      // Explicitly hide for members - check multiple possible formats
+      if (roleLower === 'member' || roleLower === 'MEMBER' || roleLower === 'Member') {
+        return false;
+      }
+      // Only show if user is admin or owner
+      if (roleLower !== 'admin' && roleLower !== 'owner') {
+        return false;
+      }
+      return tabPermissions[tab] !== false;
+    }
     // Check permissions for other tabs
     return tabPermissions[tab] !== false; // Default to true if not set
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar 
         activeTab={activeTab} 
-        onTabChange={setActiveTab} 
+        onTabChange={(tab) => {
+          // Only set loading if actually switching to a different tab
+          if (tab !== activeTab) {
+            setGlobalLoading(true, 'Switching tabs...');
+            setActiveTab(tab);
+            // Loading will be turned off by the individual panel components when they finish loading
+          }
+        }} 
         isOwner={isOwner}
         tabPermissions={tabPermissions}
+        userRole={userRole || 'member'}
       />
 
       {notification && (
         <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
           notification.type === 'success' 
-            ? 'bg-green-500 text-white' 
-            : 'bg-red-500 text-white'
+            ? 'bg-green-500 dark:bg-green-600 text-white' 
+            : 'bg-red-500 dark:bg-red-600 text-white'
         }`}>
           <div className="flex items-center justify-between">
             <span>{notification.message}</span>
             <button
               onClick={() => setNotification(null)}
               className="ml-4 text-white hover:text-gray-200"
+              aria-label="Close notification"
             >
               ×
             </button>
@@ -188,23 +274,19 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'clients' && (
-          hasTabAccess('clients') ? (
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Client Management</h2>
-              <ClientKanbanBoard />
-            </div>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
+        {activeTab === 'terminal' && (
+          hasTabAccess('terminal') ? (
+            <TerminalDashboard />
           ) : (
-            <RestrictedTabView tabName="clients" />
+            <RestrictedTabView tabName="terminal" />
           )
         )}
 
         {activeTab === 'brevo' && (
           hasTabAccess('brevo') ? (
-            <div className="max-w-4xl">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Brevo Console</h2>
-              <BrevoConsolePanel />
+            <div className="w-full">
+              <BrevoConsolePanel userRole={userRole} />
             </div>
           ) : (
             <RestrictedTabView tabName="brevo" />
@@ -214,8 +296,8 @@ export default function Dashboard() {
         {activeTab === 'stripe' && (
           hasTabAccess('stripe') ? (
             <div className="max-w-4xl">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Stripe Financial Dashboard</h2>
-              <StripeDashboardPanel />
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Stripe Financial Dashboard</h2>
+              <StripeDashboardPanel userRole={userRole} />
             </div>
           ) : (
             <RestrictedTabView tabName="stripe" />
@@ -244,9 +326,19 @@ export default function Dashboard() {
 
         {activeTab === 'owner' && isOwner && (
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">Owner Panel</h2>
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Owner Panel</h2>
             <AdminPanel />
           </div>
+        )}
+
+        {activeTab === 'calcom' && (
+          hasTabAccess('calcom') ? (
+            <div className="w-full">
+              <CalendarConsolePanel userRole={userRole} />
+            </div>
+          ) : (
+            <RestrictedTabView tabName="calcom" />
+          )
         )}
       </main>
     </div>

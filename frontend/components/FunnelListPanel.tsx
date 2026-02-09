@@ -2,9 +2,12 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import { Funnel } from '@/types/funnel';
+import ShinyButton from './ui/ShinyButton';
+import { useLoading } from '@/contexts/LoadingContext';
 
 export default function FunnelListPanel() {
   const router = useRouter();
+  const { setLoading: setGlobalLoading } = useLoading();
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -14,6 +17,7 @@ export default function FunnelListPanel() {
   }, []);
 
   const loadFunnels = async () => {
+    setGlobalLoading(true, 'Loading funnels...');
     try {
       setLoading(true);
       const data = await apiClient.getFunnels();
@@ -23,6 +27,7 @@ export default function FunnelListPanel() {
       setError(err.message || 'Failed to load funnels');
     } finally {
       setLoading(false);
+      setGlobalLoading(false);
     }
   };
 
@@ -38,8 +43,8 @@ export default function FunnelListPanel() {
     return (
       <div className="p-6">
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-          <p className="mt-2 text-gray-600">Loading funnels...</p>
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <p className="mt-2 text-gray-600 dark:text-gray-400">Loading funnels...</p>
         </div>
       </div>
     );
@@ -48,11 +53,11 @@ export default function FunnelListPanel() {
   if (error) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-          <p className="text-red-800">Error: {error}</p>
+        <div className="glass-card p-4 border-red-400/40">
+          <p className="text-red-800 dark:text-red-200">Error: {error}</p>
           <button
             onClick={loadFunnels}
-            className="mt-2 text-red-600 hover:text-red-800 underline"
+            className="mt-2 text-red-600 dark:text-red-300 hover:text-red-800 underline"
           >
             Retry
           </button>
@@ -64,24 +69,18 @@ export default function FunnelListPanel() {
   return (
     <div className="p-6">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Funnels</h2>
-        <button
-          onClick={handleCreateFunnel}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-        >
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Funnels</h2>
+        <ShinyButton onClick={handleCreateFunnel}>
           + New Funnel
-        </button>
+        </ShinyButton>
       </div>
 
       {funnels.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded-lg">
-          <p className="text-gray-600 mb-4">No funnels yet</p>
-          <button
-            onClick={handleCreateFunnel}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
-          >
+        <div className="text-center py-12 glass-card">
+          <p className="text-gray-600 dark:text-gray-300 mb-4">No funnels yet</p>
+          <ShinyButton onClick={handleCreateFunnel}>
             Create Your First Funnel
-          </button>
+          </ShinyButton>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -89,18 +88,18 @@ export default function FunnelListPanel() {
             <div
               key={funnel.id}
               onClick={() => handleFunnelClick(funnel.id)}
-              className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md cursor-pointer transition-shadow"
+              className="glass-card neon-glow p-4 hover:shadow-lg cursor-pointer transition-shadow"
             >
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">{funnel.name}</h3>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{funnel.name}</h3>
               {funnel.domain && (
-                <p className="text-sm text-gray-600 mb-2">Domain: {funnel.domain}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Domain: {funnel.domain}</p>
               )}
               {funnel.steps && funnel.steps.length > 0 && (
-                <p className="text-sm text-gray-600 mb-2">
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
                   {funnel.steps.length} step{funnel.steps.length !== 1 ? 's' : ''}
                 </p>
               )}
-              <p className="text-xs text-gray-500">
+              <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
                 Created: {new Date(funnel.created_at).toLocaleDateString()}
               </p>
             </div>

@@ -44,7 +44,7 @@ function SortableStepItem({ step, onDelete }: { step: FunnelStep; onDelete: () =
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center space-x-4 p-4 bg-white border border-gray-200 rounded-lg mb-2"
+      className="flex items-center space-x-4 p-4 glass-panel rounded-lg mb-2"
     >
       <div
         {...attributes}
@@ -57,10 +57,10 @@ function SortableStepItem({ step, onDelete }: { step: FunnelStep; onDelete: () =
         {step.step_order}
       </span>
       <div className="flex-1">
-        <p className="font-medium text-gray-900">
+        <p className="font-medium text-gray-900 dark:text-gray-100">
           {step.label || step.event_name}
         </p>
-        <p className="text-sm text-gray-500">{step.event_name}</p>
+        <p className="text-sm text-gray-500 dark:text-gray-100">{step.event_name}</p>
       </div>
       <button
         onClick={onDelete}
@@ -160,21 +160,21 @@ export default function FunnelStepsTab({ funnel, onReload }: FunnelStepsTabProps
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h3 className="text-lg font-semibold text-gray-900">Funnel Steps</h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Funnel Steps</h3>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
-          className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          className="glass-button neon-glow px-4 py-2 rounded"
         >
           + Add Step
         </button>
       </div>
 
       {showAddForm && (
-        <div className="bg-white rounded-lg shadow p-6">
-          <h4 className="font-medium text-gray-900 mb-4">Add New Step</h4>
+        <div className="glass-card p-6">
+          <h4 className="font-medium text-gray-900 dark:text-gray-100 mb-4">Add New Step</h4>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Event Name *
               </label>
               <input
@@ -182,11 +182,11 @@ export default function FunnelStepsTab({ funnel, onReload }: FunnelStepsTabProps
                 value={newStep.event_name}
                 onChange={(e) => setNewStep({ ...newStep, event_name: e.target.value })}
                 placeholder="e.g., page_view, form_submit, booking_confirmed"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                className="w-full px-3 py-2 glass-input rounded-md"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                 Label (optional)
               </label>
               <input
@@ -194,14 +194,14 @@ export default function FunnelStepsTab({ funnel, onReload }: FunnelStepsTabProps
                 value={newStep.label}
                 onChange={(e) => setNewStep({ ...newStep, label: e.target.value })}
                 placeholder="e.g., Landing Page, Form Submission"
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                className="w-full px-3 py-2 glass-input rounded-md"
               />
             </div>
             <div className="flex space-x-2">
               <button
                 onClick={handleAddStep}
                 disabled={loading}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                className="glass-button neon-glow px-4 py-2 rounded disabled:opacity-50"
               >
                 Add Step
               </button>
@@ -210,7 +210,7 @@ export default function FunnelStepsTab({ funnel, onReload }: FunnelStepsTabProps
                   setShowAddForm(false);
                   setNewStep({ event_name: '', label: '' });
                 }}
-                className="bg-gray-200 text-gray-700 px-4 py-2 rounded hover:bg-gray-300"
+                className="glass-button-secondary px-4 py-2 rounded hover:bg-white/20"
               >
                 Cancel
               </button>

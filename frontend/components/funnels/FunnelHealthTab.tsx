@@ -32,19 +32,19 @@ export default function FunnelHealthTab({ funnelId }: FunnelHealthTabProps) {
   if (loading && !health) {
     return (
       <div className="text-center py-8">
-        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-        <p className="mt-2 text-gray-600">Loading health data...</p>
+        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
+        <p className="mt-2 text-gray-600 dark:text-gray-400">Loading health data...</p>
       </div>
     );
   }
 
   if (error || !health) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <p className="text-red-800">Error: {error || 'Failed to load health data'}</p>
+      <div className="glass-card p-4 border-red-400/40">
+        <p className="text-red-800 dark:text-red-200">Error: {error || 'Failed to load health data'}</p>
         <button
           onClick={loadHealth}
-          className="mt-2 text-red-600 hover:text-red-800 underline"
+          className="mt-2 text-red-600 dark:text-red-300 hover:text-red-200 underline"
         >
           Retry
         </button>
@@ -84,50 +84,50 @@ export default function FunnelHealthTab({ funnelId }: FunnelHealthTabProps) {
   return (
     <div className="space-y-6">
       {/* Health Status Card */}
-      <div className="bg-white rounded-lg shadow p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Health Status</h3>
+      <div className="glass-card p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Health Status</h3>
         <div className="flex items-center space-x-4 mb-2">
           <div className={`w-4 h-4 rounded-full ${getStatusColor()}`}></div>
-          <span className="font-medium text-gray-900">{getStatusText()}</span>
+          <span className="font-medium text-gray-900 dark:text-gray-100">{getStatusText()}</span>
         </div>
-        <p className="text-xs text-gray-500 ml-6">{getStatusDescription()}</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 ml-6">{getStatusDescription()}</p>
       </div>
 
       {/* Metrics Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-sm text-gray-600">Last Event</p>
-          <p className="text-lg font-semibold text-gray-900">
+        <div className="glass-panel rounded-lg p-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Last Event</p>
+          <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             {lastEventTime
               ? `${minutesSinceLastEvent} min ago`
               : 'Never'}
           </p>
           {lastEventTime && (
-            <p className="text-xs text-gray-500 mt-1">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
               {lastEventTime.toLocaleString()}
             </p>
           )}
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-sm text-gray-600">Events/Min</p>
-          <p className="text-lg font-semibold text-gray-900">
+        <div className="glass-panel rounded-lg p-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Events/Min</p>
+          <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             {health.events_per_minute.toFixed(2)}
           </p>
-          <p className="text-xs text-gray-500 mt-1">Last hour average</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Last hour average</p>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-sm text-gray-600">Total Events</p>
-          <p className="text-lg font-semibold text-gray-900">
+        <div className="glass-panel rounded-lg p-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Total Events</p>
+          <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             {health.total_events.toLocaleString()}
           </p>
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
-          <p className="text-sm text-gray-600">Errors (24h)</p>
+        <div className="glass-panel rounded-lg p-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Errors (24h)</p>
           <p className={`text-lg font-semibold ${
-            health.error_count_last_24h > 0 ? 'text-red-600' : 'text-gray-900'
+            health.error_count_last_24h > 0 ? 'text-red-400' : 'text-gray-900 dark:text-gray-100'
           }`}>
             {health.error_count_last_24h}
           </p>

@@ -1,0 +1,103 @@
+// Simple in-memory cache with TTL support
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  ttl: number;
+}
+
+class Cache {
+  private cache = new Map<string, CacheEntry<any>>();
+
+  set<T>(key: string, data: T, ttl: number = 60000): void {
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      ttl,
+    });
+  }
+
+  get<T>(key: string): T | null {
+    const entry = this.cache.get(key);
+    
+    if (!entry) {
+      return null;
+    }
+
+    // Check if entry has expired
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.cache.delete(key);
+      return null;
+    }
+
+    return entry.data as T;
+  }
+
+  has(key: string): boolean {
+    const entry = this.cache.get(key);
+    
+    if (!entry) {
+      return false;
+    }
+
+    // Check if entry has expired
+    if (Date.now() - entry.timestamp > entry.ttl) {
+      this.cache.delete(key);
+      return false;
+    }
+
+    return true;
+  }
+
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
+  clear(): void {
+    this.cache.clear();
+  }
+
+  // Clean up expired entries
+  cleanup(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (now - entry.timestamp > entry.ttl) {
+        this.cache.delete(key);
+      }
+    }
+  }
+}
+
+// Global cache instance
+export const cache = new Cache();
+
+// Cleanup expired entries every 5 minutes (client-side only)
+// Use a function to initialize cleanup to avoid SSR issues
+if (typeof window !== 'undefined') {
+  // Delay initialization to ensure we're fully in browser context
+  if (typeof window.requestIdleCallback !== 'undefined') {
+    window.requestIdleCallback(() => {
+      setInterval(() => {
+        cache.cleanup();
+      }, 5 * 60 * 1000);
+    });
+  } else {
+    // Fallback for browsers without requestIdleCallback
+    setTimeout(() => {
+      setInterval(() => {
+        cache.cleanup();
+      }, 5 * 60 * 1000);
+    }, 1000);
+  }
+}
+
+// Cache keys
+export const CACHE_KEYS = {
+  USER: 'user',
+  TAB_PERMISSIONS: 'tab_permissions',
+  CLIENTS: 'clients',
+  STRIPE_SUMMARY: 'stripe_summary',
+  FUNNELS: 'funnels',
+  BREVO_STATUS: 'brevo_status',
+  CALCOM_STATUS: 'calcom_status',
+} as const;
+

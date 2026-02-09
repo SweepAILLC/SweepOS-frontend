@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
-import Navbar from '@/components/Navbar';
+import Navbar from '@/components/ui/Navbar';
+import ShinyButton from '@/components/ui/ShinyButton';
 
 export default function NewFunnelPage() {
   const router = useRouter();
@@ -43,9 +44,9 @@ export default function NewFunnelPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
         <Navbar activeTab="funnels" onTabChange={(tab) => router.push(`/?tab=${tab}`)} />
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}
@@ -56,7 +57,7 @@ export default function NewFunnelPage() {
           <h1 className="text-3xl font-bold text-gray-900">Create New Funnel</h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="glass-card p-6 space-y-6">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Funnel Name *
@@ -120,13 +121,12 @@ export default function NewFunnelPage() {
           </div>
 
           <div className="flex space-x-4">
-            <button
+            <ShinyButton
               type="submit"
               disabled={loading}
-              className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               {loading ? 'Creating...' : 'Create Funnel'}
-            </button>
+            </ShinyButton>
             <button
               type="button"
               onClick={() => router.push('/')}

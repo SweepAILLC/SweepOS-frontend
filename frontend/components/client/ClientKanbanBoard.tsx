@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   DndContext,
   closestCenter,
@@ -19,6 +19,7 @@ import { apiClient } from '@/lib/api';
 import { Client } from '@/types/client';
 import ClientCard from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
+import ShinyButton from '../ui/ShinyButton';
 
 const COLUMNS = [
   { id: 'cold_lead', title: 'Cold Lead' },
@@ -30,7 +31,12 @@ const COLUMNS = [
 
 type ColumnId = typeof COLUMNS[number]['id'];
 
-export default function ClientKanbanBoard() {
+interface ClientKanbanBoardProps {
+  filteredColumn?: string | null;
+  onLoadComplete?: () => void;
+}
+
+export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplete }: ClientKanbanBoardProps = {}) {
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
@@ -39,6 +45,7 @@ export default function ClientKanbanBoard() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const hasCalledOnLoadComplete = useRef(false);
   const [createFormData, setCreateFormData] = useState({
     first_name: '',
     last_name: '',
@@ -46,7 +53,8 @@ export default function ClientKanbanBoard() {
     phone: '',
     lifecycle_state: 'cold_lead' as ColumnId,
     notes: '',
-    program_duration_days: undefined as number | undefined,
+    program_start_date: '',
+    program_end_date: '',
   });
 
   const sensors = useSensors(
@@ -83,14 +91,56 @@ export default function ClientKanbanBoard() {
     };
   }, []);
 
-  const loadClients = async () => {
+  const loadClients = async (forceRefresh = false) => {
     try {
+      if (forceRefresh) {
+        console.log('[KanbanBoard] Force refreshing clients...');
+      } else {
+        console.log('[KanbanBoard] Loading clients...');
+      }
+      
       const data = await apiClient.getClients();
-      setClients(data);
+      const stateCounts = data.reduce((acc: Record<string, number>, client) => {
+        acc[client.lifecycle_state] = (acc[client.lifecycle_state] || 0) + 1;
+        return acc;
+      }, {});
+      console.log('[KanbanBoard] Clients loaded:', {
+        count: data.length,
+        states: stateCounts
+      });
+      
+      // Log clients with programs at 75%+ to verify they're in the right state
+      const highProgressClients = data.filter(c => 
+        c.program_progress_percent && c.program_progress_percent >= 75
+      );
+      if (highProgressClients.length > 0) {
+        console.log('[KanbanBoard] Clients with 75%+ progress:', 
+          highProgressClients.map(c => ({
+            id: c.id,
+            email: c.email,
+            progress: c.program_progress_percent,
+            state: c.lifecycle_state,
+            expectedState: c.program_progress_percent >= 100 ? 'dead' : 'offboarding',
+            inCorrectColumn: (c.program_progress_percent >= 100 && c.lifecycle_state === 'dead') ||
+                            (c.program_progress_percent >= 75 && c.program_progress_percent < 100 && c.lifecycle_state === 'offboarding')
+          }))
+        );
+      }
+      
+      // Force state update by creating a new array reference
+      setClients([...data]);
+      
+      // Return the data for use in onUpdate callback
+      return data;
     } catch (error) {
       console.error('Failed to load clients:', error);
+      throw error;
     } finally {
       setLoading(false);
+      if (!hasCalledOnLoadComplete.current && onLoadComplete) {
+        hasCalledOnLoadComplete.current = true;
+        onLoadComplete();
+      }
     }
   };
 
@@ -269,20 +319,46 @@ export default function ClientKanbanBoard() {
     const mergedClientIds = client.meta?.merged_client_ids;
     const clientIdsToUpdate = mergedClientIds || [clientId];
 
+    // Check if moving FROM offboarding to another column
+    // If so, reset program fields
+    const isMovingFromOffboarding = client.lifecycle_state === 'offboarding' && newColumnId !== 'offboarding';
+    
+    // Prepare update data
+    const updateData: any = {
+      lifecycle_state: newColumnId,
+    };
+    
+    // If moving from offboarding, reset program fields
+    if (isMovingFromOffboarding) {
+      updateData.program_progress_percent = null;
+      updateData.program_duration_days = null;
+      updateData.program_start_date = null;
+      updateData.program_end_date = null;
+      console.log(`[KANBAN] Moving client from offboarding to ${newColumnId}, resetting program fields`);
+    }
+
     // Optimistic update - update both raw clients and merged clients display
     const originalClients = [...clients];
-    const updatedClients = clients.map((c) =>
-      clientIdsToUpdate.includes(c.id) ? { ...c, lifecycle_state: newColumnId } : c
-    );
+    const updatedClients = clients.map((c) => {
+      if (clientIdsToUpdate.includes(c.id)) {
+        const updated = { ...c, lifecycle_state: newColumnId };
+        if (isMovingFromOffboarding) {
+          updated.program_progress_percent = null;
+          updated.program_duration_days = null;
+          updated.program_start_date = null;
+          updated.program_end_date = null;
+        }
+        return updated;
+      }
+      return c;
+    });
     setClients(updatedClients);
 
     try {
       // Update all underlying clients on server
       await Promise.all(
         clientIdsToUpdate.map((id: string) =>
-          apiClient.updateClient(id, {
-            lifecycle_state: newColumnId,
-          })
+          apiClient.updateClient(id, updateData)
         )
       );
       
@@ -364,20 +440,41 @@ export default function ClientKanbanBoard() {
         // Combine names with "/"
         const combinedName = Array.from(names).join(' / ') || 'Unnamed Client';
         
-        // Determine the lifecycle_state - use the most "active" state
-        // Priority: active > warm_lead > cold_lead > offboarding > dead
-        const statePriority: Record<ColumnId, number> = {
-          active: 5,
-          warm_lead: 4,
-          cold_lead: 3,
-          offboarding: 2,
-          dead: 1,
-        };
-        const mergedState = clientsWithSameEmail.reduce((prev, curr) => 
-          statePriority[curr.lifecycle_state as ColumnId] > statePriority[prev.lifecycle_state as ColumnId]
-            ? curr
-            : prev
-        ).lifecycle_state as ColumnId;
+        // Determine the lifecycle_state
+        // First, check if any client should be in offboarding/dead based on progress
+        // If a client has progress >= 100%, merged state should be "dead"
+        // If a client has progress >= 75%, merged state should be "offboarding"
+        // Otherwise, use the most "active" state (priority: active > warm_lead > cold_lead > offboarding > dead)
+        let mergedState: ColumnId;
+        
+        const hasDeadClient = clientsWithSameEmail.some(c => 
+          c.program_progress_percent && c.program_progress_percent >= 100
+        );
+        const hasOffboardingClient = clientsWithSameEmail.some(c => 
+          c.program_progress_percent && c.program_progress_percent >= 75 && c.program_progress_percent < 100
+        );
+        
+        if (hasDeadClient) {
+          mergedState = 'dead';
+          console.log(`[CLIENT_MERGE] Merged client ${normalizedEmail} set to 'dead' due to progress >= 100%`);
+        } else if (hasOffboardingClient) {
+          mergedState = 'offboarding';
+          console.log(`[CLIENT_MERGE] Merged client ${normalizedEmail} set to 'offboarding' due to progress >= 75%`);
+        } else {
+          // Use priority system for clients without high progress
+          const statePriority: Record<ColumnId, number> = {
+            active: 5,
+            warm_lead: 4,
+            cold_lead: 3,
+            offboarding: 2,
+            dead: 1,
+          };
+          mergedState = clientsWithSameEmail.reduce((prev, curr) => 
+            statePriority[curr.lifecycle_state as ColumnId] > statePriority[prev.lifecycle_state as ColumnId]
+              ? curr
+              : prev
+          ).lifecycle_state as ColumnId;
+        }
         
         // Create merged client
         const mergedClient: Client = {
@@ -437,12 +534,46 @@ export default function ClientKanbanBoard() {
   }, [mergedClients, searchQuery]);
 
   const getClientsForColumn = (columnId: ColumnId) => {
+    // If a filter is active and this column doesn't match, return empty array
+    if (filteredColumn && filteredColumn !== columnId) {
+      return [];
+    }
+    
     // Filter filtered clients by column
     // For merged clients, show them only in the column that matches their merged lifecycle_state
     // This ensures each merged client appears in exactly one column
     const columnClients = filteredClients.filter((client) => {
-      return client.lifecycle_state === columnId;
+      const matches = client.lifecycle_state === columnId;
+      
+      // Debug logging for state mismatches (especially for offboarding column)
+      if (columnId === 'offboarding') {
+        if (client.program_progress_percent && client.program_progress_percent >= 75 && client.program_progress_percent < 100) {
+          if (!matches) {
+            console.warn('[KanbanBoard] ⚠️ Client should be in offboarding but is not:', {
+              id: client.id,
+              email: client.email,
+              lifecycle_state: client.lifecycle_state,
+              progress: client.program_progress_percent,
+              expectedColumn: 'offboarding',
+              actualColumn: client.lifecycle_state
+            });
+          } else {
+            console.log('[KanbanBoard] ✅ Client correctly in offboarding column:', {
+              id: client.id,
+              email: client.email,
+              progress: client.program_progress_percent
+            });
+          }
+        }
+      }
+      
+      return matches;
     });
+    
+    // Log column counts for debugging
+    if (columnId === 'offboarding' && columnClients.length > 0) {
+      console.log(`[KanbanBoard] Offboarding column has ${columnClients.length} client(s)`);
+    }
     
     // Sort by sort_order for this column (stored in meta.sort_orders[columnId])
     return columnClients.sort((a, b) => {
@@ -497,7 +628,26 @@ export default function ClientKanbanBoard() {
 
     setCreating(true);
     try {
-      const newClient = await apiClient.createClient(createFormData);
+      // Prepare data for API - convert date strings to ISO format
+      const clientData: any = {
+        first_name: createFormData.first_name || undefined,
+        last_name: createFormData.last_name || undefined,
+        email: createFormData.email || undefined,
+        phone: createFormData.phone || undefined,
+        lifecycle_state: createFormData.lifecycle_state,
+        notes: createFormData.notes || undefined,
+      };
+      
+      // Convert date strings to ISO format if provided
+      if (createFormData.program_start_date && createFormData.program_start_date.trim() !== '') {
+        clientData.program_start_date = new Date(createFormData.program_start_date + 'T00:00:00').toISOString();
+      }
+      
+      if (createFormData.program_end_date && createFormData.program_end_date.trim() !== '') {
+        clientData.program_end_date = new Date(createFormData.program_end_date + 'T00:00:00').toISOString();
+      }
+      
+      const newClient = await apiClient.createClient(clientData);
       await loadClients();
       setIsCreateModalOpen(false);
       setCreateFormData({
@@ -507,7 +657,8 @@ export default function ClientKanbanBoard() {
         phone: '',
         lifecycle_state: 'cold_lead',
         notes: '',
-        program_duration_days: undefined,
+        program_start_date: '',
+        program_end_date: '',
       });
       // Optionally open the new client in the drawer
       setSelectedClient(newClient);
@@ -523,7 +674,7 @@ export default function ClientKanbanBoard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500">Loading clients...</div>
+        <div className="text-gray-500 dark:text-gray-400">Loading clients...</div>
       </div>
     );
   }
@@ -532,16 +683,13 @@ export default function ClientKanbanBoard() {
     <>
       <div className="mb-4 space-y-4">
         <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-900">Client Management</h2>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
-          >
-            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
+          <ShinyButton onClick={() => setIsCreateModalOpen(true)}>
+            <svg className="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             Create Client
-          </button>
+          </ShinyButton>
         </div>
         
         {/* Search Bar */}
@@ -556,7 +704,7 @@ export default function ClientKanbanBoard() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search by name, email, or phone..."
-            className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md leading-5 bg-white placeholder-gray-500 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+            className="block w-full pl-10 pr-3 py-2 glass-input rounded-md leading-5 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
           />
           {searchQuery && (
             <button
@@ -570,7 +718,7 @@ export default function ClientKanbanBoard() {
           )}
         </div>
         {searchQuery && (
-          <div className="text-sm text-gray-600">
+          <div className="text-sm text-gray-600 dark:text-gray-400 digitized-text">
             Found {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} matching &quot;{searchQuery}&quot;
           </div>
         )}
@@ -585,6 +733,10 @@ export default function ClientKanbanBoard() {
         <div className="flex gap-4 overflow-x-auto pb-4">
           {COLUMNS.map((column) => {
             const columnClients = getClientsForColumn(column.id);
+            // Hide column if filtered and doesn't match
+            if (filteredColumn && filteredColumn !== column.id) {
+              return null;
+            }
             return (
               <KanbanColumn
                 key={column.id}
@@ -610,76 +762,105 @@ export default function ClientKanbanBoard() {
           setIsDrawerOpen(false);
           setSelectedClient(null);
         }}
-        onUpdate={loadClients}
+        onUpdate={async () => {
+          console.log('[KanbanBoard] onUpdate called, reloading clients...');
+          const previousSelectedId = selectedClient?.id;
+          const previousSelectedState = selectedClient?.lifecycle_state;
+          
+          // Reload all clients - this will get the updated states from the server
+          const updatedClients = await loadClients(true);
+          
+          // After clients are loaded, update the selectedClient if one was selected
+          if (previousSelectedId && updatedClients) {
+            const updatedClient = updatedClients.find(c => c.id === previousSelectedId);
+            if (updatedClient) {
+              console.log('[KanbanBoard] Updating selected client after refresh:', {
+                id: updatedClient.id,
+                oldState: previousSelectedState,
+                newState: updatedClient.lifecycle_state,
+                progress: updatedClient.program_progress_percent,
+                stateChanged: previousSelectedState !== updatedClient.lifecycle_state
+              });
+              setSelectedClient(updatedClient);
+              
+              // If state changed, the card should now be in a different column
+              if (previousSelectedState !== updatedClient.lifecycle_state) {
+                console.log('[KanbanBoard] ✅ Client state changed! Card should move to', updatedClient.lifecycle_state, 'column');
+              }
+            } else {
+              console.warn('[KanbanBoard] Could not find updated client with ID:', previousSelectedId);
+            }
+          }
+        }}
       />
 
       {/* Create Client Modal */}
       {isCreateModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create New Client</h3>
+          <div className="bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10 neon-glow p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Create New Client</h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   First Name
                 </label>
                 <input
                   type="text"
                   value={createFormData.first_name}
                   onChange={(e) => setCreateFormData({ ...createFormData, first_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="John"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Last Name
                 </label>
                 <input
                   type="text"
                   value={createFormData.last_name}
                   onChange={(e) => setCreateFormData({ ...createFormData, last_name: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="Doe"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Email
                 </label>
                 <input
                   type="email"
                   value={createFormData.email}
                   onChange={(e) => setCreateFormData({ ...createFormData, email: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="john@example.com"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Phone
                 </label>
                 <input
                   type="tel"
                   value={createFormData.phone}
                   onChange={(e) => setCreateFormData({ ...createFormData, phone: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   placeholder="+1 (555) 123-4567"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Initial Status
                 </label>
                 <select
                   value={createFormData.lifecycle_state}
                   onChange={(e) => setCreateFormData({ ...createFormData, lifecycle_state: e.target.value as ColumnId })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   {COLUMNS.map((col) => (
                     <option key={col.id} value={col.id}>
@@ -690,16 +871,48 @@ export default function ClientKanbanBoard() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Notes
                 </label>
                 <textarea
                   value={createFormData.notes}
                   onChange={(e) => setCreateFormData({ ...createFormData, notes: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                   rows={3}
                   placeholder="Additional notes about this client..."
                 />
+              </div>
+
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
+                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Program Timeline (Optional)</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Program Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={createFormData.program_start_date}
+                      onChange={(e) => setCreateFormData({ ...createFormData, program_start_date: e.target.value })}
+                      className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Program End Date
+                    </label>
+                    <input
+                      type="date"
+                      value={createFormData.program_end_date}
+                      onChange={(e) => setCreateFormData({ ...createFormData, program_end_date: e.target.value })}
+                      min={createFormData.program_start_date || undefined}
+                      className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                    />
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  Client will automatically move to offboarding at 75% progress and dead when expired
+                </p>
               </div>
             </div>
 
@@ -714,10 +927,11 @@ export default function ClientKanbanBoard() {
                     phone: '',
                     lifecycle_state: 'cold_lead',
                     notes: '',
-                    program_duration_days: undefined,
+                    program_start_date: '',
+                    program_end_date: '',
                   });
                 }}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+                className="glass-button-secondary px-4 py-2 text-sm font-medium rounded-md hover:bg-white/20"
                 disabled={creating}
               >
                 Cancel
@@ -725,7 +939,7 @@ export default function ClientKanbanBoard() {
               <button
                 onClick={handleCreateClient}
                 disabled={creating}
-                className="px-4 py-2 text-sm font-medium text-white bg-primary-600 rounded-md hover:bg-primary-700 disabled:opacity-50"
+                className="glass-button neon-glow px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50"
               >
                 {creating ? 'Creating...' : 'Create Client'}
               </button>
@@ -755,11 +969,11 @@ function KanbanColumn({ id, title, clients, isActive, onClientClick, onClientDel
     <div className="flex-shrink-0 w-64">
       <div
         ref={setNodeRef}
-        className={`bg-gray-100 rounded-lg p-4 min-h-[400px] transition-colors ${
-          isActive ? 'bg-blue-100' : ''
+        className={`glass-card p-4 min-h-[400px] transition-shadow ${
+          isActive ? 'neon-glow' : ''
         }`}
       >
-        <h3 className="font-semibold text-gray-700 mb-4">
+        <h3 className="font-semibold text-gray-700 dark:text-gray-300 mb-4 digitized-text">
           {title} ({clients.length})
         </h3>
         <SortableContext

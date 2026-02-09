@@ -1,12 +1,29 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
 import { BrevoStatus } from '@/types/integration';
+import BrevoDashboard from './brevo/BrevoDashboard';
+import { useLoading } from '@/contexts/LoadingContext';
 
-export default function BrevoConsolePanel() {
+interface BrevoConsolePanelProps {
+  userRole?: string; // 'owner' | 'admin' | 'member'
+}
+
+export default function BrevoConsolePanel({ userRole = 'member' }: BrevoConsolePanelProps) {
+  const { setLoading: setGlobalLoading } = useLoading();
   const [status, setStatus] = useState<BrevoStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  // OAuth temporarily disabled - only API key available
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  
+  // Check if user can manage integrations (admin or owner only)
+  // Normalize role to lowercase for comparison - be explicit about member check
+  const roleLower = String(userRole || 'member').toLowerCase().trim();
+  // Explicitly check - only admin and owner can manage, members cannot
+  // If role is member or anything other than admin/owner, cannot manage
+  const canManageIntegrations = roleLower === 'admin' || roleLower === 'owner';
 
   useEffect(() => {
     loadStatus();
@@ -29,6 +46,7 @@ export default function BrevoConsolePanel() {
   }, []);
 
   const loadStatus = async () => {
+    setGlobalLoading(true, 'Loading Brevo dashboard...');
     try {
       const data = await apiClient.getBrevoStatus();
       setStatus(data);
@@ -36,20 +54,37 @@ export default function BrevoConsolePanel() {
       console.error('Failed to load Brevo status:', error);
     } finally {
       setLoading(false);
+      setGlobalLoading(false);
     }
   };
 
   const handleConnect = async () => {
     setConnecting(true);
+    setGlobalLoading(true, 'Connecting to Brevo...');
     try {
-      const response = await apiClient.startBrevoOAuth();
-      // Redirect to Brevo OAuth page (same window, so callback can redirect back)
-      window.location.href = response.redirect_url;
+      // OAuth temporarily disabled - only API key connection available
+      if (!apiKey || !apiKey.trim()) {
+        alert('Please enter your Brevo API key');
+        setConnecting(false);
+        setGlobalLoading(false);
+        return;
+      }
+      
+      const response = await apiClient.connectBrevoWithApiKey(apiKey.trim());
+      
+      // Clear API key input
+      setApiKey('');
+      setShowApiKeyInput(false);
+      
+      // Reload status
+      await loadStatus();
     } catch (error: any) {
-      console.error('Failed to start Brevo OAuth:', error);
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to start Brevo connection. Please check your configuration.';
-      alert(`Brevo OAuth Error: ${errorMessage}\n\nPlease check:\n1. BREVO_REDIRECT_URI in .env includes the full callback path (e.g., /api/oauth/brevo/callback)\n2. BREVO_CLIENT_ID is set correctly\n3. Backend server has been restarted after .env changes`);
+      console.error('[BREVO] Failed to connect:', error);
+      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to connect Brevo. Please check your configuration.';
+      alert(`Brevo Connection Error: ${errorMessage}`);
+    } finally {
       setConnecting(false);
+      setGlobalLoading(false);
     }
   };
 
@@ -72,63 +107,66 @@ export default function BrevoConsolePanel() {
 
   if (loading) {
     return (
-      <div className="bg-white rounded-lg shadow p-6">
-        <div className="text-gray-500">Loading Brevo status...</div>
+      <div className="glass-card p-6">
+        <div className="text-gray-500 dark:text-gray-400">Loading Brevo status...</div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-lg shadow p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-4">Brevo Console</h2>
+    <div className="space-y-6">
+      <div className="glass-card p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Brevo Console</h2>
 
-      {status?.connected ? (
-        <div className="space-y-4">
-          <div className="flex items-center">
-            <div className="flex-shrink-0">
-              <div className="h-3 w-3 bg-green-400 rounded-full"></div>
+        {status?.connected ? (
+          <div className="space-y-4">
+            <div className="flex items-center">
+              <div className="flex-shrink-0">
+                <div className="h-3 w-3 bg-green-400 rounded-full"></div>
+              </div>
+              <div className="ml-3">
+                <p className="text-sm font-medium">Connected</p>
+                {status.account_email && (
+                  <p className="text-sm text-gray-500">{status.account_email}</p>
+                )}
+                {status.account_name && status.account_name !== status.account_email && (
+                  <p className="text-sm text-gray-500">{status.account_name}</p>
+                )}
+              </div>
             </div>
-            <div className="ml-3">
-              <p className="text-sm font-medium text-gray-900">Connected</p>
-              {status.account_email && (
-                <p className="text-sm text-gray-500">{status.account_email}</p>
-              )}
-              {status.account_name && status.account_name !== status.account_email && (
-                <p className="text-sm text-gray-500">{status.account_name}</p>
-              )}
+
+            {status.message && (
+              <p className="text-sm text-gray-600">{status.message}</p>
+            )}
+
+            <div className="flex gap-3">
+              <a
+                href="https://app.brevo.com"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md glass-button neon-glow"
+              >
+                Open Brevo Dashboard
+              </a>
+              {canManageIntegrations ? (
+                <button
+                  onClick={handleDisconnect}
+                  disabled={disconnecting}
+                  className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
+                >
+                  {disconnecting ? 'Disconnecting...' : 'Disconnect'}
+                </button>
+              ) : null}
             </div>
           </div>
-
-          {status.message && (
-            <p className="text-sm text-gray-600">{status.message}</p>
-          )}
-
-          <div className="flex gap-3">
-            <a
-              href="https://app.brevo.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700"
-            >
-              Open Brevo Dashboard
-            </a>
-            <button
-              onClick={handleDisconnect}
-              disabled={disconnecting}
-              className="inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50"
-            >
-              {disconnecting ? 'Disconnecting...' : 'Disconnect'}
-            </button>
-          </div>
-        </div>
-      ) : (
+        ) : (
         <div className="space-y-4">
           <div className="flex items-center">
             <div className="flex-shrink-0">
               <div className="h-3 w-3 bg-gray-400 rounded-full"></div>
             </div>
             <div className="ml-3">
-              <p className="text-sm font-medium text-gray-900">Not Connected</p>
+              <p className="text-sm font-medium">Not Connected</p>
             </div>
           </div>
 
@@ -136,13 +174,58 @@ export default function BrevoConsolePanel() {
             <p className="text-sm text-gray-600">{status.message}</p>
           )}
 
-          <button
-            onClick={handleConnect}
-            disabled={connecting}
-            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-primary-600 hover:bg-primary-700 disabled:opacity-50"
-          >
-            {connecting ? 'Connecting...' : 'Install Brevo'}
-          </button>
+          {/* API Key Connection - OAuth temporarily disabled for deployment */}
+          {canManageIntegrations ? (
+            <div className="space-y-3">
+              <div className="space-y-2">
+                <label htmlFor="brevo-api-key" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Brevo API Key
+                </label>
+                <input
+                  id="brevo-api-key"
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Enter your Brevo API key"
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  onFocus={() => setShowApiKeyInput(true)}
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Get your API key from{' '}
+                  <a
+                    href="https://app.brevo.com/settings/keys/api"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-primary-500 hover:underline"
+                  >
+                    Brevo Settings → API Keys
+                  </a>
+                </p>
+              </div>
+
+              <button
+                onClick={handleConnect}
+                disabled={connecting || !apiKey.trim()}
+                className="w-full inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md glass-button neon-glow disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {connecting ? 'Connecting...' : 'Connect with API Key'}
+              </button>
+            </div>
+          ) : (
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+              <p className="text-sm text-yellow-800 dark:text-yellow-200">
+                Only administrators and owners can connect or disconnect integrations. Please contact an admin to manage Brevo settings.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+      </div>
+
+      {/* Brevo Dashboard - Only show when connected */}
+      {status?.connected && (
+        <div className="glass-card p-6">
+          <BrevoDashboard />
         </div>
       )}
     </div>

@@ -44,14 +44,16 @@ export interface FunnelHealth {
 
 export interface UTMSourceStats {
   source: string;
-  count: number;
+  count: number;  // Event count (kept for backward compatibility)
+  unique_visitors: number;  // Unique visitor count
   conversions: number;
   revenue_cents: number;
 }
 
 export interface ReferrerStats {
   referrer: string;
-  count: number;
+  count: number;  // Event count (kept for backward compatibility)
+  unique_visitors: number;  // Unique visitor count
   conversions: number;
   revenue_cents: number;
 }

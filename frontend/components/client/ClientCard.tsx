@@ -1,7 +1,7 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
-import React from 'react';
+import React, { memo, useMemo, useCallback } from 'react';
 
 interface ClientCardProps {
   client: Client;
@@ -9,7 +9,7 @@ interface ClientCardProps {
   onDelete?: (client: Client) => void;
 }
 
-export default function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
+function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
   // For merged clients, use email as the sortable ID, otherwise use client ID
   const sortableId = client.meta?.merged_client_ids ? (client.email || client.id) : client.id;
   
@@ -28,33 +28,40 @@ export default function ClientCard({ client, onClick, onDelete }: ClientCardProp
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Check if this is a merged client with multiple names
-  const mergedNames = client.meta?.merged_names;
-  const fullName = mergedNames || 
-    [client.first_name, client.last_name]
-      .filter(Boolean)
-      .join(' ') || 'Unnamed Client';
+  // Memoize computed values
+  const fullName = useMemo(() => {
+    const mergedNames = client.meta?.merged_names;
+    return mergedNames || 
+      [client.first_name, client.last_name]
+        .filter(Boolean)
+        .join(' ') || 'Unnamed Client';
+  }, [client.meta?.merged_names, client.first_name, client.last_name]);
 
-  const handleClick = (e: React.MouseEvent) => {
+  const mergedCount = useMemo(() => 
+    client.meta?.merged_client_ids?.length || 0,
+    [client.meta?.merged_client_ids]
+  );
+
+  const handleClick = useCallback((e: React.MouseEvent) => {
     // Prevent click if dragging
     if (isDragging) return;
     e.stopPropagation();
     onClick();
-  };
+  }, [isDragging, onClick]);
 
-  const handleDelete = (e: React.MouseEvent) => {
+  const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (onDelete) {
       onDelete(client);
     }
-  };
+  }, [onDelete, client]);
 
   return (
     <div
       ref={setNodeRef}
       style={style}
       {...attributes}
-      className="bg-white p-3 rounded shadow-sm cursor-pointer hover:shadow-md transition-shadow border border-gray-200 relative group"
+      className="glass-card neon-glow p-3 cursor-pointer hover:shadow-lg transition-shadow relative group"
     >
       {/* Action buttons - top right */}
       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 z-10">
@@ -85,30 +92,30 @@ export default function ClientCard({ client, onClick, onDelete }: ClientCardProp
       
       {/* Clickable content */}
       <div onClick={handleClick}>
-        <div className="font-medium text-gray-900 flex items-center gap-2">
+        <div className="font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
           {fullName}
-          {client.meta?.merged_client_ids && client.meta.merged_client_ids.length > 1 && (
-            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
-              {client.meta.merged_client_ids.length} merged
+          {mergedCount > 1 && (
+            <span className="text-xs bg-blue-500/20 text-white px-2 py-0.5 rounded-full border border-blue-400/30">
+              {mergedCount} merged
             </span>
           )}
         </div>
         {client.email && (
-          <div className="text-sm text-gray-500 mt-1">{client.email}</div>
+          <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{client.email}</div>
         )}
         {client.estimated_mrr > 0 && (
-          <div className="text-sm font-semibold text-green-600 mt-2">
+          <div className="text-sm font-semibold text-green-600 dark:text-green-400 mt-2">
             ${client.estimated_mrr.toFixed(2)}/mo
           </div>
         )}
         {/* Program progress indicator */}
         {client.program_progress_percent !== undefined && client.program_progress_percent !== null && (
           <div className="mt-2">
-            <div className="flex items-center justify-between text-xs text-gray-600 mb-1">
-              <span>Program Progress</span>
+            <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+              <span className="digitized-text">Program Progress</span>
               <span>{client.program_progress_percent.toFixed(0)}%</span>
             </div>
-            <div className="w-full bg-gray-200 rounded-full h-2">
+            <div className="w-full bg-white/20 rounded-full h-2">
               <div
                 className={`h-2 rounded-full transition-all ${
                   client.program_progress_percent >= 100
@@ -121,7 +128,7 @@ export default function ClientCard({ client, onClick, onDelete }: ClientCardProp
               />
             </div>
             {client.program_end_date && (
-              <div className="text-xs text-gray-500 mt-1">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                 Ends: {new Date(client.program_end_date).toLocaleDateString()}
               </div>
             )}
@@ -131,5 +138,7 @@ export default function ClientCard({ client, onClick, onDelete }: ClientCardProp
     </div>
   );
 }
+
+export default memo(ClientCard);
 
 

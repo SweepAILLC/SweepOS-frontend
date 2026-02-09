@@ -27,9 +27,22 @@ export interface GlobalSettings {
   brevo_configured: boolean;
 }
 
+export interface Invitation {
+  id: string;
+  org_id: string;
+  invitee_email: string;
+  invitation_type: string;
+  role: string;
+  expires_at: string;
+  used_at: string | null;
+  created_at: string;
+}
+
 export interface OrganizationDashboardSummary {
   organization_id: string;
   organization_name: string;
+  total_users: number;
+  max_user_seats: number | null;
   total_clients: number;
   clients_by_status: Record<string, number>;
   total_funnels: number;
@@ -42,12 +55,19 @@ export interface OrganizationDashboardSummary {
   total_payments: number;
   last_30_days_revenue: number;
   brevo_connected: boolean;
-  recent_clients: Array<{
-    id: string;
-    name: string;
-    email: string | null;
-    status: string;
-    created_at: string | null;
+  funnel_conversion_metrics: Array<{
+    funnel_id: string;
+    funnel_name: string;
+    total_visitors: number;
+    total_conversions: number;
+    overall_conversion_rate: number;
+    step_counts: Array<{
+      step_order: number;
+      label: string | null;
+      event_name: string;
+      count: number;
+      conversion_rate: number | null;
+    }>;
   }>;
   recent_funnels: Array<{
     id: string;
