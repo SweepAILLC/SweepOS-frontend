@@ -195,6 +195,11 @@ export default function BrevoDashboard() {
         contact = await apiClient.getBrevoContact(contactId);
       }
       
+      if (!contact) {
+        setError('Contact not found');
+        return;
+      }
+      
       console.log('[BrevoDashboard] Using contact data:', contact);
       console.log('[BrevoDashboard] Contact attributes:', contact.attributes);
       
