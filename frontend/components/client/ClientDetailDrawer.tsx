@@ -235,11 +235,14 @@ export default function ClientDetailDrawer({
         last_name: client.last_name || '',
         email: client.email || '',
         phone: client.phone || '',
+        instagram: client.instagram || '',
         notes: client.notes || '',
         program_start_date: client.program_start_date 
           ? new Date(client.program_start_date).toISOString().split('T')[0] 
           : '',
-        program_duration_days: client.program_duration_days || undefined,
+        program_end_date: client.program_end_date 
+          ? new Date(client.program_end_date).toISOString().split('T')[0] 
+          : '',
       });
     }
     setIsEditing(false);

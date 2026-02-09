@@ -758,7 +758,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                               typeof event.location === 'string' ? (
                                 isUrl(event.location) ? (
                                   <button
-                                    onClick={() => copyToClipboard(event.location as string, `location-${event.uri}`, 'location link')}
+                                    onClick={() => copyToClipboard(String(event.location), `location-${event.uri}`, 'location link')}
                                     className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors ${
                                       copiedId === `location-${event.uri}` ? 'text-green-500 dark:text-green-400' : ''
                                     }`}

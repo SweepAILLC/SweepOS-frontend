@@ -96,7 +96,7 @@ export default function EmailComposer({
     try {
       // Get list info to show count
       const lists = await apiClient.getBrevoLists(1000, 0);
-      const list = lists.lists.find(l => l.id === id);
+      const list = lists.lists?.find((l: { id: number; uniqueSubscribers?: number }) => l.id === id);
       if (list) {
         setRecipientCount(list.uniqueSubscribers || 0);
       }

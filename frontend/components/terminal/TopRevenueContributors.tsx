@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
-import { Client } from '@/types/client';
+import { Client, ClientPayment } from '@/types/client';
 
 interface RevenueContributor {
   client: Client;
@@ -37,7 +37,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
       const groupedClients = new Map<string, Client[]>();
       const processedClientIds = new Set<string>();
       
-      clients.forEach((client) => {
+      clients.forEach((client: Client) => {
         // Skip if already processed
         if (processedClientIds.has(client.id)) {
           return;
@@ -49,7 +49,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
           const key = `email:${normalizedEmail}`;
           
           // Find all clients with the same email
-          const clientsWithSameEmail = clients.filter((c) => {
+          const clientsWithSameEmail = clients.filter((c: Client) => {
             const cEmail = normalizeEmail(c.email);
             return cEmail === normalizedEmail && !processedClientIds.has(c.id);
           });
@@ -58,7 +58,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
             if (!groupedClients.has(key)) {
               groupedClients.set(key, []);
             }
-            clientsWithSameEmail.forEach((c) => {
+            clientsWithSameEmail.forEach((c: Client) => {
               groupedClients.get(key)!.push(c);
               processedClientIds.add(c.id);
             });
@@ -70,7 +70,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
             const key = `stripe:${stripeId}`;
             
             // Find all clients with the same Stripe ID
-            const clientsWithSameStripeId = clients.filter((c) => {
+            const clientsWithSameStripeId = clients.filter((c: Client) => {
               return c.stripe_customer_id === stripeId && !processedClientIds.has(c.id);
             });
             
@@ -78,7 +78,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
               if (!groupedClients.has(key)) {
                 groupedClients.set(key, []);
               }
-              clientsWithSameStripeId.forEach((c) => {
+              clientsWithSameStripeId.forEach((c: Client) => {
                 groupedClients.get(key)!.push(c);
                 processedClientIds.add(c.id);
               });
@@ -96,7 +96,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - timeRange);
       
-      for (const [groupKey, clientGroup] of groupedClients.entries()) {
+      for (const [groupKey, clientGroup] of Array.from(groupedClients.entries())) {
         try {
           // Aggregate revenue from all clients in the group
           let totalRevenue = 0;
@@ -113,7 +113,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
               const payments = await apiClient.getClientPayments(client.id);
               
               // Filter payments: within time range AND succeeded status only
-              const recentPayments = payments.payments.filter((payment) => {
+              const recentPayments = payments.payments.filter((payment: ClientPayment) => {
                 if (!payment.created_at) return false;
                 if (payment.status !== 'succeeded') return false; // Only count succeeded payments
                 const paymentDate = new Date(payment.created_at);
@@ -122,7 +122,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
               
               // Deduplicate payments across all clients in the group
               // Use stripe_id as the primary deduplication key (unique per payment)
-              recentPayments.forEach((payment) => {
+              recentPayments.forEach((payment: ClientPayment) => {
                 // Create deduplication key using stripe_id (unique per Stripe payment)
                 // This prevents the same payment from being counted multiple times when
                 // consolidating across multiple client records in the same group
@@ -166,7 +166,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
             // If multiple clients, combine names
             if (clientGroup.length > 1) {
               const names = new Set<string>();
-              clientGroup.forEach((c) => {
+              clientGroup.forEach((c: Client) => {
                 const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ');
                 if (fullName.trim()) {
                   names.add(fullName.trim());

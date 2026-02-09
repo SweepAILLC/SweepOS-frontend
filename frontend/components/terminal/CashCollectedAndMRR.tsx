@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
-import { Client } from '@/types/client';
+import { Client, ClientPayment } from '@/types/client';
 
 interface CashCollectedData {
   today: number;
@@ -129,7 +129,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
           try {
             const paymentsResponse = await apiClient.getClientPayments(client.id);
             
-            paymentsResponse.payments.forEach((payment) => {
+            paymentsResponse.payments.forEach((payment: ClientPayment) => {
               // Only process manual payments (type is 'manual_payment' or no stripe_id with no type set)
               const isManualPayment = payment.type === 'manual_payment' || (!payment.stripe_id && !payment.type);
               if (!isManualPayment || payment.status !== 'succeeded' || !payment.created_at) return;
@@ -194,7 +194,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
         const groupedClients = new Map<string, Client[]>();
         const processedClientIds = new Set<string>();
         
-        clients.forEach((client) => {
+        clients.forEach((client: Client) => {
           if (processedClientIds.has(client.id)) {
             return;
           }
@@ -202,7 +202,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
           const normalizedEmail = normalizeEmail(client.email);
           if (normalizedEmail) {
             const key = `email:${normalizedEmail}`;
-            const clientsWithSameEmail = clients.filter((c) => {
+            const clientsWithSameEmail = clients.filter((c: Client) => {
               const cEmail = normalizeEmail(c.email);
               return cEmail === normalizedEmail && !processedClientIds.has(c.id);
             });
@@ -211,7 +211,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
               if (!groupedClients.has(key)) {
                 groupedClients.set(key, []);
               }
-              clientsWithSameEmail.forEach((c) => {
+              clientsWithSameEmail.forEach((c: Client) => {
                 groupedClients.get(key)!.push(c);
                 processedClientIds.add(c.id);
               });
@@ -220,7 +220,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
             const stripeId = client.stripe_customer_id;
             if (stripeId) {
               const key = `stripe:${stripeId}`;
-              const clientsWithSameStripeId = clients.filter((c) => {
+              const clientsWithSameStripeId = clients.filter((c: Client) => {
                 return c.stripe_customer_id === stripeId && !processedClientIds.has(c.id);
               });
               
@@ -228,7 +228,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
                 if (!groupedClients.has(key)) {
                   groupedClients.set(key, []);
                 }
-                clientsWithSameStripeId.forEach((c) => {
+                clientsWithSameStripeId.forEach((c: Client) => {
                   groupedClients.get(key)!.push(c);
                   processedClientIds.add(c.id);
                 });
@@ -243,7 +243,7 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
         let totalMRR = 0;
         
         // Use max estimated_mrr from each client group (to avoid double counting)
-        for (const [groupKey, clientGroup] of groupedClients.entries()) {
+        for (const [groupKey, clientGroup] of Array.from(groupedClients.entries())) {
           const maxMRR = Math.max(...clientGroup.map(c => c.estimated_mrr || 0));
           totalMRR += maxMRR;
         }

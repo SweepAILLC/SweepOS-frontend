@@ -48,6 +48,12 @@ export interface CalComBooking {
     success: boolean;
   };
   metadata?: Record<string, any>;
+  /** Form responses keyed by field name/slug (from booking details API) */
+  responses?: Record<string, unknown>;
+  /** Event type booking field definitions */
+  bookingFields?: Array<Record<string, unknown>>;
+  /** Routing form responses (pre-call info) */
+  routingFormResponses?: Array<{ formId?: string; response?: Record<string, unknown>; createdAt?: string }>;
 }
 
 export interface CalComEventType {

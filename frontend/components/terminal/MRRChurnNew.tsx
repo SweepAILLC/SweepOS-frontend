@@ -69,10 +69,10 @@ export default function MRRChurnNew() {
         });
       
       if (sortedPayments.length > 0) {
-        const firstDate = sortedPayments[0].created_at ? new Date(sortedPayments[0].created_at) : new Date();
-        const lastDate = sortedPayments[sortedPayments.length - 1].created_at 
-          ? new Date(sortedPayments[sortedPayments.length - 1].created_at) 
-          : new Date();
+        const firstCreated = sortedPayments[0].created_at;
+        const lastCreated = sortedPayments[sortedPayments.length - 1].created_at;
+        const firstDate = firstCreated != null ? new Date(firstCreated) : new Date();
+        const lastDate = lastCreated != null ? new Date(lastCreated) : new Date();
         const monthsDiff = Math.max(1, (lastDate.getTime() - firstDate.getTime()) / (1000 * 60 * 60 * 24 * 30));
         const totalOneTime = oneTimePayments.reduce((sum, a) => sum + a, 0);
         totalMRR += totalOneTime / monthsDiff;
@@ -97,7 +97,7 @@ export default function MRRChurnNew() {
       const groupedClients = new Map<string, Client[]>();
       const processedClientIds = new Set<string>();
       
-      clients.forEach((client) => {
+      clients.forEach((client: Client) => {
         if (processedClientIds.has(client.id)) {
           return;
         }
@@ -105,7 +105,7 @@ export default function MRRChurnNew() {
         const normalizedEmail = normalizeEmail(client.email);
         if (normalizedEmail) {
           const key = `email:${normalizedEmail}`;
-          const clientsWithSameEmail = clients.filter((c) => {
+          const clientsWithSameEmail = clients.filter((c: Client) => {
             const cEmail = normalizeEmail(c.email);
             return cEmail === normalizedEmail && !processedClientIds.has(c.id);
           });
@@ -114,7 +114,7 @@ export default function MRRChurnNew() {
             if (!groupedClients.has(key)) {
               groupedClients.set(key, []);
             }
-            clientsWithSameEmail.forEach((c) => {
+            clientsWithSameEmail.forEach((c: Client) => {
               groupedClients.get(key)!.push(c);
               processedClientIds.add(c.id);
             });
@@ -123,7 +123,7 @@ export default function MRRChurnNew() {
           const stripeId = client.stripe_customer_id;
           if (stripeId) {
             const key = `stripe:${stripeId}`;
-            const clientsWithSameStripeId = clients.filter((c) => {
+            const clientsWithSameStripeId = clients.filter((c: Client) => {
               return c.stripe_customer_id === stripeId && !processedClientIds.has(c.id);
             });
             
@@ -131,7 +131,7 @@ export default function MRRChurnNew() {
               if (!groupedClients.has(key)) {
                 groupedClients.set(key, []);
               }
-              clientsWithSameStripeId.forEach((c) => {
+              clientsWithSameStripeId.forEach((c: Client) => {
                 groupedClients.get(key)!.push(c);
                 processedClientIds.add(c.id);
               });
@@ -149,7 +149,7 @@ export default function MRRChurnNew() {
       let downgradeMRR = 0;
       
       // Process each client group
-      for (const [groupKey, clientGroup] of groupedClients.entries()) {
+      for (const [groupKey, clientGroup] of Array.from(groupedClients.entries())) {
         try {
           // Aggregate payment data from all clients in the group
           const allPayments: Array<{ created_at: string | null; amount: number; subscription_id?: string | null }> = [];

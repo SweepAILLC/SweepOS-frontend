@@ -50,13 +50,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(newTheme);
   };
 
-  // Prevent flash of wrong theme on initial load
-  if (!mounted) {
-    return <>{children}</>;
-  }
+  // Always provide context (use default theme during SSG / before mount) so useTheme() never throws
+  const value = {
+    theme: mounted ? theme : 'light',
+    toggleTheme,
+    setTheme,
+  };
 
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme, setTheme }}>
+    <ThemeContext.Provider value={value}>
       {children}
     </ThemeContext.Provider>
   );

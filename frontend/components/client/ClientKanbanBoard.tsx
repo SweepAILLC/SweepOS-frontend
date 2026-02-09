@@ -100,7 +100,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       }
       
       const data = await apiClient.getClients();
-      const stateCounts = data.reduce((acc: Record<string, number>, client) => {
+      const stateCounts = data.reduce((acc: Record<string, number>, client: Client) => {
         acc[client.lifecycle_state] = (acc[client.lifecycle_state] || 0) + 1;
         return acc;
       }, {});
@@ -110,20 +110,23 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       });
       
       // Log clients with programs at 75%+ to verify they're in the right state
-      const highProgressClients = data.filter(c => 
+      const highProgressClients = data.filter((c: Client) =>
         c.program_progress_percent && c.program_progress_percent >= 75
       );
       if (highProgressClients.length > 0) {
         console.log('[KanbanBoard] Clients with 75%+ progress:', 
-          highProgressClients.map(c => ({
-            id: c.id,
-            email: c.email,
-            progress: c.program_progress_percent,
-            state: c.lifecycle_state,
-            expectedState: c.program_progress_percent >= 100 ? 'dead' : 'offboarding',
-            inCorrectColumn: (c.program_progress_percent >= 100 && c.lifecycle_state === 'dead') ||
-                            (c.program_progress_percent >= 75 && c.program_progress_percent < 100 && c.lifecycle_state === 'offboarding')
-          }))
+          highProgressClients.map((c: Client) => {
+            const p = c.program_progress_percent ?? 0;
+            return {
+              id: c.id,
+              email: c.email,
+              progress: c.program_progress_percent,
+              state: c.lifecycle_state,
+              expectedState: p >= 100 ? 'dead' : 'offboarding',
+              inCorrectColumn: (p >= 100 && c.lifecycle_state === 'dead') ||
+                              (p >= 75 && p < 100 && c.lifecycle_state === 'offboarding')
+            };
+          })
         );
       }
       
@@ -343,10 +346,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       if (clientIdsToUpdate.includes(c.id)) {
         const updated = { ...c, lifecycle_state: newColumnId };
         if (isMovingFromOffboarding) {
-          updated.program_progress_percent = null;
-          updated.program_duration_days = null;
-          updated.program_start_date = null;
-          updated.program_end_date = null;
+          updated.program_progress_percent = undefined;
+          updated.program_duration_days = undefined;
+          updated.program_start_date = undefined;
+          updated.program_end_date = undefined;
         }
         return updated;
       }
@@ -772,7 +775,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           
           // After clients are loaded, update the selectedClient if one was selected
           if (previousSelectedId && updatedClients) {
-            const updatedClient = updatedClients.find(c => c.id === previousSelectedId);
+            const updatedClient = updatedClients.find((c: Client) => c.id === previousSelectedId);
             if (updatedClient) {
               console.log('[KanbanBoard] Updating selected client after refresh:', {
                 id: updatedClient.id,
