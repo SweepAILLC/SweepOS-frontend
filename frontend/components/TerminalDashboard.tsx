@@ -9,9 +9,13 @@ import BookingRateByFunnel from './terminal/BookingRateByFunnel';
 import NotificationsCard from './calendar/NotificationsCard';
 import { useLoading } from '@/contexts/LoadingContext';
 
+// Keys that must be loaded before we hide the global overlay (above-the-fold only)
+const ABOVE_THE_FOLD_KEYS = ['topRevenue', 'cashCollected', 'notifications', 'failedPayments'];
+
 export default function TerminalDashboard() {
   const [filteredColumn, setFilteredColumn] = useState<string | null>(null);
   const { setLoading: setGlobalLoading } = useLoading();
+  const [showBelowFold, setShowBelowFold] = useState(false);
   const [componentLoadingStates, setComponentLoadingStates] = useState<Record<string, boolean>>({
     topRevenue: true,
     cashCollected: true,
@@ -33,18 +37,19 @@ export default function TerminalDashboard() {
     }
   }, [setGlobalLoading]);
 
-  // Update global loading state based on component states - only turn off when ALL are loaded
+  // Mount below-the-fold widgets after a short delay to stagger API calls and speed up first paint
   useEffect(() => {
-    const allLoaded = Object.values(componentLoadingStates).every(loading => !loading);
-    
-    if (allLoaded && !allLoadedRef.current) {
+    const t = setTimeout(() => setShowBelowFold(true), 150);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Turn off global loading when above-the-fold components are loaded (below-fold load in background)
+  useEffect(() => {
+    const aboveFoldLoaded = ABOVE_THE_FOLD_KEYS.every(k => componentLoadingStates[k] === false);
+    if (aboveFoldLoaded && !allLoadedRef.current) {
       allLoadedRef.current = true;
-      // Small delay to ensure smooth transition
-      setTimeout(() => {
-        setGlobalLoading(false);
-      }, 200);
+      setTimeout(() => setGlobalLoading(false), 200);
     }
-    // Don't set loading to true again if components are still loading - it's already true
   }, [componentLoadingStates, setGlobalLoading]);
 
   const handleComponentLoaded = (componentName: string) => {
@@ -84,28 +89,30 @@ export default function TerminalDashboard() {
         <FailedPaymentQueue onLoadComplete={() => handleComponentLoaded('failedPayments')} />
       </div>
 
-      {/* Pipeline Snapshot */}
-      <PipelineSnapshot 
-        onFilterChange={setFilteredColumn}
-        onLoadComplete={() => handleComponentLoaded('pipeline')}
-      />
+      {/* Below-the-fold: mount after short delay to stagger requests and improve perceived speed */}
+      {showBelowFold && (
+        <>
+          {/* Pipeline Snapshot */}
+          <PipelineSnapshot 
+            onFilterChange={setFilteredColumn}
+            onLoadComplete={() => handleComponentLoaded('pipeline')}
+          />
 
-      {/* Kanban Board */}
-      <div className="mt-6">
-        <ClientKanbanBoard 
-          filteredColumn={filteredColumn}
-          onLoadComplete={() => handleComponentLoaded('kanban')}
-        />
-      </div>
+          {/* Kanban Board */}
+          <div className="mt-6">
+            <ClientKanbanBoard 
+              filteredColumn={filteredColumn}
+              onLoadComplete={() => handleComponentLoaded('kanban')}
+            />
+          </div>
 
-      {/* Bottom Metrics Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Leads by Source */}
-        <LeadsBySource onLoadComplete={() => handleComponentLoaded('leadsBySource')} />
-
-        {/* Booking Rate by Funnel */}
-        <BookingRateByFunnel onLoadComplete={() => handleComponentLoaded('bookingRate')} />
-      </div>
+          {/* Bottom Metrics Row */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <LeadsBySource onLoadComplete={() => handleComponentLoaded('leadsBySource')} />
+            <BookingRateByFunnel onLoadComplete={() => handleComponentLoaded('bookingRate')} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

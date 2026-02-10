@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import Cookies from 'js-cookie';
+import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS } from './cache';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 // For cross-origin (e.g. frontend on Vercel, API on Render): set to 'none' so cookies are sent
@@ -139,11 +140,18 @@ class ApiClient {
     return response.data;
   }
 
-  // Clients
-  async getClients(lifecycleState?: string) {
+  // Clients (cached for terminal dashboard to avoid 4x duplicate requests)
+  async getClients(lifecycleState?: string, forceRefresh?: boolean) {
+    const cacheKey = lifecycleState ? `${CACHE_KEYS.CLIENTS}_${lifecycleState}` : CACHE_KEYS.CLIENTS;
+    if (!forceRefresh && !lifecycleState) {
+      const cached = cache.get<unknown[]>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params = lifecycleState ? { lifecycle_state: lifecycleState } : {};
     const response = await this.client.get('/clients', { params });
-    return response.data;
+    const data = response.data;
+    if (!lifecycleState) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getClient(id: string) {
@@ -153,26 +161,35 @@ class ApiClient {
 
   async createClient(data: any) {
     const response = await this.client.post('/clients', data);
+    cache.delete(CACHE_KEYS.CLIENTS);
     return response.data;
   }
 
   async updateClient(id: string, data: any) {
     const response = await this.client.patch(`/clients/${id}`, data);
+    cache.delete(CACHE_KEYS.CLIENTS);
     return response.data;
   }
 
   async deleteClient(id: string, deleteMerged: boolean = false) {
     const params = deleteMerged ? { delete_merged: 'true' } : {};
     await this.client.delete(`/clients/${id}`, { params });
+    cache.delete(CACHE_KEYS.CLIENTS);
   }
 
   async getClientPayments(clientId: string, mergedClientIds?: string[]) {
+    const mergeKey = mergedClientIds?.length ? [...mergedClientIds].sort().join(',') : '';
+    const cacheKey = `client_payments_${clientId}_${mergeKey}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params: any = {};
     if (mergedClientIds && mergedClientIds.length > 1) {
       params.merged_client_ids = mergedClientIds.join(',');
     }
     const response = await this.client.get(`/clients/${clientId}/payments`, { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async createManualPayment(
@@ -189,11 +206,13 @@ class ApiClient {
     if (paymentMethod) params.payment_method = paymentMethod;
     if (receiptUrl) params.receipt_url = receiptUrl;
     const response = await this.client.post(`/clients/${clientId}/manual-payment`, null, { params });
+    cache.deleteByPrefix(`client_payments_${clientId}_`);
     return response.data;
   }
 
   async deleteManualPayment(clientId: string, paymentId: string) {
     await this.client.delete(`/clients/${clientId}/manual-payment/${paymentId}`);
+    cache.deleteByPrefix(`client_payments_${clientId}_`);
   }
 
   // Check-ins
@@ -437,8 +456,12 @@ class ApiClient {
   }
 
   async getBrevoStatus() {
+    const cached = cache.get<unknown>(CACHE_KEYS.BREVO_STATUS);
+    if (cached != null) return cached;
     const response = await this.client.get('/integrations/brevo/status');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.BREVO_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   // Brevo Contacts
@@ -594,6 +617,9 @@ class ApiClient {
     pageSize?: number,
     useTreasury?: boolean
   ) {
+    const cacheKey = `stripe_payments_${status ?? 'all'}_${range ?? 'all'}_${page ?? 1}_${pageSize ?? 100}_${useTreasury ?? false}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params: any = {};
     if (status) params.status = status;
     if (range !== undefined) params.range = range; // undefined means all time
@@ -601,7 +627,9 @@ class ApiClient {
     if (pageSize) params.page_size = pageSize;
     if (useTreasury !== undefined) params.use_treasury = useTreasury;
     const response = await this.client.get('/integrations/stripe/payments', { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async deleteStripePayment(paymentId: string, useTreasury: boolean = true) {
@@ -612,12 +640,17 @@ class ApiClient {
   }
 
   async getStripeFailedPayments(page?: number, pageSize?: number, excludeResolved?: boolean) {
+    const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params: any = {};
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
     if (excludeResolved !== undefined) params.exclude_resolved = excludeResolved;
     const response = await this.client.get('/integrations/stripe/failed-payments', { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async findDuplicatePayments() {
@@ -648,11 +681,18 @@ class ApiClient {
     return response.data;
   }
 
-  // Funnels
+  // Funnels (cached for terminal - LeadsBySource and BookingRateByFunnel both call this)
   async getFunnels(clientId?: string) {
+    const cacheKey = clientId ? `${CACHE_KEYS.FUNNELS}_${clientId}` : CACHE_KEYS.FUNNELS;
+    if (!clientId) {
+      const cached = cache.get<unknown[]>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params = clientId ? { client_id: clientId } : {};
     const response = await this.client.get('/funnels', { params });
-    return response.data;
+    const data = response.data;
+    if (!clientId) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getFunnel(funnelId: string) {
@@ -703,9 +743,14 @@ class ApiClient {
   }
 
   async getFunnelAnalytics(funnelId: string, range?: number) {
+    const cacheKey = `funnel_analytics_${funnelId}_${range ?? 30}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params = range ? { range } : {};
     const response = await this.client.get(`/funnels/${funnelId}/analytics`, { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   // Event Explorer

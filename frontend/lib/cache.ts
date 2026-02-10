@@ -52,6 +52,12 @@ class Cache {
     this.cache.delete(key);
   }
 
+  deleteByPrefix(prefix: string): void {
+    for (const key of Array.from(this.cache.keys())) {
+      if (key.startsWith(prefix)) this.cache.delete(key);
+    }
+  }
+
   clear(): void {
     this.cache.clear();
   }
@@ -99,5 +105,9 @@ export const CACHE_KEYS = {
   FUNNELS: 'funnels',
   BREVO_STATUS: 'brevo_status',
   CALCOM_STATUS: 'calcom_status',
+  STRIPE_FAILED_PAYMENTS: 'stripe_failed_payments',
 } as const;
+
+// TTL for terminal dashboard data (90s) so switching tabs feels instant
+export const TERMINAL_CACHE_TTL_MS = 90 * 1000;
 

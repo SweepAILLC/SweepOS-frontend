@@ -37,11 +37,6 @@ function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
         .join(' ') || 'Unnamed Client';
   }, [client.meta?.merged_names, client.first_name, client.last_name]);
 
-  const mergedCount = useMemo(() => 
-    client.meta?.merged_client_ids?.length || 0,
-    [client.meta?.merged_client_ids]
-  );
-
   const handleClick = useCallback((e: React.MouseEvent) => {
     // Prevent click if dragging
     if (isDragging) return;
@@ -92,13 +87,8 @@ function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
       
       {/* Clickable content */}
       <div onClick={handleClick}>
-        <div className="font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2">
+        <div className="font-medium text-gray-900 dark:text-gray-100">
           {fullName}
-          {mergedCount > 1 && (
-            <span className="text-xs bg-blue-500/20 text-white px-2 py-0.5 rounded-full border border-blue-400/30">
-              {mergedCount} merged
-            </span>
-          )}
         </div>
         {client.email && (
           <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{client.email}</div>

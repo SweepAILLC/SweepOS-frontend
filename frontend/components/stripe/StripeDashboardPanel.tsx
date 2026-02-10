@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
+import { Client } from '@/types/client';
 import { StripeSummary, RevenueTimeline, ChurnData, MRRTrend, Payment, FailedPayment } from '@/types/integration';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import EmailComposer from '../brevo/EmailComposer';
@@ -402,6 +403,28 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     }
   };
 
+  // Deduplicate clients for assign modal: one entry per normalized email or stripe_customer_id (same logic as TopRevenueContributors/CashCollectedAndMRR).
+  const deduplicateClientsForAssign = (rawClients: Client[]): Client[] => {
+    const normalizeEmail = (email: string | undefined | null): string | null => {
+      if (!email) return null;
+      return email.replace(/\s+/g, '').toLowerCase().trim() || null;
+    };
+    const seenKeys = new Set<string>();
+    const result: Client[] = [];
+    for (const client of rawClients) {
+      const normalizedEmail = normalizeEmail(client.email);
+      const key = normalizedEmail
+        ? `email:${normalizedEmail}`
+        : client.stripe_customer_id
+          ? `stripe:${client.stripe_customer_id}`
+          : `id:${client.id}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      result.push(client);
+    }
+    return result;
+  };
+
   const handleOpenAssignModal = async (paymentId: string) => {
     setAssigningPayment(paymentId);
     setSearchQuery('');
@@ -410,7 +433,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     
     try {
       const allClients = await apiClient.getClients();
-      setClients(allClients);
+      setClients(deduplicateClientsForAssign(allClients));
       setShowAssignModal(true);
     } catch (error: any) {
       console.error('Failed to load clients:', error);
