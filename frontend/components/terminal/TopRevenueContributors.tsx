@@ -2,222 +2,160 @@ import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import { Client, ClientPayment } from '@/types/client';
 
-interface RevenueContributor {
-  client: Client;
+interface TopContributor {
+  client_id: string;
+  display_name: string;
   revenue: number;
-  lastPaymentDate: string | null;
+  last_payment_date: string | null;
+  merged_client_ids?: string[] | null;
 }
 
 interface TopRevenueContributorsProps {
   onLoadComplete?: () => void;
 }
 
+function normalizeEmail(email: string | undefined | null): string | null {
+  if (!email) return null;
+  return email.replace(/\s+/g, '').toLowerCase().trim() || null;
+}
+
 export default function TopRevenueContributors({ onLoadComplete }: TopRevenueContributorsProps = {}) {
-  const [contributors, setContributors] = useState<RevenueContributor[]>([]);
+  const [contributors30, setContributors30] = useState<TopContributor[]>([]);
+  const [contributors90, setContributors90] = useState<TopContributor[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<30 | 90>(30);
   const hasCalledOnLoadComplete = useRef(false);
 
-  useEffect(() => {
-    loadContributors();
-  }, [timeRange]);
-
-  const loadContributors = async () => {
-    try {
-      setLoading(true);
-      const clients = await apiClient.getClients();
-      
-      // Normalize email function - same as Kanban board
-      const normalizeEmail = (email: string | undefined | null): string | null => {
-        if (!email) return null;
-        return email.replace(/\s+/g, '').toLowerCase().trim() || null;
-      };
-      
-      // Group clients by email first (most reliable), then by Stripe customer ID if no email
-      const groupedClients = new Map<string, Client[]>();
-      const processedClientIds = new Set<string>();
-      
-      clients.forEach((client: Client) => {
-        // Skip if already processed
-        if (processedClientIds.has(client.id)) {
-          return;
-        }
-        
-        // First priority: group by normalized email (same as Kanban board)
-        const normalizedEmail = normalizeEmail(client.email);
-        if (normalizedEmail) {
-          const key = `email:${normalizedEmail}`;
-          
-          // Find all clients with the same email
-          const clientsWithSameEmail = clients.filter((c: Client) => {
-            const cEmail = normalizeEmail(c.email);
-            return cEmail === normalizedEmail && !processedClientIds.has(c.id);
-          });
-          
-          if (clientsWithSameEmail.length > 0) {
-            if (!groupedClients.has(key)) {
-              groupedClients.set(key, []);
-            }
-            clientsWithSameEmail.forEach((c: Client) => {
-              groupedClients.get(key)!.push(c);
-              processedClientIds.add(c.id);
-            });
-          }
-        } else {
-          // No email - try to group by Stripe customer ID
-          const stripeId = client.stripe_customer_id;
-          if (stripeId) {
-            const key = `stripe:${stripeId}`;
-            
-            // Find all clients with the same Stripe ID
-            const clientsWithSameStripeId = clients.filter((c: Client) => {
-              return c.stripe_customer_id === stripeId && !processedClientIds.has(c.id);
-            });
-            
-            if (clientsWithSameStripeId.length > 0) {
-              if (!groupedClients.has(key)) {
-                groupedClients.set(key, []);
-              }
-              clientsWithSameStripeId.forEach((c: Client) => {
-                groupedClients.get(key)!.push(c);
-                processedClientIds.add(c.id);
-              });
-            }
-          } else {
-            // No email or Stripe ID - treat as individual
-            groupedClients.set(`individual:${client.id}`, [client]);
-            processedClientIds.add(client.id);
-          }
-        }
-      });
-      
-      // Get payments for all client groups
-      const contributorsWithRevenue: RevenueContributor[] = [];
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - timeRange);
-      
-      for (const [groupKey, clientGroup] of Array.from(groupedClients.entries())) {
-        try {
-          // Aggregate revenue from all clients in the group
-          let totalRevenue = 0;
-          let latestPaymentDate: string | null = null;
-          const allPayments: Array<{ created_at: string | null; amount: number }> = [];
-          
-          // Track seen payments to deduplicate across all clients in the group
-          // Key: (subscription_id, invoice_id) or (invoice_id) or stripe_id
-          const seenPaymentKeys = new Set<string>();
-          
-          // Get payments from all clients in the group
-          for (const client of clientGroup) {
-            try {
-              const payments = await apiClient.getClientPayments(client.id);
-              
-              // Filter payments: within time range AND succeeded status only
-              const recentPayments = payments.payments.filter((payment: ClientPayment) => {
-                if (!payment.created_at) return false;
-                if (payment.status !== 'succeeded') return false; // Only count succeeded payments
-                const paymentDate = new Date(payment.created_at);
-                return paymentDate >= cutoffDate;
-              });
-              
-              // Deduplicate payments across all clients in the group
-              // Use stripe_id as the primary deduplication key (unique per payment)
-              recentPayments.forEach((payment: ClientPayment) => {
-                // Create deduplication key using stripe_id (unique per Stripe payment)
-                // This prevents the same payment from being counted multiple times when
-                // consolidating across multiple client records in the same group
-                const dedupeKey = payment.stripe_id || payment.id;
-                
-                // Skip if we've already seen this payment
-                if (seenPaymentKeys.has(dedupeKey)) {
-                  return;
-                }
-                seenPaymentKeys.add(dedupeKey);
-                
-                // Add to total revenue
-                totalRevenue += payment.amount;
-                allPayments.push({
-                  created_at: payment.created_at,
-                  amount: payment.amount,
-                });
-              });
-            } catch (error) {
-              // Skip clients without payment access
-              console.warn(`Failed to load payments for client ${client.id}:`, error);
-            }
-          }
-          
-          if (totalRevenue > 0) {
-            // Find the most recent payment date across all clients in the group
-            if (allPayments.length > 0) {
-              const sortedPayments = allPayments.sort((a, b) => {
-                const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
-                const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
-                return dateB - dateA;
-              });
-              latestPaymentDate = sortedPayments[0].created_at;
-            }
-            
-            // Use the primary client (oldest by created_at) for display
-            const primaryClient = [...clientGroup].sort((a, b) => 
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            )[0];
-            
-            // If multiple clients, combine names
-            if (clientGroup.length > 1) {
-              const names = new Set<string>();
-              clientGroup.forEach((c: Client) => {
-                const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ');
-                if (fullName.trim()) {
-                  names.add(fullName.trim());
-                }
-              });
-              const combinedName = Array.from(names).join(' / ') || primaryClient.email || 'Unknown';
-              
-              // Create a merged client representation
-              const mergedClient: Client = {
-                ...primaryClient,
-                meta: {
-                  ...primaryClient.meta,
-                  merged_names: combinedName,
-                  merged_client_ids: clientGroup.map(c => c.id),
-                },
-              };
-              
-              contributorsWithRevenue.push({
-                client: mergedClient,
-                revenue: totalRevenue,
-                lastPaymentDate: latestPaymentDate,
-              });
-            } else {
-              contributorsWithRevenue.push({
-                client: primaryClient,
-                revenue: totalRevenue,
-                lastPaymentDate: latestPaymentDate,
-              });
-            }
-          }
-        } catch (error) {
-          console.warn(`Failed to process client group ${groupKey}:`, error);
-        }
-      }
-      
-      // Sort by revenue descending and take top 5
-      const top5 = contributorsWithRevenue
-        .sort((a, b) => b.revenue - a.revenue)
-        .slice(0, 5);
-      
-      setContributors(top5);
-    } catch (error) {
-      console.error('Failed to load revenue contributors:', error);
-    } finally {
-      setLoading(false);
-      if (!hasCalledOnLoadComplete.current && onLoadComplete) {
-        hasCalledOnLoadComplete.current = true;
-        onLoadComplete();
-      }
-    }
+  const loadFromSummary = async (): Promise<{ top30: TopContributor[]; top90: TopContributor[] } | null> => {
+    const summary = await apiClient.getTerminalSummary();
+    const top30 = summary.top_contributors_30d ?? [];
+    const top90 = summary.top_contributors_90d ?? [];
+    const hasData = top30.length > 0 || top90.length > 0;
+    return hasData ? { top30, top90 } : null;
   };
+
+  const loadFallback = async (): Promise<{ top30: TopContributor[]; top90: TopContributor[] }> => {
+    const clients = await apiClient.getClients();
+    const grouped = new Map<string, Client[]>();
+    const processed = new Set<string>();
+
+    clients.forEach((client: Client) => {
+      if (processed.has(client.id)) return;
+      const norm = normalizeEmail(client.email);
+      if (norm) {
+        const key = `email:${norm}`;
+        const same = clients.filter(
+          (c: Client) => normalizeEmail(c.email) === norm && !processed.has(c.id)
+        );
+        if (same.length > 0) {
+          same.forEach((c: Client) => processed.add(c.id));
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(...same);
+        }
+      } else if (client.stripe_customer_id) {
+        const key = `stripe:${client.stripe_customer_id}`;
+        const same = clients.filter(
+          (c: Client) => c.stripe_customer_id === client.stripe_customer_id && !processed.has(c.id)
+        );
+        if (same.length > 0) {
+          same.forEach((c: Client) => processed.add(c.id));
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(...same);
+        }
+      }
+      if (!processed.has(client.id)) {
+        grouped.set(`id:${client.id}`, [client]);
+        processed.add(client.id);
+      }
+    });
+
+    const buildForRange = async (days: number): Promise<TopContributor[]> => {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const list: TopContributor[] = [];
+
+      for (const [, clientGroup] of grouped) {
+        let totalRevenue = 0;
+        const seenKeys = new Set<string>();
+        let latestDate: string | null = null;
+
+        for (const client of clientGroup) {
+          try {
+            const res = await apiClient.getClientPayments(client.id);
+            (res.payments || []).forEach((p: ClientPayment) => {
+              if (p.status !== 'succeeded' || !p.created_at) return;
+              const d = new Date(p.created_at);
+              if (d < cutoff) return;
+              const key = p.stripe_id || p.id;
+              if (seenKeys.has(key)) return;
+              seenKeys.add(key);
+              totalRevenue += p.amount || 0;
+              if (!latestDate || (p.created_at && p.created_at > latestDate)) latestDate = p.created_at;
+            });
+          } catch {
+            // skip
+          }
+        }
+
+        if (totalRevenue > 0) {
+          const primary = [...clientGroup].sort(
+            (a, b) => new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime()
+          )[0];
+          const names = new Set(
+            clientGroup.map((c) => [c.first_name, c.last_name].filter(Boolean).join(' ').trim()).filter(Boolean)
+          );
+          const displayName = names.size > 0 ? [...names].join(' / ') : (primary.email || 'Unknown');
+          list.push({
+            client_id: primary.id,
+            display_name: displayName,
+            revenue: totalRevenue,
+            last_payment_date: latestDate,
+            merged_client_ids: clientGroup.length > 1 ? clientGroup.map((c) => c.id) : null,
+          });
+        }
+      }
+
+      list.sort((a, b) => b.revenue - a.revenue);
+      return list.slice(0, 5);
+    };
+
+    const [top30, top90] = await Promise.all([buildForRange(30), buildForRange(90)]);
+    return { top30, top90 };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        let result: { top30: TopContributor[]; top90: TopContributor[] } | null = null;
+        try {
+          result = await loadFromSummary();
+        } catch (err) {
+          console.warn('Terminal summary failed for contributors, using fallback:', err);
+        }
+        if (!result) {
+          result = await loadFallback();
+        }
+        if (cancelled) return;
+        setContributors30(result.top30);
+        setContributors90(result.top90);
+      } catch (error) {
+        if (!cancelled) console.error('Failed to load revenue contributors:', error);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          if (!hasCalledOnLoadComplete.current && onLoadComplete) {
+            hasCalledOnLoadComplete.current = true;
+            onLoadComplete();
+          }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [onLoadComplete]);
+
+  const contributors = timeRange === 30 ? contributors30 : contributors90;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -231,16 +169,6 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString();
-  };
-
-  const getClientName = (client: Client) => {
-    // Use merged names if available (from consolidated clients)
-    if (client.meta?.merged_names) {
-      return client.meta.merged_names;
-    }
-    const firstName = client.first_name || '';
-    const lastName = client.last_name || '';
-    return [firstName, lastName].filter(Boolean).join(' ') || client.email || 'Unknown';
   };
 
   return (
@@ -275,7 +203,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
 
       {loading ? (
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-gray-100" />
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       ) : contributors.length === 0 ? (
@@ -286,7 +214,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
         <div className="space-y-3">
           {contributors.map((contributor, index) => (
             <div
-              key={contributor.client.id}
+              key={contributor.client_id}
               className="flex items-center justify-between p-3 glass-panel rounded-lg"
             >
               <div className="flex items-center space-x-3 flex-1">
@@ -295,10 +223,10 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                    {getClientName(contributor.client)}
+                    {contributor.display_name}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    Last payment: {formatDate(contributor.lastPaymentDate)}
+                    Last payment: {formatDate(contributor.last_payment_date)}
                   </p>
                 </div>
               </div>
@@ -314,4 +242,3 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
     </div>
   );
 }
-

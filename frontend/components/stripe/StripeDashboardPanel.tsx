@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
+import { cache } from '@/lib/cache';
 import { Client } from '@/types/client';
 import { StripeSummary, RevenueTimeline, ChurnData, MRRTrend, Payment, FailedPayment } from '@/types/integration';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -83,15 +84,12 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     setGlobalLoading(true, 'Loading Stripe dashboard...');
     setError(null);
     try {
-      // First check if Stripe is connected
       const status = await apiClient.getStripeStatus();
       setIsConnected(status.connected);
-      
       if (status.connected) {
-        // If connected, load all data
-        await loadAllData();
+        await loadSummaryOnly();
+        setTimeout(() => loadChartsAndPayments(), 150);
       } else {
-        // If not connected, just set loading to false
         setLoading(false);
         setGlobalLoading(false);
       }
@@ -103,46 +101,96 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     }
   };
 
-  const loadAllData = async () => {
+  const loadSummaryOnly = async () => {
     setError(null);
     setLoading(true);
     try {
-      // Load summary - use 365 days for "all time" to show comprehensive data
       const summaryRange = timeRange === 'all' ? 365 : timeRange;
       const summaryData = await apiClient.getStripeSummary(summaryRange);
       setSummary(summaryData);
       setIsConnected(true);
+    } catch (error: any) {
+      console.error('❌ Failed to load Stripe summary:', error);
+      if (error?.response?.status === 404) {
+        setIsConnected(false);
+        setSummary(null);
+        try {
+          const status = await apiClient.getStripeStatus();
+          setIsConnected(status.connected);
+        } catch {
+          setIsConnected(false);
+        }
+      } else if (error?.response?.status === 401) {
+        setError('Please log in to view Stripe data');
+        setIsConnected(false);
+      } else {
+        setError(error?.response?.data?.detail || error?.message || 'Failed to load Stripe data');
+        setIsConnected(false);
+      }
+    } finally {
+      setLoading(false);
+      setGlobalLoading(false);
+    }
+  };
 
-      // Load charts data
-      // IMPORTANT: Our revenue timeline endpoint is capped at 365 days.
-      // To avoid "chart shows revenue but table looks like it's missing rows", we align the table range to the same window.
-      // Also, Treasury data is often synced for limited lookback windows; for longer ranges we prefer StripePayment history.
+  const loadChartsAndPayments = async () => {
+    try {
       const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
       const useTreasuryForPayments = timeRange === 'all' ? false : true;
-
-      // Reset payments pagination on reload
       setPaymentsPage(1);
       const [revenue, churn, mrr, paymentsData, failedData] = await Promise.all([
         apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day'),
         apiClient.getStripeChurn(6),
         apiClient.getStripeMRRTrend(alignedRangeDays, 'day'),
-        // Revenue timeline is based on succeeded payments; use same filter for consistency.
         apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments),
         apiClient.getStripeFailedPayments(1, 20),
       ]);
-
       setRevenueTimeline(revenue);
       setChurnData(churn);
       setMrrTrend(mrr);
-      // Sort payments by date (most recent first)
-      const sortedPayments = [...paymentsData].sort((a, b) => {
-        const dateA = a.created_at || 0;
-        const dateB = b.created_at || 0;
-        return dateB - dateA; // Most recent first (descending)
+      const sortedPayments = [...(paymentsData || [])].sort((a, b) => {
+        const dateA = (a as any).created_at || 0;
+        const dateB = (b as any).created_at || 0;
+        return dateB - dateA;
       });
       setPayments(sortedPayments);
       setPaymentsHasMore(Array.isArray(paymentsData) && paymentsData.length === paymentsPageSize);
-      setFailedPayments(failedData);
+      setFailedPayments(failedData || []);
+    } catch (error: any) {
+      console.error('Failed to load Stripe charts/payments:', error);
+    }
+  };
+
+  const loadAllData = async () => {
+    setError(null);
+    setLoading(true);
+    setGlobalLoading(true, 'Loading Stripe dashboard...');
+    try {
+      const summaryRange = timeRange === 'all' ? 365 : timeRange;
+      const summaryData = await apiClient.getStripeSummary(summaryRange);
+      setSummary(summaryData);
+      setIsConnected(true);
+      const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
+      const useTreasuryForPayments = timeRange === 'all' ? false : true;
+      setPaymentsPage(1);
+      const [revenue, churn, mrr, paymentsData, failedData] = await Promise.all([
+        apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day'),
+        apiClient.getStripeChurn(6),
+        apiClient.getStripeMRRTrend(alignedRangeDays, 'day'),
+        apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments),
+        apiClient.getStripeFailedPayments(1, 20),
+      ]);
+      setRevenueTimeline(revenue);
+      setChurnData(churn);
+      setMrrTrend(mrr);
+      const sortedPayments = [...(paymentsData || [])].sort((a, b) => {
+        const dateA = (a as any).created_at || 0;
+        const dateB = (b as any).created_at || 0;
+        return dateB - dateA;
+      });
+      setPayments(sortedPayments);
+      setPaymentsHasMore(Array.isArray(paymentsData) && paymentsData.length === paymentsPageSize);
+      setFailedPayments(failedData || []);
     } catch (error: any) {
       console.error('❌ Failed to load Stripe data:', error);
       if (error?.response?.status === 404) {
@@ -454,7 +502,8 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       
       alert(`Payment assigned to ${result.client_name} successfully. Reconciliation has been run automatically.`);
       
-      // Reload payments
+      // Invalidate payments cache so refetch returns updated customer info
+      cache.deleteByPrefix('stripe_payments_');
       await loadAllData();
       
       // Close modal
@@ -977,7 +1026,7 @@ Your Team
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500 dark:text-gray-100">
                       {payment.subscription_id ? (
-                        <span className="font-mono text-xs">{payment.subscription_id.substring(0, 20)}...</span>
+                        <span className="font-mono text-xs break-all" title={payment.subscription_id}>{payment.subscription_id}</span>
                       ) : (
                         'N/A'
                       )}
@@ -1053,7 +1102,7 @@ Your Team
                           <p className="text-gray-500 dark:text-gray-400 text-xs">{payment.client_email}</p>
                         )}
                         {payment.subscription_id && (
-                          <p className="text-gray-400 dark:text-gray-500 text-xs mt-1">Sub: {payment.subscription_id.substring(0, 20)}...</p>
+                          <p className="text-gray-400 dark:text-gray-500 text-xs mt-1 break-all">Sub: {payment.subscription_id}</p>
                         )}
                       </div>
                     </td>
@@ -1136,26 +1185,26 @@ Your Team
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                              Group {groupIndex + 1}: {group.key}
+                              Group {groupIndex + 1}: shared suffix = <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{group.key}</code>
                             </p>
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                               {group.count} payment(s) • Total: {formatCurrency(group.total_amount_cents / 100)}
                             </p>
                           </div>
-                          <span className="px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded">
-                            Keep: {group.recommended_keep_id.substring(0, 8)}...
+                          <span className="px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200 rounded break-all" title={group.recommended_keep_id}>
+                            Keep: {group.recommended_keep_id}
                           </span>
                         </div>
-                        
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2">Full stripe_id and suffix per payment (suffix should match above):</p>
                         <div className="space-y-2">
-                          {group.payment_ids.map((paymentId: string) => {
+                          {(group.payments_detail || []).map((entry: any) => {
+                            const paymentId = entry.payment_id;
                             const isRecommended = paymentId === group.recommended_keep_id;
                             const isSelected = selectedDuplicates.has(paymentId);
-                            
                             return (
                               <label
                                 key={paymentId}
-                                className={`flex items-center p-2 rounded border ${
+                                className={`flex items-start gap-3 p-2 rounded border ${
                                   isRecommended
                                     ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600 cursor-not-allowed opacity-60'
                                     : isSelected
@@ -1168,14 +1217,36 @@ Your Team
                                   checked={isSelected}
                                   disabled={isRecommended}
                                   onChange={() => toggleDuplicateSelection(paymentId, group.recommended_keep_id)}
-                                  className="mr-3"
+                                  className="mt-1"
                                 />
-                                <span className="text-sm font-mono text-gray-700 dark:text-gray-300">
-                                  {paymentId}
+                                <div className="flex-1 min-w-0 text-sm font-mono">
+                                  <div className="text-gray-700 dark:text-gray-300 break-all">
+                                    stripe_id: <span className="text-gray-900 dark:text-gray-100">{entry.stripe_id || '(none)'}</span>
+                                  </div>
+                                  <div className="text-gray-600 dark:text-gray-400 mt-0.5 break-all">
+                                    suffix: <span className="text-amber-700 dark:text-amber-300">{entry.suffix || '(none)'}</span>
+                                    {entry.type && <span className="ml-2 text-gray-500">type: {entry.type}</span>}
+                                    <span className="ml-2 text-gray-500">{formatCurrency((entry.amount_cents || 0) / 100)}</span>
+                                  </div>
                                   {isRecommended && (
-                                    <span className="ml-2 text-xs text-green-600 dark:text-green-400">(Keep)</span>
+                                    <span className="text-xs text-green-600 dark:text-green-400">(Keep)</span>
                                   )}
-                                </span>
+                                </div>
+                              </label>
+                            );
+                          })}
+                          {(!group.payments_detail || group.payments_detail.length === 0) && group.payment_ids.map((paymentId: string) => {
+                            const isRecommended = paymentId === group.recommended_keep_id;
+                            const isSelected = selectedDuplicates.has(paymentId);
+                            return (
+                              <label
+                                key={paymentId}
+                                className={`flex items-center p-2 rounded border ${
+                                  isRecommended ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-300 dark:border-gray-600 cursor-not-allowed opacity-60' : isSelected ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 cursor-pointer' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700/50'
+                                }`}
+                              >
+                                <input type="checkbox" checked={isSelected} disabled={isRecommended} onChange={() => toggleDuplicateSelection(paymentId, group.recommended_keep_id)} className="mr-3" />
+                                <span className="text-sm font-mono text-gray-700 dark:text-gray-300">{paymentId}{isRecommended && <span className="ml-2 text-xs text-green-600 dark:text-green-400">(Keep)</span>}</span>
                               </label>
                             );
                           })}

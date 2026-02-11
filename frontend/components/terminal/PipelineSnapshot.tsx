@@ -40,63 +40,6 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
     }
   };
 
-  // Merge clients by email (same logic as Kanban board)
-  const mergedClients = useMemo(() => {
-    const emailMap = new Map<string, Client[]>();
-    const noEmailClients: Client[] = [];
-    
-    const normalizeEmail = (email: string | undefined | null): string | null => {
-      if (!email) return null;
-      return email.replace(/\s+/g, '').toLowerCase().trim() || null;
-    };
-    
-    clients.forEach((client) => {
-      const normalizedEmail = normalizeEmail(client.email);
-      if (normalizedEmail) {
-        if (!emailMap.has(normalizedEmail)) {
-          emailMap.set(normalizedEmail, []);
-        }
-        emailMap.get(normalizedEmail)!.push(client);
-      } else {
-        noEmailClients.push(client);
-      }
-    });
-    
-    const mergedClientsList: Client[] = [];
-    mergedClientsList.push(...noEmailClients);
-    
-    emailMap.forEach((clientsWithSameEmail) => {
-      if (clientsWithSameEmail.length === 1) {
-        mergedClientsList.push(clientsWithSameEmail[0]);
-      } else {
-        const sorted = [...clientsWithSameEmail].sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-        const primary = sorted[0];
-        
-        const statePriority: Record<string, number> = {
-          active: 5,
-          warm_lead: 4,
-          cold_lead: 3,
-          offboarding: 2,
-          dead: 1,
-        };
-        const mergedState = clientsWithSameEmail.reduce((prev, curr) => 
-          statePriority[curr.lifecycle_state] > statePriority[prev.lifecycle_state]
-            ? curr
-            : prev
-        ).lifecycle_state;
-        
-        mergedClientsList.push({
-          ...primary,
-          lifecycle_state: mergedState as Client['lifecycle_state'],
-        });
-      }
-    });
-    
-    return mergedClientsList;
-  }, [clients]);
-
   const counts = useMemo(() => {
     const counts: Record<string, number> = {
       cold_lead: 0,
@@ -105,13 +48,11 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
       offboarding: 0,
       dead: 0,
     };
-    
-    mergedClients.forEach((client) => {
+    clients.forEach((client) => {
       counts[client.lifecycle_state] = (counts[client.lifecycle_state] || 0) + 1;
     });
-    
     return counts;
-  }, [mergedClients]);
+  }, [clients]);
 
   const handleCountClick = (columnId: string) => {
     if (activeFilter === columnId) {

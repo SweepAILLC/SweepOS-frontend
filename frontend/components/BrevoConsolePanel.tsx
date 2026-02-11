@@ -12,6 +12,7 @@ export default function BrevoConsolePanel({ userRole = 'member' }: BrevoConsoleP
   const { setLoading: setGlobalLoading } = useLoading();
   const [status, setStatus] = useState<BrevoStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showBrevoDashboard, setShowBrevoDashboard] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   // OAuth temporarily disabled - only API key available
@@ -27,23 +28,28 @@ export default function BrevoConsolePanel({ userRole = 'member' }: BrevoConsoleP
 
   useEffect(() => {
     loadStatus();
-    
-    // Check for OAuth callback parameters in URL
     const params = new URLSearchParams(window.location.search);
     if (params.get('brevo_connected') === 'true') {
-      // Reload status after successful connection
       setTimeout(() => {
         loadStatus();
-        // Clean up URL
         window.history.replaceState({}, '', window.location.pathname);
       }, 1000);
     } else if (params.get('brevo_error')) {
       const errorMsg = params.get('error_description') || 'Failed to connect Brevo';
       alert(`Brevo connection error: ${errorMsg}`);
-      // Clean up URL
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, []);
+
+  // Lazy-mount BrevoDashboard 150ms after status is loaded (when connected) so global loading clears on status first
+  useEffect(() => {
+    if (!status?.connected) {
+      setShowBrevoDashboard(false);
+      return;
+    }
+    const t = setTimeout(() => setShowBrevoDashboard(true), 150);
+    return () => clearTimeout(t);
+  }, [status?.connected]);
 
   const loadStatus = async () => {
     setGlobalLoading(true, 'Loading Brevo dashboard...');
@@ -222,8 +228,8 @@ export default function BrevoConsolePanel({ userRole = 'member' }: BrevoConsoleP
       )}
       </div>
 
-      {/* Brevo Dashboard - Only show when connected */}
-      {status?.connected && (
+      {/* Brevo Dashboard - Lazy-mount when connected so tab loads fast */}
+      {status?.connected && showBrevoDashboard && (
         <div className="glass-card p-6">
           <BrevoDashboard />
         </div>

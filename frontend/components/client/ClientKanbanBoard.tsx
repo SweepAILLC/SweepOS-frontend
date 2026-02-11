@@ -165,16 +165,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     const activeId = active.id as string;
     const overId = over.id as string;
 
-    // Helper function to find client by sortable ID (email for merged, ID for regular)
     const findClientBySortableId = (sortableId: string): Client | undefined => {
-      return mergedClients.find(c => {
-        // For merged clients, the sortable ID is the email
-        if (c.meta?.merged_client_ids) {
-          return c.email === sortableId;
-        }
-        // For regular clients, the sortable ID is the client ID
-        return c.id === sortableId;
-      });
+      return filteredClients.find((c) => c.id === sortableId);
     };
 
     // Find the client being dragged using the sortable ID
@@ -190,24 +182,18 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     if (columnId) {
       // Dropped on a column header - move to that column
       const newColumnId = columnId.id;
-      const clientIdToUpdate = draggedClient.meta?.merged_client_ids?.[0] || draggedClient.id;
-      await updateClientState(clientIdToUpdate, newColumnId, draggedClient);
+      await updateClientState(draggedClient.id, newColumnId, draggedClient);
       return;
     }
 
-    // Might be dropped on another card
     const targetClient = findClientBySortableId(overId);
     if (targetClient) {
       const newColumnId = targetClient.lifecycle_state as ColumnId;
       const currentColumnId = draggedClient.lifecycle_state as ColumnId;
-      
-      // Check if moving within the same column (reordering)
       if (newColumnId === currentColumnId) {
         await reorderClientInColumn(draggedClient, targetClient, newColumnId);
       } else {
-        // Moving to a different column
-        const clientIdToUpdate = draggedClient.meta?.merged_client_ids?.[0] || draggedClient.id;
-        await updateClientState(clientIdToUpdate, newColumnId, draggedClient);
+        await updateClientState(draggedClient.id, newColumnId, draggedClient);
       }
     }
   };
@@ -222,17 +208,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         return aOrder - bOrder;
       });
 
-    // Find indices
-    const draggedIndex = columnClients.findIndex(c => {
-      const sortableId = c.meta?.merged_client_ids ? (c.email || c.id) : c.id;
-      const draggedSortableId = draggedClient.meta?.merged_client_ids ? (draggedClient.email || draggedClient.id) : draggedClient.id;
-      return sortableId === draggedSortableId;
-    });
-    const targetIndex = columnClients.findIndex(c => {
-      const sortableId = c.meta?.merged_client_ids ? (c.email || c.id) : c.id;
-      const targetSortableId = targetClient.meta?.merged_client_ids ? (targetClient.email || targetClient.id) : targetClient.id;
-      return sortableId === targetSortableId;
-    });
+    const draggedIndex = columnClients.findIndex((c) => c.id === draggedClient.id);
+    const targetIndex = columnClients.findIndex((c) => c.id === targetClient.id);
 
     if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
       return; // No change needed
@@ -243,11 +220,9 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     const [removed] = reorderedClients.splice(draggedIndex, 1);
     reorderedClients.splice(targetIndex, 0, removed);
 
-    // Update sort orders for all affected clients
     const updates: Array<{ clientId: string; sortOrder: number }> = [];
     reorderedClients.forEach((client, index) => {
-      const clientId = client.meta?.merged_client_ids?.[0] || client.id;
-      updates.push({ clientId, sortOrder: index });
+      updates.push({ clientId: client.id, sortOrder: index });
     });
 
     // Optimistic update
@@ -318,9 +293,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       return;
     }
 
-    // Check if this is a merged client (has merged_client_ids in meta)
-    const mergedClientIds = client.meta?.merged_client_ids;
-    const clientIdsToUpdate = mergedClientIds || [clientId];
+    const clientIdsToUpdate = [clientId];
 
     // Check if moving FROM offboarding to another column
     // If so, reset program fields
@@ -376,165 +349,57 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     }
   };
 
-  // Group ALL clients by email and merge duplicates (across all columns)
-  // This ensures clients with the same email are merged even if they're in different columns
-  const mergedClients = useMemo(() => {
+  const normalizeEmail = (email: string | undefined | null): string | null => {
+    if (!email) return null;
+    const normalized = email.replace(/\s+/g, '').toLowerCase().trim();
+    return normalized.length > 0 ? normalized : null;
+  };
+
+  // Duplicate groups (same email) for "Merge duplicates" - persisted via API, not in-memory
+  const duplicateGroups = useMemo(() => {
     const emailMap = new Map<string, Client[]>();
-    const noEmailClients: Client[] = [];
-    
-    // Normalize email function - handles various edge cases
-    const normalizeEmail = (email: string | undefined | null): string | null => {
-      if (!email) return null;
-      // Remove all whitespace, convert to lowercase
-      const normalized = email.replace(/\s+/g, '').toLowerCase().trim();
-      return normalized.length > 0 ? normalized : null;
-    };
-    
-    // Group ALL clients by email (case-insensitive, normalized)
     clients.forEach((client) => {
-      const normalizedEmail = normalizeEmail(client.email);
-      if (normalizedEmail) {
-        if (!emailMap.has(normalizedEmail)) {
-          emailMap.set(normalizedEmail, []);
-        }
-        emailMap.get(normalizedEmail)!.push(client);
-      } else {
-        // Clients without email are not grouped
-        noEmailClients.push(client);
+      const norm = normalizeEmail(client.email);
+      if (norm) {
+        if (!emailMap.has(norm)) emailMap.set(norm, []);
+        emailMap.get(norm)!.push(client);
       }
     });
-    
-    // Debug: Log email groups
-    emailMap.forEach((clientsWithSameEmail, email) => {
-      if (clientsWithSameEmail.length > 1) {
-        console.log(`[CLIENT_MERGE] Found ${clientsWithSameEmail.length} clients with email "${email}":`, 
-          clientsWithSameEmail.map(c => ({ id: c.id, name: `${c.first_name} ${c.last_name}`, state: c.lifecycle_state }))
-        );
-      }
-    });
-    
-    const mergedClientsList: Client[] = [];
-    
-    // Add clients without email as-is
-    mergedClientsList.push(...noEmailClients);
-    
-    // Process clients grouped by email
-    emailMap.forEach((clientsWithSameEmail, normalizedEmail) => {
-      if (clientsWithSameEmail.length === 1) {
-        // No duplicates, use as-is
-        mergedClientsList.push(clientsWithSameEmail[0]);
-      } else {
-        // Multiple clients with same email - merge them
-        // Sort by created_at to use the oldest as primary
-        const sorted = [...clientsWithSameEmail].sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-        const primary = sorted[0];
-        
-        // Collect all unique names (excluding empty names)
-        const names = new Set<string>();
-        clientsWithSameEmail.forEach((c) => {
-          const fullName = [c.first_name, c.last_name].filter(Boolean).join(' ');
-          if (fullName.trim()) {
-            names.add(fullName.trim());
-          }
-        });
-        
-        // Combine names with "/"
-        const combinedName = Array.from(names).join(' / ') || 'Unnamed Client';
-        
-        // Determine the lifecycle_state
-        // First, check if any client should be in offboarding/dead based on progress
-        // If a client has progress >= 100%, merged state should be "dead"
-        // If a client has progress >= 75%, merged state should be "offboarding"
-        // Otherwise, use the most "active" state (priority: active > warm_lead > cold_lead > offboarding > dead)
-        let mergedState: ColumnId;
-        
-        const hasDeadClient = clientsWithSameEmail.some(c => 
-          c.program_progress_percent && c.program_progress_percent >= 100
-        );
-        const hasOffboardingClient = clientsWithSameEmail.some(c => 
-          c.program_progress_percent && c.program_progress_percent >= 75 && c.program_progress_percent < 100
-        );
-        
-        if (hasDeadClient) {
-          mergedState = 'dead';
-          console.log(`[CLIENT_MERGE] Merged client ${normalizedEmail} set to 'dead' due to progress >= 100%`);
-        } else if (hasOffboardingClient) {
-          mergedState = 'offboarding';
-          console.log(`[CLIENT_MERGE] Merged client ${normalizedEmail} set to 'offboarding' due to progress >= 75%`);
-        } else {
-          // Use priority system for clients without high progress
-          const statePriority: Record<ColumnId, number> = {
-            active: 5,
-            warm_lead: 4,
-            cold_lead: 3,
-            offboarding: 2,
-            dead: 1,
-          };
-          mergedState = clientsWithSameEmail.reduce((prev, curr) => 
-            statePriority[curr.lifecycle_state as ColumnId] > statePriority[prev.lifecycle_state as ColumnId]
-              ? curr
-              : prev
-          ).lifecycle_state as ColumnId;
-        }
-        
-        // Create merged client
-        const mergedClient: Client = {
-          ...primary,
-          lifecycle_state: mergedState,
-          // Store combined name in a custom field for display
-          meta: {
-            ...primary.meta,
-            merged_names: combinedName,
-            merged_client_ids: clientsWithSameEmail.map(c => c.id),
-            normalized_email: normalizedEmail, // Store normalized email for lookup
-          },
-          // Use the highest MRR and revenue from merged clients
-          estimated_mrr: Math.max(...clientsWithSameEmail.map(c => c.estimated_mrr || 0)),
-          lifetime_revenue_cents: Math.max(...clientsWithSameEmail.map(c => c.lifetime_revenue_cents || 0)),
-        };
-        
-        mergedClientsList.push(mergedClient);
-      }
-    });
-    
-    return mergedClientsList;
+    return Array.from(emailMap.values()).filter((group) => group.length > 1);
   }, [clients]);
 
-  // Filter merged clients by search query
-  const filteredClients = useMemo(() => {
-    if (!searchQuery.trim()) {
-      return mergedClients;
+  const [mergingDuplicates, setMergingDuplicates] = useState(false);
+  const handleMergeDuplicates = async () => {
+    if (duplicateGroups.length === 0) return;
+    setMergingDuplicates(true);
+    try {
+      for (const group of duplicateGroups) {
+        await apiClient.mergeClients(group.map((c) => c.id));
+      }
+      await loadClients(true);
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Failed to merge duplicates.');
+    } finally {
+      setMergingDuplicates(false);
     }
-    
+  };
+
+  // Filter clients by search query (no in-memory merge; one client per record)
+  const filteredClients = useMemo(() => {
+    if (!searchQuery.trim()) return clients;
     const query = searchQuery.toLowerCase().trim();
-    
-    return mergedClients.filter((client) => {
-      // Search by name (first_name, last_name, or merged_names)
-      const fullName = client.meta?.merged_names || 
-        [client.first_name, client.last_name].filter(Boolean).join(' ').toLowerCase();
-      if (fullName.includes(query)) {
-        return true;
-      }
-      
-      // Search by email
-      if (client.email && client.email.toLowerCase().includes(query)) {
-        return true;
-      }
-      
-      // Search by phone (normalize both query and phone by removing non-digits)
+    return clients.filter((client) => {
+      const fullName = [client.first_name, client.last_name].filter(Boolean).join(' ').toLowerCase();
+      if (fullName.includes(query)) return true;
+      if (client.email && client.email.toLowerCase().includes(query)) return true;
       if (client.phone) {
         const normalizedPhone = client.phone.replace(/\D/g, '');
         const normalizedQuery = query.replace(/\D/g, '');
-        if (normalizedPhone.includes(normalizedQuery)) {
-          return true;
-        }
+        if (normalizedPhone.includes(normalizedQuery)) return true;
       }
-      
       return false;
     });
-  }, [mergedClients, searchQuery]);
+  }, [clients, searchQuery]);
 
   const getClientsForColumn = (columnId: ColumnId) => {
     // If a filter is active and this column doesn't match, return empty array
@@ -591,29 +456,13 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   };
 
   const handleDeleteClient = async (client: Client) => {
-    // Check if this is a merged client
-    const mergedIds = client.meta?.merged_client_ids;
-    const isMerged = mergedIds && mergedIds.length > 1;
-    const clientCount = isMerged ? (client.meta?.merged_client_ids?.length || 1) : 1;
-    
-    const confirmMessage = isMerged
-      ? `This will delete ${clientCount} merged client(s) with email "${client.email}". Are you sure?`
-      : `Are you sure you want to delete "${[client.first_name, client.last_name].filter(Boolean).join(' ') || 'this client'}"?`;
-    
-    if (!window.confirm(confirmMessage)) {
-      return;
-    }
-    
+      const confirmMessage = `Are you sure you want to delete "${[client.first_name, client.last_name].filter(Boolean).join(' ') || 'this client'}"?`;
+    if (!window.confirm(confirmMessage)) return;
+
     try {
-      // Delete the client (and all merged clients if it's a merged client)
-      await apiClient.deleteClient(client.id, isMerged);
-      
-      // Reload clients to refresh the board
+      await apiClient.deleteClient(client.id, false);
       await loadClients();
-      
-      // Close drawer if the deleted client was selected
-      if (selectedClient && (selectedClient.id === client.id || 
-          (isMerged && mergedIds?.includes(selectedClient.id)))) {
+      if (selectedClient?.id === client.id) {
         setIsDrawerOpen(false);
         setSelectedClient(null);
       }
@@ -687,13 +536,30 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       <div className="mb-4 space-y-4">
         <div className="flex justify-between items-center">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
-          <ShinyButton onClick={() => setIsCreateModalOpen(true)}>
+          <div className="flex items-center gap-2">
+            {duplicateGroups.length > 0 && (
+              <button
+                type="button"
+                onClick={handleMergeDuplicates}
+                disabled={mergingDuplicates}
+                className="px-3 py-1.5 text-sm glass-button neon-glow rounded-md disabled:opacity-50"
+              >
+                {mergingDuplicates ? 'Merging...' : `Merge ${duplicateGroups.length} duplicate group(s)`}
+              </button>
+            )}
+            <ShinyButton onClick={() => setIsCreateModalOpen(true)}>
             <svg className="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
             Create Client
           </ShinyButton>
+          </div>
         </div>
+        {duplicateGroups.length > 0 && (
+          <p className="text-sm text-amber-600 dark:text-amber-400">
+            You have duplicate client cards (same email). Click &quot;Merge duplicate group(s)&quot; to combine them into one profile per person.
+          </p>
+        )}
         
         {/* Search Bar */}
         <div className="relative">
@@ -980,16 +846,13 @@ function KanbanColumn({ id, title, clients, isActive, onClientClick, onClientDel
           {title} ({clients.length})
         </h3>
         <SortableContext
-          items={clients.map((c) => {
-            // For merged clients, use email as unique ID, otherwise use client ID
-            return c.meta?.merged_client_ids ? (c.email || c.id) : c.id;
-          })}
+          items={clients.map((c) => c.id)}
           strategy={verticalListSortingStrategy}
         >
           <div className="space-y-2">
             {clients.map((client) => (
               <ClientCard
-                key={client.meta?.merged_client_ids ? (client.email || client.id) : client.id}
+                key={client.id}
                 client={client}
                 onClick={() => onClientClick(client)}
                 onDelete={onClientDelete}

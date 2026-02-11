@@ -10,8 +10,7 @@ interface ClientCardProps {
 }
 
 function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
-  // For merged clients, use email as the sortable ID, otherwise use client ID
-  const sortableId = client.meta?.merged_client_ids ? (client.email || client.id) : client.id;
+  const sortableId = client.id;
   
   const {
     attributes,
@@ -28,14 +27,9 @@ function ClientCard({ client, onClick, onDelete }: ClientCardProps) {
     opacity: isDragging ? 0.5 : 1,
   };
 
-  // Memoize computed values
   const fullName = useMemo(() => {
-    const mergedNames = client.meta?.merged_names;
-    return mergedNames || 
-      [client.first_name, client.last_name]
-        .filter(Boolean)
-        .join(' ') || 'Unnamed Client';
-  }, [client.meta?.merged_names, client.first_name, client.last_name]);
+    return [client.first_name, client.last_name].filter(Boolean).join(' ') || 'Unnamed Client';
+  }, [client.first_name, client.last_name]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     // Prevent click if dragging

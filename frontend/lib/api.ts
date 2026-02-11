@@ -159,6 +159,18 @@ class ApiClient {
     return response.data;
   }
 
+  /** Precomputed terminal dashboard: cash collected, MRR, top contributors (30d/90d). Cached to avoid N+1. */
+  async getTerminalSummary(forceRefresh?: boolean) {
+    if (!forceRefresh) {
+      const cached = cache.get<unknown>(CACHE_KEYS.TERMINAL_SUMMARY);
+      if (cached != null) return cached;
+    }
+    const response = await this.client.get('/clients/terminal-summary');
+    const data = response.data;
+    cache.set(CACHE_KEYS.TERMINAL_SUMMARY, data, TERMINAL_CACHE_TTL_MS);
+    return data;
+  }
+
   async createClient(data: any) {
     const response = await this.client.post('/clients', data);
     cache.delete(CACHE_KEYS.CLIENTS);
@@ -167,6 +179,12 @@ class ApiClient {
 
   async updateClient(id: string, data: any) {
     const response = await this.client.patch(`/clients/${id}`, data);
+    cache.delete(CACHE_KEYS.CLIENTS);
+    return response.data;
+  }
+
+  async mergeClients(clientIds: string[]) {
+    const response = await this.client.post('/clients/merge', { client_ids: clientIds });
     cache.delete(CACHE_KEYS.CLIENTS);
     return response.data;
   }
@@ -207,12 +225,14 @@ class ApiClient {
     if (receiptUrl) params.receipt_url = receiptUrl;
     const response = await this.client.post(`/clients/${clientId}/manual-payment`, null, { params });
     cache.deleteByPrefix(`client_payments_${clientId}_`);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
   async deleteManualPayment(clientId: string, paymentId: string) {
     await this.client.delete(`/clients/${clientId}/manual-payment/${paymentId}`);
     cache.deleteByPrefix(`client_payments_${clientId}_`);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
   }
 
   // Check-ins
@@ -263,6 +283,7 @@ class ApiClient {
 
   async disconnectStripe() {
     const response = await this.client.delete('/oauth/stripe/disconnect');
+    cache.deleteByPrefix('stripe_');
     return response.data;
   }
 
@@ -276,6 +297,8 @@ class ApiClient {
     const response = await this.client.post(`/oauth/stripe/callback/manual?code=${code}&org_id=${orgId}`, null, {
       timeout: 300000, // 5 minutes for initial sync
     });
+    cache.deleteByPrefix('stripe_');
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -286,6 +309,8 @@ class ApiClient {
     }, {
       timeout: 300000, // 5 minutes for initial sync
     });
+    cache.deleteByPrefix('stripe_');
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -296,6 +321,8 @@ class ApiClient {
       params: { force_full: forceFull },
       timeout: 300000, // 5 minutes for sync operations
     });
+    cache.deleteByPrefix('stripe_');
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -304,6 +331,7 @@ class ApiClient {
     const response = await this.client.post('/integrations/stripe/reconcile', null, {
       timeout: 120000, // 2 minutes for reconciliation
     });
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -314,12 +342,14 @@ class ApiClient {
 
   async disconnectBrevo() {
     await this.client.delete('/oauth/brevo/disconnect');
+    cache.delete(CACHE_KEYS.BREVO_STATUS);
   }
 
   async connectBrevoWithApiKey(apiKey: string) {
     const response = await this.client.post('/oauth/brevo/connect-direct', {
       api_key: apiKey
     });
+    cache.delete(CACHE_KEYS.BREVO_STATUS);
     return response.data;
   }
 
@@ -328,16 +358,22 @@ class ApiClient {
     const response = await this.client.post('/oauth/calcom/connect-direct', {
       api_key: apiKey
     });
+    cache.delete(CACHE_KEYS.CALCOM_STATUS);
     return response.data;
   }
 
   async getCalComStatus() {
+    const cached = cache.get<unknown>(CACHE_KEYS.CALCOM_STATUS);
+    if (cached != null) return cached;
     const response = await this.client.get('/integrations/calcom/status');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.CALCOM_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async disconnectCalCom() {
     await this.client.delete('/oauth/calcom/disconnect');
+    cache.delete(CACHE_KEYS.CALCOM_STATUS);
   }
 
   async getCalComBookings(limit: number = 50, offset: number = 0) {
@@ -364,16 +400,22 @@ class ApiClient {
     const response = await this.client.post('/oauth/calendly/connect-direct', {
       api_key: apiKey
     });
+    cache.delete(CACHE_KEYS.CALENDLY_STATUS);
     return response.data;
   }
 
   async getCalendlyStatus() {
+    const cached = cache.get<unknown>(CACHE_KEYS.CALENDLY_STATUS);
+    if (cached != null) return cached;
     const response = await this.client.get('/integrations/calendly/status');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.CALENDLY_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async disconnectCalendly() {
     await this.client.delete('/oauth/calendly/disconnect');
+    cache.delete(CACHE_KEYS.CALENDLY_STATUS);
   }
 
   async getCalendlyScheduledEvents(params?: {
@@ -417,22 +459,25 @@ class ApiClient {
     return response.data;
   }
 
-  // Integrations
+  // Integrations (Stripe endpoints cached for fast dashboard tab switching)
   async getStripeStatus() {
+    const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
+    if (cached != null) return cached;
     const response = await this.client.get('/integrations/stripe/status');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getStripeSummary(range?: number) {
+    const cacheKey = `stripe_summary_${range ?? 'all'}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params = range ? { range } : {};
-    console.log('🌐 API: Fetching /integrations/stripe/summary with params:', params);
     const response = await this.client.get('/integrations/stripe/summary', { params });
-    console.log('🌐 API: Response received:', {
-      status: response.status,
-      dataKeys: Object.keys(response.data || {}),
-      hasData: !!response.data
-    });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getStripeCustomers(limit?: number) {
@@ -589,25 +634,40 @@ class ApiClient {
 
   // Stripe Analytics
   async getStripeRevenueTimeline(range?: number, groupBy?: 'day' | 'week') {
+    const cacheKey = `stripe_revenue_${range ?? 'all'}_${groupBy ?? 'day'}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params: any = {};
     if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/revenue-timeline', { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getStripeChurn(months?: number) {
+    const cacheKey = `stripe_churn_${months ?? 6}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params = months ? { months } : {};
     const response = await this.client.get('/integrations/stripe/churn', { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getStripeMRRTrend(range?: number, groupBy?: 'day' | 'week' | 'month') {
+    const cacheKey = `stripe_mrr_${range ?? 'all'}_${groupBy ?? 'day'}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const params: any = {};
     if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/mrr-trend', { params });
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getStripePayments(
@@ -776,8 +836,12 @@ class ApiClient {
 
   // Admin APIs
   async getOrganizations() {
+    const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_ORGANIZATIONS);
+    if (cached != null) return cached;
     const response = await this.client.get('/admin/organizations');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.ADMIN_ORGANIZATIONS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getOrganization(orgId: string) {
@@ -798,22 +862,36 @@ class ApiClient {
   // Admin: Invite organization (email-based onboarding)
   async inviteOrganization(data: { name: string; admin_email: string }) {
     const response = await this.client.post('/admin/organizations/invite', data);
+    cache.delete(CACHE_KEYS.ADMIN_INVITATIONS);
+    cache.delete(CACHE_KEYS.ADMIN_ORGANIZATIONS);
     return response.data;
   }
 
   async listAdminInvitations() {
+    const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_INVITATIONS);
+    if (cached != null) return cached;
     const response = await this.client.get('/admin/organizations/invitations');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.ADMIN_INVITATIONS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getGlobalHealth() {
+    const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_HEALTH);
+    if (cached != null) return cached;
     const response = await this.client.get('/admin/health');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.ADMIN_HEALTH, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getGlobalSettings() {
+    const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_SETTINGS);
+    if (cached != null) return cached;
     const response = await this.client.get('/admin/settings');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.ADMIN_SETTINGS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async getOrganizationDashboard(orgId: string) {
@@ -866,21 +944,29 @@ class ApiClient {
   // Organization-scoped invitations (org admin/owner)
   async inviteUserToOrg(orgId: string, data: { email: string; role?: string }) {
     const response = await this.client.post(`/organizations/${orgId}/invite-user`, data);
+    cache.delete(`org_invitations_${orgId}`);
     return response.data;
   }
 
   async listOrgInvitations(orgId: string) {
+    const cacheKey = `org_invitations_${orgId}`;
+    const cached = cache.get<unknown>(cacheKey);
+    if (cached != null) return cached;
     const response = await this.client.get(`/organizations/${orgId}/invitations`);
-    return response.data;
+    const data = response.data;
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async resendOrgInvitation(orgId: string, invitationId: string) {
     const response = await this.client.post(`/organizations/${orgId}/invitations/${invitationId}/resend`);
+    cache.delete(`org_invitations_${orgId}`);
     return response.data;
   }
 
   async cancelOrgInvitation(orgId: string, invitationId: string) {
     await this.client.delete(`/organizations/${orgId}/invitations/${invitationId}`);
+    cache.delete(`org_invitations_${orgId}`);
   }
 
   async addSystemOwnerToOrg(orgId: string) {
@@ -890,12 +976,17 @@ class ApiClient {
 
   // User Management
   async getUsers() {
+    const cached = cache.get<unknown>(CACHE_KEYS.USERS);
+    if (cached != null) return cached;
     const response = await this.client.get('/users');
-    return response.data;
+    const data = response.data;
+    cache.set(CACHE_KEYS.USERS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async createUser(data: { email: string; password?: string; role?: string }) {
     const response = await this.client.post('/users', data);
+    cache.delete(CACHE_KEYS.USERS);
     return response.data;
   }
 
@@ -911,6 +1002,7 @@ class ApiClient {
 
   async deleteUser(userId: string) {
     const response = await this.client.delete(`/users/${userId}`);
+    cache.delete(CACHE_KEYS.USERS);
     return response.data;
   }
 

@@ -106,6 +106,14 @@ export const CACHE_KEYS = {
   BREVO_STATUS: 'brevo_status',
   CALCOM_STATUS: 'calcom_status',
   STRIPE_FAILED_PAYMENTS: 'stripe_failed_payments',
+  STRIPE_STATUS: 'stripe_status',
+  USERS: 'users',
+  CALENDLY_STATUS: 'calendly_status',
+  ADMIN_ORGANIZATIONS: 'admin_organizations',
+  ADMIN_INVITATIONS: 'admin_invitations',
+  ADMIN_HEALTH: 'admin_health',
+  ADMIN_SETTINGS: 'admin_settings',
+  TERMINAL_SUMMARY: 'terminal_summary',
 } as const;
 
 // TTL for terminal dashboard data (90s) so switching tabs feels instant

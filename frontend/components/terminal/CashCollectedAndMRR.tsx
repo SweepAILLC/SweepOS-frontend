@@ -17,242 +17,165 @@ interface CashCollectedAndMRRProps {
   onLoadComplete?: () => void;
 }
 
+function getLocalDate(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
 export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAndMRRProps = {}) {
   const [cashCollected, setCashCollected] = useState<CashCollectedData | null>(null);
   const [mrrData, setMrrData] = useState<MRRData | null>(null);
   const [loading, setLoading] = useState(true);
   const hasCalledOnLoadComplete = useRef(false);
 
-  useEffect(() => {
-    loadData();
-    
-    // Listen for manual payment creation events to refresh data
-    const handlePaymentCreated = () => {
-      loadData();
-    };
-    
-    window.addEventListener('manualPaymentCreated', handlePaymentCreated);
-    
-    return () => {
-      window.removeEventListener('manualPaymentCreated', handlePaymentCreated);
-    };
-  }, []);
-
-  // Normalize email function - same as other components
   const normalizeEmail = (email: string | undefined | null): string | null => {
     if (!email) return null;
     return email.replace(/\s+/g, '').toLowerCase().trim() || null;
   };
 
-  // Get local date components for comparison (normalizes to user's timezone)
-  const getLocalDate = (date: Date): Date => {
-    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const loadFromSummary = async (): Promise<{ cash: CashCollectedData; mrr: MRRData } | null> => {
+    const summary = await apiClient.getTerminalSummary();
+    const cash = {
+      today: summary.cash_collected?.today ?? 0,
+      last7Days: summary.cash_collected?.last_7_days ?? 0,
+      last30Days: summary.cash_collected?.last_30_days ?? 0,
+    };
+    const mrr = {
+      currentMRR: summary.mrr?.current_mrr ?? 0,
+      arr: summary.mrr?.arr ?? 0,
+    };
+    const hasData = cash.today > 0 || cash.last7Days > 0 || cash.last30Days > 0 || mrr.currentMRR > 0;
+    return hasData ? { cash, mrr } : null;
+  };
+
+  const loadFallback = async (): Promise<{ cash: CashCollectedData; mrr: MRRData }> => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    todayStart.setHours(0, 0, 0, 0);
+    const sevenDaysAgo = new Date(todayStart);
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    const thirtyDaysAgo = new Date(todayStart);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    let todayCash = 0;
+    let last7DaysCash = 0;
+    let last30DaysCash = 0;
+    const seenPaymentIds = new Set<string>();
+
+    try {
+      let allStripePayments: any[] = [];
+      let page = 1;
+      const pageSize = 100;
+      let hasMore = true;
+      while (hasMore) {
+        const payments = await apiClient.getStripePayments('succeeded', undefined, page, pageSize);
+        if (payments && Array.isArray(payments) && payments.length > 0) {
+          allStripePayments = allStripePayments.concat(payments);
+          hasMore = payments.length === pageSize;
+          page++;
+        } else {
+          hasMore = false;
+        }
+      }
+      allStripePayments.forEach((payment: any) => {
+        if (!payment.created_at || payment.status !== 'succeeded') return;
+        if (payment.stripe_id && seenPaymentIds.has(payment.stripe_id)) return;
+        if (payment.stripe_id) seenPaymentIds.add(payment.stripe_id);
+        const paymentTimestamp = typeof payment.created_at === 'number'
+          ? payment.created_at
+          : parseInt(String(payment.created_at), 10);
+        if (Number.isNaN(paymentTimestamp)) return;
+        const paymentDate = new Date(paymentTimestamp * 1000);
+        const amount = (payment.amount_cents || 0) / 100;
+        const paymentLocalDate = getLocalDate(paymentDate);
+        if (paymentLocalDate >= todayStart) todayCash += amount;
+        if (paymentLocalDate >= sevenDaysAgo) last7DaysCash += amount;
+        if (paymentLocalDate >= thirtyDaysAgo) last30DaysCash += amount;
+      });
+    } catch (e) {
+      console.warn('Fallback: failed to load Stripe payments', e);
+    }
+
+    try {
+      const clients = await apiClient.getClients();
+      for (const client of clients) {
+        try {
+          const paymentsResponse = await apiClient.getClientPayments(client.id);
+          (paymentsResponse.payments || []).forEach((payment: ClientPayment) => {
+            const isManual = payment.type === 'manual_payment' || (!payment.stripe_id && !payment.type);
+            if (!isManual || payment.status !== 'succeeded' || !payment.created_at) return;
+            if (seenPaymentIds.has(payment.id)) return;
+            seenPaymentIds.add(payment.id);
+            const paymentDate = new Date(payment.created_at);
+            if (Number.isNaN(paymentDate.getTime())) return;
+            const paymentLocalDate = getLocalDate(paymentDate);
+            const amount = payment.amount || 0;
+            if (paymentLocalDate >= todayStart) todayCash += amount;
+            if (paymentLocalDate >= sevenDaysAgo) last7DaysCash += amount;
+            if (paymentLocalDate >= thirtyDaysAgo) last30DaysCash += amount;
+          });
+        } catch {
+          // skip client
+        }
+      }
+    } catch (e) {
+      console.warn('Fallback: failed to load manual payments', e);
+    }
+
+    let currentMRR = 0;
+    let arr = 0;
+    try {
+      const stripeSummary = await apiClient.getStripeSummary(30);
+      currentMRR = stripeSummary?.total_mrr ?? 0;
+      arr = stripeSummary?.total_arr ?? 0;
+    } catch {
+      try {
+        const clients = await apiClient.getClients();
+        const grouped = new Map<string, Client[]>();
+        const processed = new Set<string>();
+        clients.forEach((c: Client) => {
+          if (processed.has(c.id)) return;
+          const norm = normalizeEmail(c.email);
+          const key = norm ? `email:${norm}` : (c.stripe_customer_id ? `stripe:${c.stripe_customer_id}` : `id:${c.id}`);
+          const same = clients.filter((x: Client) => {
+            if (processed.has(x.id)) return false;
+            if (norm && normalizeEmail(x.email) === norm) return true;
+            if (!norm && x.stripe_customer_id === c.stripe_customer_id) return true;
+            return x.id === c.id;
+          });
+          same.forEach((x: Client) => processed.add(x.id));
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(...same);
+        });
+        grouped.forEach((group) => {
+          const maxMRR = Math.max(...group.map((c) => c.estimated_mrr || 0), 0);
+          currentMRR += maxMRR;
+        });
+        arr = currentMRR * 12;
+      } catch {
+        // leave 0
+      }
+    }
+
+    return {
+      cash: { today: todayCash, last7Days: last7DaysCash, last30Days: last30DaysCash },
+      mrr: { currentMRR, arr },
+    };
   };
 
   const loadData = async () => {
     try {
       setLoading(true);
-      
-      // Calculate date ranges
-      const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      todayStart.setHours(0, 0, 0, 0);
-      const sevenDaysAgo = new Date(todayStart);
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const thirtyDaysAgo = new Date(todayStart);
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      
-      let todayCash = 0;
-      let last7DaysCash = 0;
-      let last30DaysCash = 0;
-      const seenPaymentIds = new Set<string>();
-      
-      // Fetch Stripe payments
+      let result: { cash: CashCollectedData; mrr: MRRData } | null = null;
       try {
-        let allStripePayments: any[] = [];
-        let page = 1;
-        const pageSize = 100;
-        let hasMore = true;
-        
-        while (hasMore) {
-          const payments = await apiClient.getStripePayments('succeeded', undefined, page, pageSize);
-          if (payments && payments.length > 0) {
-            allStripePayments = allStripePayments.concat(payments);
-            hasMore = payments.length === pageSize;
-            page++;
-          } else {
-            hasMore = false;
-          }
-        }
-        
-        // Process Stripe payments
-        allStripePayments.forEach((payment: any) => {
-          if (!payment.created_at || payment.status !== 'succeeded') return;
-          
-          // Deduplicate by stripe_id
-          if (payment.stripe_id && seenPaymentIds.has(payment.stripe_id)) return;
-          if (payment.stripe_id) seenPaymentIds.add(payment.stripe_id);
-          
-          // created_at is Unix timestamp in seconds
-          const paymentTimestamp = typeof payment.created_at === 'number' 
-            ? payment.created_at 
-            : parseInt(String(payment.created_at));
-          
-          if (isNaN(paymentTimestamp)) return;
-          
-          const paymentDate = new Date(paymentTimestamp * 1000);
-          const amount = (payment.amount_cents || 0) / 100;
-          
-          // Normalize payment date to local timezone for comparison
-          const paymentLocalDate = getLocalDate(paymentDate);
-          
-          // Check timestamp and increment totals (compare local dates)
-          if (paymentLocalDate >= todayStart) {
-            todayCash += amount;
-          }
-          if (paymentLocalDate >= sevenDaysAgo) {
-            last7DaysCash += amount;
-          }
-          if (paymentLocalDate >= thirtyDaysAgo) {
-            last30DaysCash += amount;
-          }
-        });
-      } catch (error) {
-        console.warn('Failed to load Stripe payments:', error);
+        result = await loadFromSummary();
+      } catch (err) {
+        console.warn('Terminal summary failed, using fallback calculation:', err);
       }
-      
-      // Fetch manual payments from client payments
-      try {
-        const clients = await apiClient.getClients();
-        
-        for (const client of clients) {
-          try {
-            const paymentsResponse = await apiClient.getClientPayments(client.id);
-            
-            paymentsResponse.payments.forEach((payment: ClientPayment) => {
-              // Only process manual payments (type is 'manual_payment' or no stripe_id with no type set)
-              const isManualPayment = payment.type === 'manual_payment' || (!payment.stripe_id && !payment.type);
-              if (!isManualPayment || payment.status !== 'succeeded' || !payment.created_at) return;
-              
-              // Deduplicate by id
-              if (seenPaymentIds.has(payment.id)) return;
-              seenPaymentIds.add(payment.id);
-              
-              // created_at is ISO string, convert to Date
-              const paymentDate = new Date(payment.created_at);
-              if (isNaN(paymentDate.getTime())) return;
-              
-              // Normalize payment date to local timezone for comparison
-              const paymentLocalDate = getLocalDate(paymentDate);
-              
-              // amount is already in dollars from API
-              const amount = payment.amount || 0;
-              
-              // Check timestamp and increment totals (compare local dates)
-              if (paymentLocalDate >= todayStart) {
-                todayCash += amount;
-              }
-              if (paymentLocalDate >= sevenDaysAgo) {
-                last7DaysCash += amount;
-              }
-              if (paymentLocalDate >= thirtyDaysAgo) {
-                last30DaysCash += amount;
-              }
-            });
-          } catch (error) {
-            console.warn(`Failed to load payments for client ${client.id}:`, error);
-          }
-        }
-      } catch (error) {
-        console.warn('Failed to load manual payments:', error);
+      if (!result) {
+        result = await loadFallback();
       }
-      
-      // Set final totals
-      setCashCollected({
-        today: todayCash,
-        last7Days: last7DaysCash,
-        last30Days: last30DaysCash,
-      });
-      
-      // Fallback handling for edge cases - already handled above
-      
-      // Get current MRR from Stripe summary (this uses proper deduplication)
-      try {
-        const stripeSummary = await apiClient.getStripeSummary(30);
-        setMrrData({
-          currentMRR: stripeSummary.total_mrr || 0,
-          arr: stripeSummary.total_arr || 0,
-        });
-      } catch (error) {
-        // If Stripe not connected, calculate from consolidated client estimated_mrr
-        console.warn('Failed to load Stripe summary, calculating from client MRR:', error);
-        
-        // Get all clients for MRR fallback
-        const clients = await apiClient.getClients();
-        
-        // Consolidate clients by email or Stripe ID
-        const groupedClients = new Map<string, Client[]>();
-        const processedClientIds = new Set<string>();
-        
-        clients.forEach((client: Client) => {
-          if (processedClientIds.has(client.id)) {
-            return;
-          }
-          
-          const normalizedEmail = normalizeEmail(client.email);
-          if (normalizedEmail) {
-            const key = `email:${normalizedEmail}`;
-            const clientsWithSameEmail = clients.filter((c: Client) => {
-              const cEmail = normalizeEmail(c.email);
-              return cEmail === normalizedEmail && !processedClientIds.has(c.id);
-            });
-            
-            if (clientsWithSameEmail.length > 0) {
-              if (!groupedClients.has(key)) {
-                groupedClients.set(key, []);
-              }
-              clientsWithSameEmail.forEach((c: Client) => {
-                groupedClients.get(key)!.push(c);
-                processedClientIds.add(c.id);
-              });
-            }
-          } else {
-            const stripeId = client.stripe_customer_id;
-            if (stripeId) {
-              const key = `stripe:${stripeId}`;
-              const clientsWithSameStripeId = clients.filter((c: Client) => {
-                return c.stripe_customer_id === stripeId && !processedClientIds.has(c.id);
-              });
-              
-              if (clientsWithSameStripeId.length > 0) {
-                if (!groupedClients.has(key)) {
-                  groupedClients.set(key, []);
-                }
-                clientsWithSameStripeId.forEach((c: Client) => {
-                  groupedClients.get(key)!.push(c);
-                  processedClientIds.add(c.id);
-                });
-              }
-            } else {
-              groupedClients.set(`individual:${client.id}`, [client]);
-              processedClientIds.add(client.id);
-            }
-          }
-        });
-        
-        let totalMRR = 0;
-        
-        // Use max estimated_mrr from each client group (to avoid double counting)
-        for (const [groupKey, clientGroup] of Array.from(groupedClients.entries())) {
-          const maxMRR = Math.max(...clientGroup.map(c => c.estimated_mrr || 0));
-          totalMRR += maxMRR;
-        }
-        
-        setMrrData({
-          currentMRR: totalMRR,
-          arr: totalMRR * 12,
-        });
-      }
+      setCashCollected(result.cash);
+      setMrrData(result.mrr);
     } catch (error) {
       console.error('Failed to load cash collected and MRR data:', error);
     } finally {
@@ -263,6 +186,15 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
       }
     }
   };
+
+  useEffect(() => {
+    loadData();
+    const handlePaymentCreated = () => {
+      loadData();
+    };
+    window.addEventListener('manualPaymentCreated', handlePaymentCreated);
+    return () => window.removeEventListener('manualPaymentCreated', handlePaymentCreated);
+  }, []);
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -281,12 +213,11 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
 
       {loading ? (
         <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-gray-100"></div>
+          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-gray-100" />
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       ) : (
         <div className="space-y-6">
-          {/* Cash Collected Section */}
           <div>
             <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-4 digitized-text uppercase tracking-wider">
               Cash Collected
@@ -295,25 +226,23 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
               <div className="text-center p-4 glass-panel rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Today</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(cashCollected?.today || 0)}
+                  {formatCurrency(cashCollected?.today ?? 0)}
                 </p>
               </div>
               <div className="text-center p-4 glass-panel rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">7 Days</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(cashCollected?.last7Days || 0)}
+                  {formatCurrency(cashCollected?.last7Days ?? 0)}
                 </p>
               </div>
               <div className="text-center p-4 glass-panel rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">30 Days</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(cashCollected?.last30Days || 0)}
+                  {formatCurrency(cashCollected?.last30Days ?? 0)}
                 </p>
               </div>
             </div>
           </div>
-
-          {/* Current MRR Section */}
           <div className="pt-4 border-t border-white/10">
             <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-4 digitized-text uppercase tracking-wider">
               Current MRR
@@ -322,13 +251,13 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
               <div className="p-4 glass-panel rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Monthly Recurring Revenue</p>
                 <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(mrrData?.currentMRR || 0)}
+                  {formatCurrency(mrrData?.currentMRR ?? 0)}
                 </p>
               </div>
               <div className="p-4 glass-panel rounded-lg">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Annual Recurring Revenue</p>
                 <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(mrrData?.arr || 0)}
+                  {formatCurrency(mrrData?.arr ?? 0)}
                 </p>
               </div>
             </div>
@@ -338,4 +267,3 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
     </div>
   );
 }
-

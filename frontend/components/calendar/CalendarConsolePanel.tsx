@@ -107,7 +107,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       console.error('Failed to load calendar statuses:', error);
     } finally {
       setLoading(false);
-      // Global loading will be turned off by useEffect when all data is loaded
+      setGlobalLoading(false);
     }
   };
 
