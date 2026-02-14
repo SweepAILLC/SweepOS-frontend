@@ -221,7 +221,7 @@ export interface StripeSummary {
   total_arr: number;
   mrr_change?: number;
   mrr_change_percent?: number;
-  new_subscriptions?: number;
+  new_customers?: number;
   churned_subscriptions?: number;
   failed_payments?: number;
   last_30_days_revenue: number;
@@ -268,7 +268,7 @@ export interface ChurnMonthData {
 
 export interface CohortMonthData {
   month: string;
-  new_subscriptions: number;
+  new_customers: number;
   churned: number;
 }
 

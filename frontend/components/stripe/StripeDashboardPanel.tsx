@@ -49,6 +49,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   // Payment assignment management
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [assigningPayment, setAssigningPayment] = useState<string | null>(null);
+  const [assignConfirmClient, setAssignConfirmClient] = useState<{ id: string; name: string } | null>(null);
   const [clients, setClients] = useState<any[]>([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [assigning, setAssigning] = useState(false);
@@ -491,6 +492,28 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     }
   };
 
+  /** Refetch only the payments list and update state so the recent payments table updates without a full loading overlay. */
+  const refetchPaymentsOnly = async () => {
+    cache.deleteByPrefix('stripe_payments_');
+    const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
+    const useTreasuryForPayments = timeRange === 'all' ? false : true;
+    const paymentsData = await apiClient.getStripePayments(
+      'succeeded',
+      alignedRangeDays,
+      1,
+      paymentsPageSize,
+      useTreasuryForPayments
+    );
+    const sortedPayments = [...(paymentsData || [])].sort((a, b) => {
+      const dateA = (a as any).created_at || 0;
+      const dateB = (b as any).created_at || 0;
+      return dateB - dateA;
+    });
+    setPayments(sortedPayments);
+    setPaymentsPage(1);
+    setPaymentsHasMore(Array.isArray(paymentsData) && paymentsData.length === paymentsPageSize);
+  };
+
   const handleAssignPayment = async (clientId: string) => {
     if (!assigningPayment) return;
 
@@ -500,16 +523,16 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     try {
       const result = await apiClient.assignPaymentToClient(assigningPayment, clientId, true);
       
-      alert(`Payment assigned to ${result.client_name} successfully. Reconciliation has been run automatically.`);
+      // Update recent payments table immediately without full dashboard reload
+      await refetchPaymentsOnly();
       
-      // Invalidate payments cache so refetch returns updated customer info
-      cache.deleteByPrefix('stripe_payments_');
-      await loadAllData();
-      
-      // Close modal
+      // Close modal and clear confirmation state before showing success so UI is already updated
       setShowAssignModal(false);
       setAssigningPayment(null);
+      setAssignConfirmClient(null);
       setSearchQuery('');
+      
+      alert(`Payment assigned to ${result.client_name} successfully. Reconciliation has been run automatically.`);
     } catch (error: any) {
       console.error('Failed to assign payment:', error);
       setError(error?.response?.data?.detail || 'Failed to assign payment to client.');
@@ -864,12 +887,12 @@ Your Team
         </div>
 
         {/* Additional KPIs */}
-        {(summary.new_subscriptions !== undefined || summary.churned_subscriptions !== undefined || summary.failed_payments !== undefined) && (
+        {(summary.new_customers !== undefined || summary.churned_subscriptions !== undefined || summary.failed_payments !== undefined) && (
           <div className="grid grid-cols-3 gap-4 mb-6">
-            {summary.new_subscriptions !== undefined && (
+            {summary.new_customers !== undefined && (
               <div className="glass-panel rounded-lg p-4">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">New Subs</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{summary.new_subscriptions}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">New Customers</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{summary.new_customers}</p>
               </div>
             )}
             {summary.churned_subscriptions !== undefined && (
@@ -953,7 +976,7 @@ Your Team
               <YAxis tick={{ fontSize: 12 }} />
               <Tooltip />
               <Legend />
-              <Bar dataKey="new_subscriptions" fill="#3b82f6" name="New Subscriptions" />
+              <Bar dataKey="new_customers" fill="#3b82f6" name="New Customers" />
               <Bar dataKey="churned" fill="#ef4444" name="Churned" />
             </BarChart>
           </ResponsiveContainer>
@@ -1299,6 +1322,7 @@ Your Team
                   onClick={() => {
                     setShowAssignModal(false);
                     setAssigningPayment(null);
+                    setAssignConfirmClient(null);
                     setSearchQuery('');
                     setClients([]);
                   }}
@@ -1307,6 +1331,32 @@ Your Team
                   ✕
                 </button>
               </div>
+
+              {assignConfirmClient ? (
+                <div className="mb-4 p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                    Assign this payment to <strong>{assignConfirmClient.name}</strong>? This will link the payment to the client and trigger reconciliation.
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setAssignConfirmClient(null)}
+                      disabled={assigning}
+                      className="px-3 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 rounded"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignPayment(assignConfirmClient.id)}
+                      disabled={assigning}
+                      className="px-3 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50"
+                    >
+                      {assigning ? 'Assigning…' : 'Assign'}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="mb-4">
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -1335,19 +1385,21 @@ Your Team
                       {searchQuery ? 'No clients found matching your search.' : 'No clients available.'}
                     </p>
                   ) : (
-                    filteredClients.map((client) => (
+                    filteredClients.map((client) => {
+                      const displayName = client.first_name || client.last_name
+                        ? `${client.first_name || ''} ${client.last_name || ''}`.trim()
+                        : 'Unnamed Client';
+                      return (
                       <button
                         key={client.id}
-                        onClick={() => handleAssignPayment(client.id)}
+                        onClick={() => setAssignConfirmClient({ id: client.id, name: displayName })}
                         disabled={assigning}
                         className="w-full text-left p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="font-medium text-gray-900 dark:text-gray-100">
-                              {client.first_name || client.last_name
-                                ? `${client.first_name || ''} ${client.last_name || ''}`.trim()
-                                : 'Unnamed Client'}
+                              {displayName}
                             </p>
                             {client.email && (
                               <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
@@ -1365,7 +1417,8 @@ Your Team
                           )}
                         </div>
                       </button>
-                    ))
+                    );
+                    })
                   )}
                 </div>
               )}
@@ -1375,6 +1428,7 @@ Your Team
                   onClick={() => {
                     setShowAssignModal(false);
                     setAssigningPayment(null);
+                    setAssignConfirmClient(null);
                     setSearchQuery('');
                     setClients([]);
                   }}
