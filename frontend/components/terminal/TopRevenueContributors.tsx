@@ -74,7 +74,9 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
       cutoff.setDate(cutoff.getDate() - days);
       const list: TopContributor[] = [];
 
-      for (const [, clientGroup] of grouped) {
+      const groups = Array.from(grouped.values());
+      for (let i = 0; i < groups.length; i++) {
+        const clientGroup = groups[i];
         let totalRevenue = 0;
         const seenKeys = new Set<string>();
         let latestDate: string | null = null;
@@ -104,7 +106,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
           const names = new Set(
             clientGroup.map((c) => [c.first_name, c.last_name].filter(Boolean).join(' ').trim()).filter(Boolean)
           );
-          const displayName = names.size > 0 ? [...names].join(' / ') : (primary.email || 'Unknown');
+          const displayName = names.size > 0 ? Array.from(names).join(' / ') : (primary.email || 'Unknown');
           list.push({
             client_id: primary.id,
             display_name: displayName,

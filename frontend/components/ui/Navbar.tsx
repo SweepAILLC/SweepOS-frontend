@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 import UserSettingsModal from './UserSettingsModal';
+import { clearSessionCaches } from '@/lib/cache';
 
 interface NavbarProps {
   activeTab: 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
@@ -45,6 +46,7 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
   const [showSettings, setShowSettings] = useState(false);
 
   const handleLogout = () => {
+    clearSessionCaches();
     Cookies.remove('access_token');
     router.push('/login');
   };

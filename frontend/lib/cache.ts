@@ -119,3 +119,11 @@ export const CACHE_KEYS = {
 // TTL for terminal dashboard data (90s) so switching tabs feels instant
 export const TERMINAL_CACHE_TTL_MS = 90 * 1000;
 
+// Terminal summary: keep until session ends (24h) or until invalidated by Stripe sync / manual payment / connect
+export const TERMINAL_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Clear caches that should not persist across logout (e.g. terminal summary). Call on logout. */
+export function clearSessionCaches(): void {
+  cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+}
+

@@ -7,6 +7,7 @@ import { LoadingProvider } from '@/contexts/LoadingContext';
 import GlobalLoadingOverlay from '@/components/ui/GlobalLoadingOverlay';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
+import { clearSessionCaches } from '@/lib/cache';
 
 export default function App({ Component, pageProps }: AppProps) {
   const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -19,7 +20,7 @@ export default function App({ Component, pageProps }: AppProps) {
       if (error?.response?.status === 401 || error?.response?.status === 403) {
         // Suppress the error - it's already handled by the API interceptor
         event.preventDefault();
-        // Clear token if not already cleared
+        clearSessionCaches();
         Cookies.remove('access_token');
         // Redirect if not already on login page
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
@@ -40,7 +41,7 @@ export default function App({ Component, pageProps }: AppProps) {
       if (isAuthError) {
         // Suppress auth-related runtime errors
         event.preventDefault();
-        // Clear token and redirect
+        clearSessionCaches();
         Cookies.remove('access_token');
         if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
           window.location.href = '/login';

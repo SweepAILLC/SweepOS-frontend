@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import Cookies from 'js-cookie';
-import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS } from './cache';
+import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clearSessionCaches } from './cache';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 // For cross-origin (e.g. frontend on Vercel, API on Render): set to 'none' so cookies are sent
@@ -33,7 +33,7 @@ class ApiClient {
       (error) => {
         if (error.response?.status === 401 || error.response?.status === 403) {
           // Unauthorized/Forbidden - session expired or invalid credentials
-          // Clear token and redirect to login gracefully
+          clearSessionCaches();
           Cookies.remove('access_token');
           
           if (typeof window !== 'undefined') {
@@ -159,7 +159,7 @@ class ApiClient {
     return response.data;
   }
 
-  /** Precomputed terminal dashboard: cash collected, MRR, top contributors (30d/90d). Cached to avoid N+1. */
+  /** Precomputed terminal dashboard: cash collected, MRR, top contributors (30d/90d). Cached for session (24h) until invalidated by sync/payment/connect. */
   async getTerminalSummary(forceRefresh?: boolean) {
     if (!forceRefresh) {
       const cached = cache.get<unknown>(CACHE_KEYS.TERMINAL_SUMMARY);
@@ -167,7 +167,7 @@ class ApiClient {
     }
     const response = await this.client.get('/clients/terminal-summary');
     const data = response.data;
-    cache.set(CACHE_KEYS.TERMINAL_SUMMARY, data, TERMINAL_CACHE_TTL_MS);
+    cache.set(CACHE_KEYS.TERMINAL_SUMMARY, data, TERMINAL_SESSION_TTL_MS);
     return data;
   }
 

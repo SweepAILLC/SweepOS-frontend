@@ -11,6 +11,7 @@ import AdminPanel from '@/components/AdminPanel';
 import UsersPanel from '@/components/UsersPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import { useLoading } from '@/contexts/LoadingContext';
+import { clearSessionCaches } from '@/lib/cache';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -108,7 +109,7 @@ export default function Dashboard() {
         if (isMounted) {
           // Handle auth errors gracefully - redirect without showing errors
           if (isAuthError) {
-            // Clear any stale token
+            clearSessionCaches();
             const Cookies = require('js-cookie');
             Cookies.remove('access_token');
             // Redirect to login immediately
