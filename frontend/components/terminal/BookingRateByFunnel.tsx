@@ -25,7 +25,13 @@ export default function BookingRateByFunnel({ onLoadComplete }: BookingRateByFun
     loadFunnelRates();
   }, []);
 
-  const loadFunnelRates = async () => {
+  // Live polling for accurate terminal funnel data (refresh every 60s; bypass cache)
+  useEffect(() => {
+    const interval = setInterval(() => loadFunnelRates(true), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadFunnelRates = async (forceRefresh = false) => {
     try {
       setLoading(true);
       
@@ -36,7 +42,7 @@ export default function BookingRateByFunnel({ onLoadComplete }: BookingRateByFun
       
       for (const funnel of funnels) {
         try {
-          const analytics = await apiClient.getFunnelAnalytics(funnel.id, 30);
+          const analytics = await apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh);
           
           const visitors = analytics.total_visitors || 0;
           const bookings = analytics.total_conversions || 0; // Use conversions instead of bookings
@@ -116,8 +122,8 @@ export default function BookingRateByFunnel({ onLoadComplete }: BookingRateByFun
   };
 
   return (
-    <div className="glass-card p-6">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
         Booking Rate by Funnel
       </h3>
 
@@ -135,38 +141,38 @@ export default function BookingRateByFunnel({ onLoadComplete }: BookingRateByFun
           {funnelRates.map((rate) => (
             <div
               key={rate.funnel.id}
-              className="p-4 glass-panel rounded-lg"
+              className="p-3 sm:p-4 glass-panel rounded-lg min-w-0"
             >
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
                   {rate.funnel.name}
                 </h4>
-                <span className="text-xs text-gray-500 dark:text-gray-400">
+                <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
                   {rate.overallConversion.toFixed(1)}% Overall
                 </span>
               </div>
               
               <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 text-xs">
                   <span className="text-gray-600 dark:text-gray-400">Visitors → Form Submit</span>
-                  <span className="text-gray-900 dark:text-gray-100 font-medium">
+                  <span className="text-gray-900 dark:text-gray-100 font-medium break-all">
                     {rate.visitors.toLocaleString()} → {rate.formSubmits.toLocaleString()} ({rate.ctr.toFixed(1)}%)
                   </span>
                 </div>
                 
-                <div className="flex items-center justify-between text-xs">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 text-xs">
                   <span className="text-gray-600 dark:text-gray-400">Form Submit → Booking</span>
-                  <span className="text-gray-900 dark:text-gray-100 font-medium">
+                  <span className="text-gray-900 dark:text-gray-100 font-medium break-all">
                     {rate.formSubmits.toLocaleString()} → {rate.bookings.toLocaleString()} ({rate.formToBooking.toFixed(1)}%)
                   </span>
                 </div>
                 
                 <div className="mt-3 pt-3 border-t border-white/10">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
                       Total Bookings
                     </span>
-                    <span className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                    <span className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
                       {rate.bookings.toLocaleString()}
                     </span>
                   </div>

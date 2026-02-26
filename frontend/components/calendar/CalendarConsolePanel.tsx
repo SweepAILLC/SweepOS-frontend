@@ -681,15 +681,32 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                             )}
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              booking.status === 'confirmed' || booking.status === 'accepted'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : booking.status === 'cancelled' || booking.status === 'rejected'
-                                ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
-                            }`}>
-                              {booking.status || 'unknown'}
-                            </span>
+                            {(() => {
+                              const isNoShow = booking.status === 'accepted' && (
+                                booking.absentHost === true ||
+                                (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true))
+                              );
+                              const statusLabel = isNoShow ? 'No-show' : (booking.status === 'accepted' ? 'Confirmed' : booking.status || 'unknown');
+                              const title = booking.status === 'cancelled' && booking.cancellationReason
+                                ? `Cancelled: ${booking.cancellationReason}${booking.cancelledByEmail ? ` (by ${booking.cancelledByEmail})` : ''}`
+                                : isNoShow ? 'Marked as no-show' : undefined;
+                              return (
+                                <span
+                                  title={title}
+                                  className={`px-2 py-1 rounded text-xs ${
+                                    booking.status === 'accepted' && !isNoShow
+                                      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                                      : booking.status === 'cancelled' || booking.status === 'rejected'
+                                      ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                                      : isNoShow
+                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                                      : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
+                                  }`}
+                                >
+                                  {statusLabel}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                             {booking.location ? (
@@ -746,11 +763,11 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                             <span className={`px-2 py-1 rounded text-xs ${
                               event.status === 'active'
                                 ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : event.status === 'canceled'
+                                : event.status === 'canceled' || event.status === 'cancelled'
                                 ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                                 : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
                             }`}>
-                              {event.status || 'unknown'}
+                              {event.status === 'canceled' || event.status === 'cancelled' ? 'Canceled' : (event.status || 'unknown')}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">

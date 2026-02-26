@@ -122,8 +122,20 @@ export const TERMINAL_CACHE_TTL_MS = 90 * 1000;
 // Terminal summary: keep until session ends (24h) or until invalidated by Stripe sync / manual payment / connect
 export const TERMINAL_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** Clear caches that should not persist across logout (e.g. terminal summary). Call on logout. */
+/** SessionStorage key for terminal: last Stripe webhook time we've seen (so we only refetch on webhook, not refresh). */
+export const TERMINAL_STRIPE_UPDATED_KEY = 'terminal_last_stripe_updated';
+
+/** Clear caches that should not persist across logout. Call on logout. Terminal Stripe data refetches on next load. */
 export function clearSessionCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.deleteByPrefix('stripe_');
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.removeItem(TERMINAL_STRIPE_UPDATED_KEY);
+  }
+}
+
+/** Invalidate all Stripe-related caches. Only used when terminal should refetch (webhook) or on session end. */
+export function invalidateStripeCache(): void {
+  cache.deleteByPrefix('stripe_');
 }
 

@@ -8,6 +8,8 @@ import LeadsBySource from './terminal/LeadsBySource';
 import BookingRateByFunnel from './terminal/BookingRateByFunnel';
 import NotificationsCard from './calendar/NotificationsCard';
 import { useLoading } from '@/contexts/LoadingContext';
+import { apiClient } from '@/lib/api';
+import { invalidateStripeCache, TERMINAL_STRIPE_UPDATED_KEY } from '@/lib/cache';
 
 // Keys that must be loaded before we hide the global overlay (above-the-fold only)
 const ABOVE_THE_FOLD_KEYS = ['topRevenue', 'cashCollected', 'notifications', 'failedPayments'];
@@ -36,6 +38,25 @@ export default function TerminalDashboard() {
       loadingInitialized.current = true;
     }
   }, [setGlobalLoading]);
+
+  // On terminal tab focus: only invalidate Stripe cache if a webhook has fired since we last loaded (fast tab switch)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { last_updated } = await apiClient.getStripeLastUpdated();
+        if (cancelled || typeof window === 'undefined') return;
+        if (!last_updated) return; // No webhook ever → use cache only
+        const stored = sessionStorage.getItem(TERMINAL_STRIPE_UPDATED_KEY);
+        if (stored && stored >= last_updated) return; // No new webhook since last load
+        invalidateStripeCache();
+        sessionStorage.setItem(TERMINAL_STRIPE_UPDATED_KEY, last_updated);
+      } catch {
+        // Ignore: use cache on error so tab still loads fast
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Mount below-the-fold widgets after a short delay to stagger API calls and speed up first paint
   useEffect(() => {
@@ -66,13 +87,13 @@ export default function TerminalDashboard() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6 min-w-0">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Terminal</h2>
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Terminal</h2>
       </div>
 
       {/* Top Metrics Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Calendar Notifications */}
         <NotificationsCard onLoadComplete={() => handleComponentLoaded('notifications')} />
 
@@ -81,7 +102,7 @@ export default function TerminalDashboard() {
       </div>
 
       {/* Revenue Contributors & Failed Payment Queue Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Top 5 Revenue Contributors */}
         <TopRevenueContributors onLoadComplete={() => handleComponentLoaded('topRevenue')} />
 
@@ -99,7 +120,7 @@ export default function TerminalDashboard() {
           />
 
           {/* Kanban Board */}
-          <div className="mt-6">
+          <div className="mt-4 sm:mt-6 min-w-0">
             <ClientKanbanBoard 
               filteredColumn={filteredColumn}
               onLoadComplete={() => handleComponentLoaded('kanban')}
@@ -107,7 +128,7 @@ export default function TerminalDashboard() {
           </div>
 
           {/* Bottom Metrics Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
             <LeadsBySource onLoadComplete={() => handleComponentLoaded('leadsBySource')} />
             <BookingRateByFunnel onLoadComplete={() => handleComponentLoaded('bookingRate')} />
           </div>

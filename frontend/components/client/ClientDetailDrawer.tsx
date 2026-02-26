@@ -47,6 +47,7 @@ export default function ClientDetailDrawer({
     first_name: '',
     last_name: '',
     email: '',
+    emails: [] as string[],
     phone: '',
     instagram: '',
     notes: '',
@@ -65,6 +66,7 @@ export default function ClientDetailDrawer({
         first_name: client.first_name || '',
         last_name: client.last_name || '',
         email: client.email || '',
+        emails: Array.isArray(client.emails) ? [...client.emails] : [],
         phone: client.phone || '',
         instagram: client.instagram || '',
         notes: client.notes || '',
@@ -96,14 +98,21 @@ export default function ClientDetailDrawer({
     }
   }, [client, isOpen]);
 
+  const getAllClientEmails = (c: Client) => {
+    const set = new Set<string>();
+    if (c.email?.trim()) set.add(c.email.trim());
+    if (Array.isArray(c.emails)) c.emails.forEach((e) => e?.trim() && set.add(e.trim()));
+    return Array.from(set);
+  };
+
   // Check if client is in Brevo when Brevo status is loaded
   useEffect(() => {
-    if (brevoStatus?.connected && client?.email) {
+    if (brevoStatus?.connected && client && getAllClientEmails(client).length > 0) {
       checkClientInBrevo();
     } else {
       setClientInBrevo(false);
     }
-  }, [brevoStatus, client?.email]);
+  }, [brevoStatus, client?.email, client?.emails]);
 
   const loadBrevoStatus = async () => {
     setBrevoLoading(true);
@@ -119,14 +128,15 @@ export default function ClientDetailDrawer({
   };
 
   const checkClientInBrevo = async () => {
-    if (!client || !client.email || !brevoStatus?.connected) {
+    const emails = client ? getAllClientEmails(client) : [];
+    if (!client || emails.length === 0 || !brevoStatus?.connected) {
       setClientInBrevo(false);
       return;
     }
 
     setCheckingBrevoContact(true);
     try {
-      const existingContact = await apiClient.getBrevoContactByEmail(client.email);
+      const existingContact = await apiClient.getBrevoContactByEmail(emails[0]);
       setClientInBrevo(existingContact !== null);
     } catch (error: any) {
       // If 404, contact doesn't exist
@@ -142,8 +152,9 @@ export default function ClientDetailDrawer({
   };
 
   const handleEmailClient = () => {
-    if (!client || !client.email) {
-      alert('Client must have an email address to send email');
+    const emails = client ? getAllClientEmails(client) : [];
+    if (!client || emails.length === 0) {
+      alert('Client must have at least one email address to send email');
       return;
     }
     setShowEmailComposer(true);
@@ -184,7 +195,8 @@ export default function ClientDetailDrawer({
       const updateData: any = {
         first_name: formData.first_name,
         last_name: formData.last_name,
-        email: formData.email,
+        email: formData.email || null,
+        emails: formData.emails?.length ? formData.emails : null,
         phone: formData.phone,
         instagram: formData.instagram,
         notes: formData.notes,
@@ -234,6 +246,7 @@ export default function ClientDetailDrawer({
         first_name: client.first_name || '',
         last_name: client.last_name || '',
         email: client.email || '',
+        emails: Array.isArray(client.emails) ? [...client.emails] : [],
         phone: client.phone || '',
         instagram: client.instagram || '',
         notes: client.notes || '',
@@ -433,11 +446,11 @@ export default function ClientDetailDrawer({
                             <>
                               {client.first_name && client.last_name && brevoStatus?.connected && (
                                 <>
-                                  {clientInBrevo && client.email ? (
+                                  {clientInBrevo && getAllClientEmails(client).length > 0 ? (
                                     <button
                                       type="button"
                                       onClick={handleEmailClient}
-                                      disabled={checkingBrevoContact || !client.email}
+                                      disabled={checkingBrevoContact}
                                       className="px-3 py-1 text-sm glass-button-secondary hover:bg-white/20 rounded disabled:opacity-50"
                                       title="Send email to this client via Brevo"
                                     >
@@ -445,9 +458,9 @@ export default function ClientDetailDrawer({
                                     </button>
                                   ) : (
                                     <button
-                                      type="button"
-                                      onClick={handleAddToBrevo}
-                                      disabled={addingToBrevo || !client.email}
+                                        type="button"
+                                        onClick={handleAddToBrevo}
+                                        disabled={addingToBrevo || getAllClientEmails(client).length === 0}
                                       className="px-3 py-1 text-sm glass-button-secondary hover:bg-white/20 rounded disabled:opacity-50"
                                       title="Add this client as a contact in Brevo"
                                     >
@@ -518,7 +531,7 @@ export default function ClientDetailDrawer({
                             </div>
 
                             <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Email</dt>
+                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Primary email</dt>
                               {isEditing ? (
                                 <input
                                   type="email"
@@ -529,6 +542,46 @@ export default function ClientDetailDrawer({
                               ) : (
                                 <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
                                   {client.email || 'N/A'}
+                                </dd>
+                              )}
+                            </div>
+
+                            <div className="md:col-span-2">
+                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Additional emails</dt>
+                              {isEditing ? (
+                                <div className="space-y-2">
+                                  {formData.emails.map((e, i) => (
+                                    <div key={i} className="flex gap-2 items-center">
+                                      <input
+                                        type="email"
+                                        value={e}
+                                        onChange={(ev) => {
+                                          const next = [...formData.emails];
+                                          next[i] = ev.target.value;
+                                          setFormData({ ...formData, emails: next });
+                                        }}
+                                        className="flex-1 rounded-md glass-input focus:ring-blue-500 sm:text-sm"
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, emails: formData.emails.filter((_, j) => j !== i) })}
+                                        className="text-red-400 hover:text-red-600 text-sm"
+                                      >
+                                        Remove
+                                      </button>
+                                    </div>
+                                  ))}
+                                  <button
+                                    type="button"
+                                    onClick={() => setFormData({ ...formData, emails: [...formData.emails, ''] })}
+                                    className="text-sm text-primary-500 hover:text-primary-600"
+                                  >
+                                    + Add email
+                                  </button>
+                                </div>
+                              ) : (
+                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                                  {(client.emails && client.emails.length > 0) ? client.emails.join(', ') : 'None'}
                                 </dd>
                               )}
                             </div>
@@ -1053,9 +1106,12 @@ export default function ClientDetailDrawer({
     </Transition>
 
     {/* Email Composer Modal */}
-    {showEmailComposer && client && client.email && (
+    {showEmailComposer && client && getAllClientEmails(client).length > 0 && (
       <EmailComposer
-        recipients={[{ email: client.email, name: client.first_name && client.last_name ? `${client.first_name} ${client.last_name}` : undefined }]}
+        recipients={getAllClientEmails(client).map((email) => ({
+          email,
+          name: client.first_name && client.last_name ? `${client.first_name} ${client.last_name}` : undefined,
+        }))}
         onClose={() => {
           setShowEmailComposer(false);
         }}

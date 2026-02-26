@@ -4,6 +4,7 @@ export interface Client {
   first_name?: string;
   last_name?: string;
   email?: string;
+  emails?: string[];
   phone?: string;
   instagram?: string;
   lifecycle_state: 'cold_lead' | 'warm_lead' | 'active' | 'offboarding' | 'dead';

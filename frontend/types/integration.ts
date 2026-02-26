@@ -22,6 +22,7 @@ export interface CalComBooking {
     email: string;
     name?: string;
     timeZone?: string;
+    absent?: boolean; // No-show: marked via Cal.com "Mark a booking absence"
   }>;
   user?: {
     id: number;
@@ -35,9 +36,11 @@ export interface CalComBooking {
     slug?: string;
     length?: number;
   };
-  status?: string;
+  status?: string; // accepted | cancelled | rejected | pending (Cal.com API v2)
   location?: string;
   cancellationReason?: string;
+  cancelledByEmail?: string; // Who cancelled (when status is cancelled)
+  absentHost?: boolean; // Host no-show (Cal.com "Mark a booking absence")
   rejectionReason?: string;
   rescheduled?: boolean;
   paid?: boolean;
@@ -316,6 +319,7 @@ export interface CalendarNotificationsSummary {
   last_month_count: number;
   last_week_percentage_change?: number | null;
   last_month_percentage_change?: number | null;
+  show_up_rate?: number | null; // % of past appointments (last 30 days) that showed up; 0-100
   most_upcoming?: CalendarUpcomingAppointment | null;
   upcoming_appointments?: CalendarUpcomingAppointment[] | null; // Up to 3 upcoming appointments (including manual check-ins)
   provider?: string | null; // "calcom" or "calendly" or null

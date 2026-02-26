@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
-import { cache } from '@/lib/cache';
 import { Client } from '@/types/client';
 import { StripeSummary, RevenueTimeline, ChurnData, MRRTrend, Payment, FailedPayment } from '@/types/integration';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -85,7 +84,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     setGlobalLoading(true, 'Loading Stripe dashboard...');
     setError(null);
     try {
-      const status = await apiClient.getStripeStatus();
+      const status = await apiClient.getStripeStatus(true);
       setIsConnected(status.connected);
       if (status.connected) {
         await loadSummaryOnly();
@@ -107,7 +106,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     setLoading(true);
     try {
       const summaryRange = timeRange === 'all' ? 365 : timeRange;
-      const summaryData = await apiClient.getStripeSummary(summaryRange);
+      const summaryData = await apiClient.getStripeSummary(summaryRange, true);
       setSummary(summaryData);
       setIsConnected(true);
     } catch (error: any) {
@@ -116,7 +115,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
         setIsConnected(false);
         setSummary(null);
         try {
-          const status = await apiClient.getStripeStatus();
+          const status = await apiClient.getStripeStatus(true);
           setIsConnected(status.connected);
         } catch {
           setIsConnected(false);
@@ -140,11 +139,11 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       const useTreasuryForPayments = timeRange === 'all' ? false : true;
       setPaymentsPage(1);
       const [revenue, churn, mrr, paymentsData, failedData] = await Promise.all([
-        apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day'),
-        apiClient.getStripeChurn(6),
-        apiClient.getStripeMRRTrend(alignedRangeDays, 'day'),
-        apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments),
-        apiClient.getStripeFailedPayments(1, 20),
+        apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day', true),
+        apiClient.getStripeChurn(6, true),
+        apiClient.getStripeMRRTrend(alignedRangeDays, 'day', true),
+        apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments, true),
+        apiClient.getStripeFailedPayments(1, 20, undefined, true),
       ]);
       setRevenueTimeline(revenue);
       setChurnData(churn);
@@ -168,18 +167,18 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     setGlobalLoading(true, 'Loading Stripe dashboard...');
     try {
       const summaryRange = timeRange === 'all' ? 365 : timeRange;
-      const summaryData = await apiClient.getStripeSummary(summaryRange);
+      const summaryData = await apiClient.getStripeSummary(summaryRange, true);
       setSummary(summaryData);
       setIsConnected(true);
       const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
       const useTreasuryForPayments = timeRange === 'all' ? false : true;
       setPaymentsPage(1);
       const [revenue, churn, mrr, paymentsData, failedData] = await Promise.all([
-        apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day'),
-        apiClient.getStripeChurn(6),
-        apiClient.getStripeMRRTrend(alignedRangeDays, 'day'),
-        apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments),
-        apiClient.getStripeFailedPayments(1, 20),
+        apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day', true),
+        apiClient.getStripeChurn(6, true),
+        apiClient.getStripeMRRTrend(alignedRangeDays, 'day', true),
+        apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments, true),
+        apiClient.getStripeFailedPayments(1, 20, undefined, true),
       ]);
       setRevenueTimeline(revenue);
       setChurnData(churn);
@@ -198,7 +197,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
         setIsConnected(false);
         setSummary(null);
         try {
-          const status = await apiClient.getStripeStatus();
+          const status = await apiClient.getStripeStatus(true);
           setIsConnected(status.connected);
         } catch {
           setIsConnected(false);
@@ -227,7 +226,8 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
         alignedRangeDays,
         nextPage,
         paymentsPageSize,
-        useTreasuryForPayments
+        useTreasuryForPayments,
+        true
       );
 
       const nextList = Array.isArray(nextPayments) ? nextPayments : [];
@@ -261,7 +261,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       const pollInterval = setInterval(async () => {
         attempts++;
         try {
-          const status = await apiClient.getStripeStatus();
+          const status = await apiClient.getStripeStatus(true);
           if (status.connected) {
             clearInterval(pollInterval);
             setIsConnected(true);
@@ -494,7 +494,6 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
 
   /** Refetch only the payments list and update state so the recent payments table updates without a full loading overlay. */
   const refetchPaymentsOnly = async () => {
-    cache.deleteByPrefix('stripe_payments_');
     const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
     const useTreasuryForPayments = timeRange === 'all' ? false : true;
     const paymentsData = await apiClient.getStripePayments(
@@ -502,7 +501,8 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       alignedRangeDays,
       1,
       paymentsPageSize,
-      useTreasuryForPayments
+      useTreasuryForPayments,
+      true
     );
     const sortedPayments = [...(paymentsData || [])].sort((a, b) => {
       const dateA = (a as any).created_at || 0;
@@ -550,74 +550,37 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     return name.includes(query) || email.includes(query);
   });
 
-  const handleSyncStripe = async () => {
+  /** Single action: sync from Stripe then reconcile. One request for speed. */
+  const handleSyncAndReconcile = async () => {
     setLoading(true);
     setError(null);
-    setGlobalLoading(true, 'Syncing Stripe data...');
+    setGlobalLoading(true, 'Syncing & reconciling...');
     try {
-      const result = await apiClient.syncStripeData(false); // Incremental sync
-      const totalCustomers = (result.results?.customers_synced || 0) + (result.results?.customers_updated || 0);
-      const totalSubs = (result.results?.subscriptions_synced || 0) + (result.results?.subscriptions_updated || 0);
-      const totalPayments = (result.results?.payments_synced || 0) + (result.results?.payments_updated || 0);
-      
-      let message = `Sync complete!\n\n`;
-      if (result.is_full_sync) {
-        message += `(Full historical sync)\n\n`;
+      const result = await apiClient.syncAndReconcileStripeData(false, false);
+      const sync = result.sync || {};
+      const recon = result.reconciliation || {};
+      const totalC = (sync.customers_synced || 0) + (sync.customers_updated || 0);
+      const totalS = (sync.subscriptions_synced || 0) + (sync.subscriptions_updated || 0);
+      const totalP = (sync.payments_synced || 0) + (sync.payments_updated || 0);
+
+      let message = result.is_full_sync ? '(Full sync)\n\n' : '(Incremental sync)\n\n';
+      if (totalC === 0 && totalS === 0 && totalP === 0) {
+        message += 'No new changes. ';
       } else {
-        message += `(Incremental sync - only new/updated data)\n\n`;
+        message += `Synced: ${sync.customers_synced || 0} new customers, ${sync.subscriptions_synced || 0} new subs, ${sync.payments_synced || 0} new payments.\n\n`;
       }
-      
-      if (totalCustomers === 0 && totalSubs === 0 && totalPayments === 0) {
-        message += `No changes detected. All data is up-to-date.`;
-      } else {
-        message += `Customers: ${result.results?.customers_synced || 0} new, ${result.results?.customers_updated || 0} updated\n`;
-        message += `Subscriptions: ${result.results?.subscriptions_synced || 0} new, ${result.results?.subscriptions_updated || 0} updated\n`;
-        message += `Payments: ${result.results?.payments_synced || 0} new, ${result.results?.payments_updated || 0} updated`;
-        
-        if (result.diagnostic) {
-          message += `\n\nFound ${result.diagnostic.customers_found_from_stripe || 0} customers and ${result.diagnostic.subscriptions_found_from_stripe || 0} subscriptions in Stripe.`;
-        }
-      }
-      
+      message += `Reconciled: ${recon.clients_reconciled || 0} clients, ${recon.revenue_recalculated || 0} revenue updated.`;
       alert(message);
-      // Dispatch event to refresh clients list
       window.dispatchEvent(new Event('stripe-connected'));
-      // Also reload Stripe data
       await loadAllData();
     } catch (error: any) {
-      console.error('Failed to sync Stripe data:', error);
-      let errorMessage = error?.response?.data?.detail || error?.message || 'Failed to sync Stripe data.';
-      
-      // Check if it's a timeout error
+      console.error('Sync & reconcile failed:', error);
+      let errorMessage = error?.response?.data?.detail || error?.message || 'Sync & reconcile failed.';
       if (error?.code === 'ECONNABORTED' || error?.message?.includes('timeout')) {
-        errorMessage = 'Sync timed out. The operation is taking longer than expected. This may happen during full historical syncs with large amounts of data. Please try again or check backend logs.';
+        errorMessage = 'Request timed out. Try again or check backend logs.';
       }
-      
       setError(errorMessage);
-      alert(`Sync failed: ${errorMessage}`);
-    } finally {
-      setLoading(false);
-      setGlobalLoading(false);
-    }
-  };
-
-  const handleReconcile = async () => {
-    if (!confirm('This will recalculate all analytics from existing data. Continue?')) {
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    setGlobalLoading(true, 'Reconciling Stripe data...');
-    try {
-      const result = await apiClient.reconcileStripeData();
-      alert(`Reconciliation complete!\n\nClients reconciled: ${result.clients_reconciled || 0}\nRevenue recalculated: ${result.revenue_recalculated || 0}`);
-      await loadAllData();
-    } catch (error: any) {
-      console.error('Failed to reconcile Stripe data:', error);
-      const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to reconcile Stripe data.';
-      setError(errorMessage);
-      alert(`Reconciliation failed: ${errorMessage}`);
+      alert(`Sync & reconcile failed: ${errorMessage}`);
     } finally {
       setLoading(false);
       setGlobalLoading(false);
@@ -713,19 +676,12 @@ Your Team
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Stripe Financial Dashboard</h2>
           <div className="flex gap-2">
             <button
-              onClick={handleSyncStripe}
+              onClick={handleSyncAndReconcile}
               disabled={loading}
               className="text-sm glass-button neon-glow px-4 py-2 rounded-md disabled:opacity-50"
+              title="Sync from Stripe and recalculate analytics"
             >
-              {loading ? 'Syncing...' : 'Sync'}
-            </button>
-            <button
-              onClick={handleReconcile}
-              disabled={loading}
-              className="text-sm glass-button-secondary px-3 py-2 rounded-md hover:bg-white/20 disabled:opacity-50"
-              title="Recalculate analytics from existing data"
-            >
-              Reconcile
+              {loading ? 'Syncing...' : 'Sync & Reconcile'}
             </button>
           </div>
         </div>
@@ -832,20 +788,12 @@ Your Team
             </select>
             <div className="flex gap-2">
               <button
-                onClick={handleSyncStripe}
+                onClick={handleSyncAndReconcile}
                 disabled={loading}
                 className="text-sm glass-button neon-glow px-4 py-2 rounded-md disabled:opacity-50"
-                title="Incremental sync: Only fetches new/updated data since last sync"
+                title="Sync from Stripe and recalculate analytics in one step"
               >
-                {loading ? 'Syncing...' : 'Sync'}
-              </button>
-              <button
-                onClick={handleReconcile}
-                disabled={loading}
-                className="text-sm glass-button-secondary px-3 py-2 rounded-md hover:bg-white/20 disabled:opacity-50"
-                title="Recalculate analytics from existing data"
-              >
-                Reconcile
+                {loading ? 'Syncing...' : 'Sync & Reconcile'}
               </button>
             </div>
           </div>

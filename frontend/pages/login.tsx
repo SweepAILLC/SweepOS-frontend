@@ -68,6 +68,8 @@ export default function Login() {
         // Still redirect - the dashboard will handle the auth error
       }
       
+      // Mark as new session so dashboard starts on Terminal (refresh keeps current tab)
+      sessionStorage.setItem('newSession', '1');
       // Use window.location instead of router.push to ensure full page reload
       // This ensures the cookie is available when the dashboard loads
       window.location.href = '/';

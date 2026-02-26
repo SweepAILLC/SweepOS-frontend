@@ -18,6 +18,7 @@ interface CheckIn {
   attendee_name?: string;
   completed: boolean;
   cancelled: boolean;
+  no_show?: boolean;
   created_at?: string;
 }
 
@@ -42,6 +43,7 @@ export default function ClientCheckInCalendar({
   const [showTimeInput, setShowTimeInput] = useState(false);
   const [manualCheckInTime, setManualCheckInTime] = useState('12:00');
   const [manualCheckInDuration, setManualCheckInDuration] = useState(60); // Duration in minutes
+  const [manualCheckInStatus, setManualCheckInStatus] = useState<'scheduled' | 'completed' | 'cancelled' | 'no_show'>('scheduled');
 
   useEffect(() => {
     if (isOpen && client) {
@@ -55,6 +57,7 @@ export default function ClientCheckInCalendar({
       setShowTimeInput(false);
       setManualCheckInTime('12:00');
       setManualCheckInDuration(60);
+      setManualCheckInStatus('scheduled');
     }
   }, [selectedDate]);
 
@@ -93,10 +96,13 @@ export default function ClientCheckInCalendar({
     }
   };
 
-  const handleMarkComplete = async (checkInId: string, currentlyCompleted: boolean) => {
+  const handleUpdateStatus = async (
+    checkInId: string,
+    updates: { completed?: boolean; cancelled?: boolean; no_show?: boolean }
+  ) => {
     try {
-      await apiClient.updateCheckIn(checkInId, !currentlyCompleted);
-      await loadCheckIns(); // Reload to show updated state
+      await apiClient.updateCheckIn(checkInId, updates);
+      await loadCheckIns();
     } catch (error: any) {
       console.error('Failed to update check-in:', error);
       const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to update check-in. Please try again.';
@@ -137,17 +143,28 @@ export default function ClientCheckInCalendar({
     const endTime = new Date(startTime);
     endTime.setMinutes(endTime.getMinutes() + (duration || 60));
     
+    const options =
+      manualCheckInStatus === 'completed'
+        ? { completed: true, cancelled: false, no_show: false }
+        : manualCheckInStatus === 'cancelled'
+        ? { completed: false, cancelled: true, no_show: false }
+        : manualCheckInStatus === 'no_show'
+        ? { completed: false, cancelled: false, no_show: true }
+        : undefined;
+    
     try {
       await apiClient.createManualCheckIn(
         client.id,
         "Manual Check-In",
         startTime.toISOString(),
-        endTime.toISOString()
+        endTime.toISOString(),
+        options
       );
       await loadCheckIns();
       setShowTimeInput(false);
       setManualCheckInTime('12:00');
       setManualCheckInDuration(60);
+      setManualCheckInStatus('scheduled');
     } catch (error: any) {
       console.error('Failed to create check-in:', error);
       const errorMessage = error?.response?.data?.detail || error?.message || 'Failed to create check-in. Please try again.';
@@ -404,6 +421,8 @@ export default function ClientCheckInCalendar({
                         const hasCheckIn = hasCheckInOnDate(date);
                         const isTodayDate = isToday(date);
                         const dateCheckIns = getCheckInsForDate(date);
+                        const hasCancelled = dateCheckIns.some(ci => ci.cancelled);
+                        const hasNoShow = dateCheckIns.some(ci => ci.no_show);
                         const allCompleted = dateCheckIns.length > 0 && dateCheckIns.every(ci => ci.completed);
                         const hasCompleted = dateCheckIns.some(ci => ci.completed);
                         const isSelected = selectedDate && date && 
@@ -419,15 +438,16 @@ export default function ClientCheckInCalendar({
                               if (date) {
                                 // If no check-ins exist for this date, open modal to set time
                                 if (!hasCheckIn) {
-                                  console.log('Setting selected date:', date);
                                   setSelectedDate(date);
                                   setShowTimeInput(true);
                                 } else {
-                                  // If check-ins exist but are NOT all completed (blue dot), remove them
-                                  // If all completed (green checkmark), open modal to view/manage
-                                  if (!allCompleted && dateCheckIns.length > 0) {
-                                    // Remove all check-ins for this date (blue dot - incomplete)
-                                    const deletePromises = dateCheckIns.map(checkIn => 
+                                  // If all check-ins are in a terminal state (completed, cancelled, or no-show), open to view/manage
+                                  const allSettled = dateCheckIns.every(ci => ci.completed || ci.cancelled || ci.no_show);
+                                  if (allSettled) {
+                                    setSelectedDate(date);
+                                  } else {
+                                    // Some are still "scheduled" (blue dot) - click to remove them
+                                    const deletePromises = dateCheckIns.map(checkIn =>
                                       apiClient.deleteCheckIn(checkIn.id)
                                     );
                                     Promise.all(deletePromises)
@@ -436,19 +456,16 @@ export default function ClientCheckInCalendar({
                                         console.error('Failed to delete check-ins:', error);
                                         alert('Failed to remove check-ins. Please try again.');
                                       });
-                                  } else {
-                                    // Open the modal to view/manage completed check-ins
-                                    setSelectedDate(date);
                                   }
                                 }
                               }
                             }}
-                            title={hasCheckIn ? (!allCompleted ? "Click to remove check-in" : "Click to view check-ins") : "Click to mark a check-in"}
+                            title={hasCheckIn ? (dateCheckIns.every(ci => ci.completed || ci.cancelled || ci.no_show) ? "Click to view check-ins" : "Click to remove check-in") : "Click to mark a check-in"}
                             className={`
                               aspect-square p-1 border rounded transition-all
                               ${date ? 'cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700' : ''}
                               ${isTodayDate ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' : 'border-gray-200 dark:border-gray-700'}
-                              ${hasCheckIn ? (allCompleted ? 'bg-green-50 dark:bg-green-900/20' : hasCompleted ? 'bg-yellow-50 dark:bg-yellow-900/20' : 'bg-blue-50 dark:bg-blue-900/20') : ''}
+                              ${hasCheckIn ? (allCompleted ? 'bg-green-50 dark:bg-green-900/20' : hasNoShow ? 'bg-amber-50 dark:bg-amber-900/20' : hasCancelled ? 'bg-gray-100 dark:bg-gray-700/50' : hasCompleted ? 'bg-yellow-50 dark:bg-yellow-900/20' : 'bg-blue-50 dark:bg-blue-900/20') : ''}
                               ${isSelected ? 'ring-2 ring-blue-500 ring-offset-1' : ''}
                             `}
                           >
@@ -463,6 +480,10 @@ export default function ClientCheckInCalendar({
                                       <svg className="w-4 h-4 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                       </svg>
+                                    ) : hasNoShow ? (
+                                      <div className="w-2 h-2 rounded-full bg-amber-500 dark:bg-amber-400" title="No-show" />
+                                    ) : hasCancelled ? (
+                                      <span className="text-gray-400 dark:text-gray-500 text-xs font-medium" title="Cancelled">✕</span>
                                     ) : hasCompleted ? (
                                       <svg className="w-4 h-4 text-yellow-600 dark:text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
                                         <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -535,17 +556,19 @@ export default function ClientCheckInCalendar({
                             key={checkIn.id}
                             className={`
                               p-4 rounded-lg border
-                              ${checkIn.cancelled ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600' : ''}
-                              ${checkIn.completed ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'}
+                              ${checkIn.no_show ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : ''}
+                              ${checkIn.cancelled && !checkIn.no_show ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600' : ''}
+                              ${checkIn.completed && !checkIn.cancelled && !checkIn.no_show ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : ''}
+                              ${!checkIn.completed && !checkIn.cancelled && !checkIn.no_show ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : ''}
                             `}
                           >
                             <div className="flex items-start justify-between">
                               <div className="flex-1">
-                                <div className="flex items-center gap-2 mb-1">
+                                <div className="flex items-center gap-2 mb-1 flex-wrap">
                                   <h4 className="font-semibold text-gray-900 dark:text-gray-100">
                                     {checkIn.title}
                                   </h4>
-                                  {checkIn.completed && !checkIn.cancelled && (
+                                  {checkIn.completed && !checkIn.cancelled && !checkIn.no_show && (
                                     <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                     </svg>
@@ -555,12 +578,17 @@ export default function ClientCheckInCalendar({
                                       Cancelled
                                     </span>
                                   )}
+                                  {checkIn.no_show && (
+                                    <span className="text-xs px-2 py-1 bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 rounded">
+                                      No-show
+                                    </span>
+                                  )}
                                 </div>
                                 <p className="text-sm text-gray-600 dark:text-gray-400">
                                   {formatDate(checkIn.start_time)}
                                   {checkIn.end_time && ` - ${formatTime(checkIn.end_time)}`}
                                 </p>
-                                {checkIn.meeting_url && (
+                                {checkIn.meeting_url && !checkIn.cancelled && (
                                   <a
                                     href={checkIn.meeting_url}
                                     target="_blank"
@@ -575,22 +603,29 @@ export default function ClientCheckInCalendar({
                                 <span className="text-xs text-gray-500 dark:text-gray-400 capitalize">
                                   {checkIn.provider}
                                 </span>
-                                {/* Action buttons */}
                                 <div className="flex items-center gap-1">
                                   <button
-                                    onClick={() => handleMarkComplete(checkIn.id, checkIn.completed)}
-                                    className={`
-                                      p-1.5 rounded transition-colors
-                                      ${checkIn.completed 
-                                        ? 'text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30' 
-                                        : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                      }
-                                    `}
-                                    title={checkIn.completed ? 'Mark as incomplete' : 'Mark as complete'}
+                                    onClick={() => handleUpdateStatus(checkIn.id, { completed: !checkIn.completed, cancelled: false, no_show: false })}
+                                    className={`p-1.5 rounded transition-colors ${checkIn.completed ? 'text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30' : 'text-gray-400 hover:text-green-600 dark:hover:text-green-400 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                                    title={checkIn.completed ? 'Mark as incomplete' : 'Mark complete'}
                                   >
                                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                                     </svg>
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateStatus(checkIn.id, { cancelled: true, no_show: false })}
+                                    className={`p-1.5 rounded transition-colors ${checkIn.cancelled ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'}`}
+                                    title="Mark cancelled"
+                                  >
+                                    <span className="text-xs font-medium">✕</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleUpdateStatus(checkIn.id, { no_show: true, cancelled: false })}
+                                    className={`p-1.5 rounded transition-colors ${checkIn.no_show ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400 hover:text-amber-600 dark:hover:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20'}`}
+                                    title="Mark no-show"
+                                  >
+                                    <span className="text-xs font-medium">NS</span>
                                   </button>
                                   <button
                                     onClick={() => handleDelete(checkIn.id)}
@@ -666,6 +701,21 @@ export default function ClientCheckInCalendar({
                       <div className="flex flex-col gap-3">
                         <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 text-left">
+                            Status
+                          </label>
+                          <select
+                            value={manualCheckInStatus}
+                            onChange={(e) => setManualCheckInStatus(e.target.value as 'scheduled' | 'completed' | 'cancelled' | 'no_show')}
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          >
+                            <option value="scheduled">Scheduled</option>
+                            <option value="completed">Completed</option>
+                            <option value="cancelled">Cancelled</option>
+                            <option value="no_show">No-show</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 text-left">
                             Time
                           </label>
                           <input
@@ -724,17 +774,19 @@ export default function ClientCheckInCalendar({
                       key={checkIn.id}
                       className={`
                         p-4 rounded-lg border
-                        ${checkIn.cancelled ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600' : ''}
-                        ${checkIn.completed ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'}
+                        ${checkIn.no_show ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' : ''}
+                        ${checkIn.cancelled && !checkIn.no_show ? 'bg-gray-50 dark:bg-gray-700/50 border-gray-200 dark:border-gray-600' : ''}
+                        ${checkIn.completed && !checkIn.cancelled && !checkIn.no_show ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800' : ''}
+                        ${!checkIn.completed && !checkIn.cancelled && !checkIn.no_show ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : ''}
                       `}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
                             <h4 className="font-semibold text-gray-900 dark:text-gray-100">
                               {checkIn.title}
                             </h4>
-                            {checkIn.completed && !checkIn.cancelled && (
+                            {checkIn.completed && !checkIn.cancelled && !checkIn.no_show && (
                               <svg className="w-5 h-5 text-green-600 dark:text-green-400" fill="currentColor" viewBox="0 0 20 20">
                                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
                               </svg>
@@ -744,12 +796,17 @@ export default function ClientCheckInCalendar({
                                 Cancelled
                               </span>
                             )}
+                            {checkIn.no_show && (
+                              <span className="text-xs px-2 py-1 bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200 rounded">
+                                No-show
+                              </span>
+                            )}
                           </div>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
                             {formatTime(checkIn.start_time)}
                             {checkIn.end_time && ` - ${formatTime(checkIn.end_time)}`}
                           </p>
-                          {checkIn.meeting_url && (
+                          {checkIn.meeting_url && !checkIn.cancelled && (
                             <a
                               href={checkIn.meeting_url}
                               target="_blank"
@@ -761,31 +818,40 @@ export default function ClientCheckInCalendar({
                           )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
                         <button
                           onClick={async () => {
-                            await handleMarkComplete(checkIn.id, checkIn.completed);
-                            await loadCheckIns(); // Refresh to update the modal
+                            await handleUpdateStatus(checkIn.id, { completed: !checkIn.completed, cancelled: false, no_show: false });
+                            await loadCheckIns();
                           }}
-                          className={`
-                            flex-1 px-3 py-2 rounded-md text-sm font-medium transition-colors
-                            ${checkIn.completed 
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/40' 
-                              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                            }
-                          `}
+                          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${checkIn.completed ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
                         >
                           {checkIn.completed ? '✓ Completed' : 'Mark Complete'}
                         </button>
                         <button
                           onClick={async () => {
+                            await handleUpdateStatus(checkIn.id, { cancelled: true, no_show: false });
+                            await loadCheckIns();
+                          }}
+                          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${checkIn.cancelled ? 'bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200' : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
+                        >
+                          Cancelled
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await handleUpdateStatus(checkIn.id, { no_show: true, cancelled: false });
+                            await loadCheckIns();
+                          }}
+                          className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${checkIn.no_show ? 'bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-200' : 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40'}`}
+                        >
+                          No-show
+                        </button>
+                        <button
+                          onClick={async () => {
                             await handleDelete(checkIn.id);
-                            await loadCheckIns(); // Refresh to update the modal
-                            // If no more check-ins for this date, close the modal
+                            await loadCheckIns();
                             const remaining = selectedDateCheckIns.filter(ci => ci.id !== checkIn.id);
-                            if (remaining.length === 0) {
-                              setSelectedDate(null);
-                            }
+                            if (remaining.length === 0) setSelectedDate(null);
                           }}
                           className="px-3 py-2 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-md text-sm font-medium hover:bg-red-200 dark:hover:bg-red-900/40 transition-colors"
                         >

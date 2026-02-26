@@ -206,8 +206,8 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
   };
 
   return (
-    <div className="glass-card p-6">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-6">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6">
         Cash & MRR
       </h3>
 
@@ -217,46 +217,46 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           <div>
-            <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-4 digitized-text uppercase tracking-wider">
+            <h4 className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-3 sm:mb-4 digitized-text uppercase tracking-wider">
               Cash Collected
             </h4>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="text-center p-4 glass-panel rounded-lg">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Today</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+              <div className="text-center p-3 sm:p-4 glass-panel rounded-lg min-w-0">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">Today</p>
+                <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.today ?? 0)}>
                   {formatCurrency(cashCollected?.today ?? 0)}
                 </p>
               </div>
-              <div className="text-center p-4 glass-panel rounded-lg">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">7 Days</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              <div className="text-center p-3 sm:p-4 glass-panel rounded-lg min-w-0">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">7 Days</p>
+                <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.last7Days ?? 0)}>
                   {formatCurrency(cashCollected?.last7Days ?? 0)}
                 </p>
               </div>
-              <div className="text-center p-4 glass-panel rounded-lg">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">30 Days</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+              <div className="text-center p-3 sm:p-4 glass-panel rounded-lg min-w-0">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">30 Days</p>
+                <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.last30Days ?? 0)}>
                   {formatCurrency(cashCollected?.last30Days ?? 0)}
                 </p>
               </div>
             </div>
           </div>
           <div className="pt-4 border-t border-white/10">
-            <h4 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-4 digitized-text uppercase tracking-wider">
+            <h4 className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-3 sm:mb-4 digitized-text uppercase tracking-wider">
               Current MRR
             </h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 glass-panel rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Monthly Recurring Revenue</p>
-                <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
                   {formatCurrency(mrrData?.currentMRR ?? 0)}
                 </p>
               </div>
-              <div className="p-4 glass-panel rounded-lg">
+              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Annual Recurring Revenue</p>
-                <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
                   {formatCurrency(mrrData?.arr ?? 0)}
                 </p>
               </div>

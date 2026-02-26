@@ -174,15 +174,15 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
   };
 
   return (
-    <div className="glass-card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
           Top 5 Revenue Contributors
         </h3>
         <div className="flex space-x-2">
           <button
             onClick={() => setTimeRange(30)}
-            className={`px-3 py-1 text-sm rounded transition-colors ${
+            className={`min-h-[44px] px-4 py-2 text-sm rounded transition-colors ${
               timeRange === 30
                 ? 'glass-button neon-glow text-white'
                 : 'glass-button-secondary text-gray-700 dark:text-gray-300'
@@ -192,7 +192,7 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
           </button>
           <button
             onClick={() => setTimeRange(90)}
-            className={`px-3 py-1 text-sm rounded transition-colors ${
+            className={`min-h-[44px] px-4 py-2 text-sm rounded transition-colors ${
               timeRange === 90
                 ? 'glass-button neon-glow text-white'
                 : 'glass-button-secondary text-gray-700 dark:text-gray-300'
@@ -217,9 +217,9 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
           {contributors.map((contributor, index) => (
             <div
               key={contributor.client_id}
-              className="flex items-center justify-between p-3 glass-panel rounded-lg"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 glass-panel rounded-lg"
             >
-              <div className="flex items-center space-x-3 flex-1">
+              <div className="flex items-center space-x-3 flex-1 min-w-0">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
                   {index + 1}
                 </div>
@@ -232,8 +232,8 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
                   </p>
                 </div>
               </div>
-              <div className="text-right">
-                <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              <div className="text-left sm:text-right flex-shrink-0">
+                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
                   {formatCurrency(contributor.revenue)}
                 </p>
               </div>

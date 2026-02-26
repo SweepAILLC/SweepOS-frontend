@@ -17,9 +17,13 @@ export default function Dashboard() {
   const router = useRouter();
   const { setLoading: setGlobalLoading } = useLoading();
   
-  // Initialize activeTab from localStorage or default to 'terminal'
+  // New session (after login) starts on terminal; refresh keeps current tab via localStorage
   const getInitialTab = (): 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' => {
     if (typeof window === 'undefined') return 'terminal';
+    if (sessionStorage.getItem('newSession') === '1') {
+      sessionStorage.removeItem('newSession');
+      return 'terminal';
+    }
     const savedTab = localStorage.getItem('activeTab');
     const validTabs = ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'];
     if (savedTab && validTabs.includes(savedTab)) {
@@ -27,16 +31,16 @@ export default function Dashboard() {
     }
     return 'terminal';
   };
-  
-  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom'>(getInitialTab());
+
+  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom'>(() => getInitialTab());
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
   const [userRole, setUserRole] = useState<string>('member'); // Track user role for permission checks
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
-  // Save activeTab to localStorage whenever it changes
+
+  // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
   useEffect(() => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('activeTab', activeTab);
@@ -152,9 +156,6 @@ export default function Dashboard() {
     if (stripe_connected === 'true') {
       setNotification({ type: 'success', message: 'Stripe connected successfully! Syncing customers...' });
       setActiveTab('stripe');
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeTab', 'stripe');
-      }
       // Clear query params
       router.replace('/', undefined, { shallow: true });
       // Dispatch event to refresh clients list
@@ -169,18 +170,12 @@ export default function Dashboard() {
       const errorMsg = error_description || 'Failed to connect Stripe';
       setNotification({ type: 'error', message: `Stripe connection error: ${errorMsg}` });
       setActiveTab('stripe');
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeTab', 'stripe');
-      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
     } else if (brevo_connected === 'true') {
       setNotification({ type: 'success', message: 'Brevo connected successfully!' });
       setActiveTab('brevo');
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeTab', 'brevo');
-      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
@@ -188,9 +183,6 @@ export default function Dashboard() {
       const errorMsg = error_description || 'Failed to connect Brevo';
       setNotification({ type: 'error', message: `Brevo connection error: ${errorMsg}` });
       setActiveTab('brevo');
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeTab', 'brevo');
-      }
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
@@ -200,9 +192,6 @@ export default function Dashboard() {
     if (tab && typeof tab === 'string' && ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'].includes(tab)) {
       const tabValue = tab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
       setActiveTab(tabValue);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('activeTab', tabValue);
-      }
       // Clear the query parameter after setting the tab
       router.replace('/', undefined, { shallow: true });
     }
@@ -275,7 +264,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
+      <main className="min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pt-20 sm:pt-24 overflow-x-hidden">
         {activeTab === 'terminal' && (
           hasTabAccess('terminal') ? (
             <TerminalDashboard />
@@ -296,8 +285,8 @@ export default function Dashboard() {
 
         {activeTab === 'stripe' && (
           hasTabAccess('stripe') ? (
-            <div className="max-w-4xl">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Stripe Financial Dashboard</h2>
+            <div className="max-w-4xl mx-auto w-full">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Stripe Financial Dashboard</h2>
               <StripeDashboardPanel userRole={userRole} />
             </div>
           ) : (

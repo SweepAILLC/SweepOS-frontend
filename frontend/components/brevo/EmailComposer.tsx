@@ -31,6 +31,7 @@ export default function EmailComposer({
   const [useTemplate, setUseTemplate] = useState(false);
   const [templateId, setTemplateId] = useState<number | null>(null);
   const [recipients, setRecipients] = useState<Array<{ email: string; name?: string }>>(initialRecipients || []);
+  const [selectedRecipientIndices, setSelectedRecipientIndices] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [recipientCount, setRecipientCount] = useState(0);
@@ -47,6 +48,7 @@ export default function EmailComposer({
     } else if (initialRecipients) {
       setRecipients(initialRecipients);
       setRecipientCount(initialRecipients.length);
+      setSelectedRecipientIndices(new Set(initialRecipients.map((_, i) => i)));
     }
     
     // Load verified senders
@@ -140,7 +142,15 @@ export default function EmailComposer({
       } else if (listId) {
         payload.listId = listId;
       } else if (recipients.length > 0) {
-        payload.recipients = recipients;
+        const toSend = selectedRecipientIndices.size > 0
+          ? recipients.filter((_, i) => selectedRecipientIndices.has(i))
+          : recipients;
+        payload.recipients = toSend;
+        if (toSend.length === 0) {
+          setError('Select at least one recipient');
+          setLoading(false);
+          return;
+        }
       } else {
         setError('No recipients specified');
         setLoading(false);
@@ -155,8 +165,8 @@ export default function EmailComposer({
       }
 
       const result = await apiClient.sendBrevoTransactionalEmail(payload);
-      
-      alert(`Email sent successfully to ${result.recipientsCount || recipientCount} recipient(s)!`);
+      const sentCount = payload.recipients?.length ?? result.recipientsCount ?? recipientCount;
+      alert(`Email sent successfully to ${sentCount} recipient(s)!`);
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -205,13 +215,30 @@ export default function EmailComposer({
             {recipients.length > 0 && !contactIds && !listId && (
               <div className="space-y-1">
                 <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                  Sending to {recipients.length} recipient(s):
+                  {recipients.length > 1
+                    ? `Select recipients (${selectedRecipientIndices.size} of ${recipients.length} selected):`
+                    : `Sending to 1 recipient:`}
                 </p>
                 <div className="space-y-1">
                   {recipients.map((recipient, index) => (
-                    <p key={index} className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
-                    </p>
+                    <label key={index} className="flex items-center gap-2 cursor-pointer">
+                      {recipients.length > 1 && (
+                        <input
+                          type="checkbox"
+                          checked={selectedRecipientIndices.has(index)}
+                          onChange={() => {
+                            const next = new Set(selectedRecipientIndices);
+                            if (next.has(index)) next.delete(index);
+                            else next.add(index);
+                            setSelectedRecipientIndices(next);
+                          }}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                      )}
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                        {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
+                      </span>
+                    </label>
                   ))}
                 </div>
               </div>
@@ -396,7 +423,7 @@ export default function EmailComposer({
               disabled={loading}
               className="px-4 py-2 text-sm font-medium rounded-md bg-primary-500 dark:bg-primary-600 text-white hover:bg-primary-600 dark:hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? 'Sending...' : `Send to ${recipientCount || recipients.length || 'recipients'}`}
+              {loading ? 'Sending...' : `Send to ${selectedRecipientIndices.size > 0 ? selectedRecipientIndices.size : recipients.length} recipient(s)`}
             </button>
           </div>
       </form>

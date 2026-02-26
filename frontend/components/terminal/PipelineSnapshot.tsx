@@ -73,11 +73,11 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
   }
 
   return (
-    <div className="glass-card p-4">
+    <div className="glass-card p-3 sm:p-4 min-w-0">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 digitized-text">
         Pipeline Snapshot
       </h3>
-      <div className="flex flex-wrap gap-4">
+      <div className="flex flex-wrap gap-2 sm:gap-4">
         {COLUMNS.map((column) => {
           const count = counts[column.id] || 0;
           const isActive = activeFilter === column.id;
@@ -86,7 +86,7 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
             <button
               key={column.id}
               onClick={() => handleCountClick(column.id)}
-              className={`flex items-center space-x-2 px-4 py-2 rounded-lg transition-all ${
+              className={`flex items-center space-x-2 px-3 py-3 sm:px-4 sm:py-2 rounded-lg transition-all min-h-[44px] touch-manipulation ${
                 isActive
                   ? 'glass-button neon-glow'
                   : 'glass-panel hover:bg-white/20'
@@ -95,7 +95,7 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
               <span className={`text-sm font-medium ${column.color} dark:text-gray-100`}>
                 {column.title}
               </span>
-              <span className={`text-lg font-bold ${isActive ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
+              <span className={`text-base sm:text-lg font-bold ${isActive ? 'text-white' : 'text-gray-900 dark:text-gray-100'}`}>
                 {count}
               </span>
             </button>

@@ -191,9 +191,9 @@ Your Team
   };
 
   return (
-    <div className="glass-card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
           Failed Payment Queue
         </h3>
         <span className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
@@ -217,7 +217,7 @@ Your Team
           {failedPayments.map((payment) => (
             <div
               key={payment.id}
-              className="flex items-center justify-between p-4 glass-panel rounded-lg border border-red-500/20"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 glass-panel rounded-lg border border-red-500/20"
             >
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
@@ -230,17 +230,17 @@ Your Team
                   Failed: {formatDate(payment.failed_at)}
                 </p>
               </div>
-              <div className="flex items-center space-x-4">
-                <div className="text-right">
+              <div className="flex flex-wrap items-center gap-3 sm:space-x-4 sm:gap-0">
+                <div className="text-left sm:text-right w-full sm:w-auto">
                   <p className="text-lg font-bold text-red-500 dark:text-red-400">
                     {formatCurrency(payment.amount)}
                   </p>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex flex-wrap gap-2">
                   {brevoStatus?.connected && payment.client_email ? (
                     <button
                       onClick={() => handleRecover(payment)}
-                      className="px-3 py-1 text-xs glass-button-secondary rounded hover:bg-white/20 transition-colors"
+                      className="min-h-[44px] px-4 py-2 text-sm glass-button-secondary rounded hover:bg-white/20 transition-colors"
                       title="Send payment recovery email via Brevo"
                     >
                       Recover
@@ -248,7 +248,7 @@ Your Team
                   ) : (
                     <button
                       disabled
-                      className="px-3 py-1 text-xs glass-button-secondary rounded opacity-50 cursor-not-allowed"
+                      className="min-h-[44px] px-4 py-2 text-sm glass-button-secondary rounded opacity-50 cursor-not-allowed"
                       title={!brevoStatus?.connected ? "Brevo not connected" : "No email address available"}
                     >
                       Recover
@@ -257,7 +257,7 @@ Your Team
                   <button
                     onClick={() => handleResolve(payment.id)}
                     disabled={resolving.has(payment.id)}
-                    className="px-3 py-1 text-xs glass-button-secondary rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white/20 transition-colors"
+                    className="min-h-[44px] px-4 py-2 text-sm glass-button-secondary rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white/20 transition-colors"
                     title="Resolve this failed payment alert"
                   >
                     {resolving.has(payment.id) ? 'Resolving...' : 'Resolve'}

@@ -323,7 +323,7 @@ export default function UsersPanel() {
             type="button"
             onClick={handleAddSystemOwner}
             disabled={addingSystemOwner}
-            className="px-4 py-2 rounded-md bg-purple-500/20 border border-purple-400/30 text-sm font-medium hover:bg-purple-500/30 disabled:opacity-50"
+            className="px-4 py-2 rounded-md bg-purple-100 border border-purple-300 text-purple-800 hover:bg-purple-200 dark:bg-purple-900/60 dark:text-purple-100 dark:border-purple-500/50 dark:hover:bg-purple-900/70 text-sm font-medium disabled:opacity-50"
           >
             {addingSystemOwner ? 'Adding…' : 'Add System Owner'}
           </button>
@@ -559,9 +559,11 @@ export default function UsersPanel() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     <span className={`px-2 py-1 text-xs font-medium rounded-full capitalize border ${
-                      user.role === 'owner' ? 'bg-purple-500/20 text-gray-900 border-purple-400/30' :
-                      user.role === 'admin' ? 'bg-blue-500/20 text-gray-900 border-blue-400/30' :
-                      'bg-white/10 text-gray-200 border-white/20'
+                      user.role === 'owner'
+                        ? 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/60 dark:text-purple-100 dark:border-purple-500/50'
+                        : user.role === 'admin'
+                        ? 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/60 dark:text-blue-100 dark:border-blue-500/50'
+                        : 'bg-gray-100 text-gray-800 border-gray-300 dark:bg-white/10 dark:text-gray-200 dark:border-white/20'
                     }`}>
                       {user.role}
                     </span>

@@ -56,26 +56,26 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
   };
 
   return (
-    <nav className="glass-panel fixed top-0 left-0 right-0 z-[50] w-full">
+    <nav className="glass-panel fixed top-0 left-0 right-0 z-[50] w-full relative">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
-          <div className="flex">
-            <div className="flex-shrink-0 flex items-center gap-3">
+        <div className="flex justify-between h-14 sm:h-16">
+          <div className="flex items-center min-w-0">
+            <div className="flex-shrink-0 flex items-center gap-2 sm:gap-3">
               {mounted && (
-                <div className="relative w-8 h-8 flex-shrink-0">
+                <div className="relative w-7 h-7 sm:w-8 sm:h-8 flex-shrink-0">
                   <img
                     src="/SWEEP_favicon.png"
                     alt="Sweep"
                     width={32}
                     height={32}
-                    className="object-contain"
+                    className="object-contain w-full h-full"
                     onError={(e) => {
                       (e.target as HTMLImageElement).style.display = 'none';
                     }}
                   />
                 </div>
               )}
-              <h1 className="text-xl font-bold text-gray-900 dark:text-gray-100">Sweep Coach OS</h1>
+              <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100 truncate">Sweep Coach OS</h1>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
               {shouldShowTab('brevo') && (
@@ -185,21 +185,21 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
               )}
             </div>
           </div>
-          <div className="flex items-center space-x-4">
+          <div className="flex items-center space-x-2 sm:space-x-4">
             <button
               onClick={handleSettingsClick}
-              className="glass-button-secondary px-3 py-2 rounded-md text-sm font-medium flex items-center"
+              className="glass-button-secondary px-2 py-2 sm:px-3 sm:py-2 rounded-md text-sm font-medium flex items-center min-h-[44px] min-w-[44px] sm:min-w-0 justify-center sm:justify-start"
               aria-label="Open settings"
             >
-              <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 sm:mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               </svg>
-              Settings
+              <span className="hidden sm:inline">Settings</span>
             </button>
             <button
               onClick={handleLogout}
-              className="glass-button-secondary px-3 py-2 rounded-md text-sm font-medium"
+              className="glass-button-secondary px-2 py-2 sm:px-3 sm:py-2 rounded-md text-sm font-medium min-h-[44px]"
             >
               Logout
             </button>

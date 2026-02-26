@@ -104,7 +104,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
 
   if (loading && !summary) {
     return (
-      <div className="glass-card p-6">
+      <div className="glass-card p-4 sm:p-6 min-w-0">
         <div className="animate-pulse">
           <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
           <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
@@ -116,7 +116,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
   if (!summary) {
     // Show error or loading state
     return (
-      <div className="glass-card p-6">
+      <div className="glass-card p-4 sm:p-6 min-w-0">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
@@ -148,7 +148,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
 
   if (!summary.connected) {
     return (
-      <div className="glass-card p-6">
+      <div className="glass-card p-4 sm:p-6 min-w-0">
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
@@ -168,20 +168,20 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
   const monthChange = summary.last_month_percentage_change;
 
   return (
-    <div className="glass-card p-6">
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div className="min-w-0">
+          <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
             Calendar Notifications
           </h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
+          <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
             {summary.provider === 'calcom' ? 'Cal.com' : 'Calendly'} • {summary.upcoming_count} upcoming appointment{summary.upcoming_count !== 1 ? 's' : ''}
           </p>
         </div>
         <button
           onClick={loadSummary}
           disabled={refreshing}
-          className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="p-2.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] min-w-[44px] flex items-center justify-center flex-shrink-0"
           title="Refresh"
         >
           <svg 
@@ -201,48 +201,58 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-4">
         {/* Upcoming Count */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-          <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
             {summary.upcoming_count}
           </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-            Upcoming Appointments
+          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            Upcoming
           </div>
         </div>
 
         {/* Last Week Comparison */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-          <div className="flex items-center gap-2">
-            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
               {summary.last_week_count}
             </div>
             {weekChange !== null && weekChange !== undefined && (
-              <span className={`text-sm font-medium ${weekChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              <span className={`text-xs font-medium ${weekChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {weekChange >= 0 ? '+' : ''}{weekChange.toFixed(1)}%
               </span>
             )}
           </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
             Last 7 Days
           </div>
         </div>
 
         {/* Last Month Comparison */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-          <div className="flex items-center gap-2">
-            <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
               {summary.last_month_count}
             </div>
             {monthChange !== null && monthChange !== undefined && (
-              <span className={`text-sm font-medium ${monthChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              <span className={`text-xs font-medium ${monthChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {monthChange >= 0 ? '+' : ''}{monthChange.toFixed(1)}%
               </span>
             )}
           </div>
-          <div className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
             Last 30 Days
+          </div>
+        </div>
+
+        {/* Show-up Rate */}
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+            {summary.show_up_rate != null ? `${summary.show_up_rate}%` : '—'}
+          </div>
+          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            Show-up Rate
           </div>
         </div>
       </div>

@@ -342,6 +342,41 @@ export default function EventDetailsModal({
                         {formatDateTime(provider === 'calcom' ? booking!.endTime : event!.end_time)}
                       </span>
                     </div>
+                    {/* Status: cancelled / no-show / confirmed (Cal.com and Calendly) */}
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-gray-500 dark:text-gray-400">Status:</span>
+                      <span className="text-gray-900 dark:text-gray-100">
+                        {provider === 'calcom' && booking ? (() => {
+                          const isNoShow = booking.status === 'accepted' && (
+                            booking.absentHost === true ||
+                            (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true))
+                          );
+                          if (isNoShow) return <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>;
+                          if (booking.status === 'cancelled') {
+                            return (
+                              <span>
+                                <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
+                                {booking.cancellationReason && (
+                                  <span className="block text-gray-600 dark:text-gray-400 text-xs mt-1">{booking.cancellationReason}</span>
+                                )}
+                                {booking.cancelledByEmail && (
+                                  <span className="block text-gray-500 dark:text-gray-500 text-xs">by {booking.cancelledByEmail}</span>
+                                )}
+                              </span>
+                            );
+                          }
+                          if (booking.status === 'accepted') return <span className="text-green-600 dark:text-green-400">Confirmed</span>;
+                          if (booking.status === 'rejected') return <span className="text-red-600 dark:text-red-400">Rejected</span>;
+                          return <span>{booking.status || '—'}</span>;
+                        })() : event ? (
+                          event.status === 'canceled' || event.status === 'cancelled'
+                            ? <span className="text-red-600 dark:text-red-400 font-medium">Canceled</span>
+                            : event.status === 'active'
+                            ? <span className="text-green-600 dark:text-green-400">Active</span>
+                            : <span>{event.status || '—'}</span>
+                        ) : '—'}
+                      </span>
+                    </div>
                     {provider === 'calcom' && booking?.location && (
                       <div className="flex justify-between">
                         <span className="text-gray-500 dark:text-gray-400">Location:</span>
@@ -390,9 +425,17 @@ export default function EventDetailsModal({
                               <div key={idx} className="text-gray-900 dark:text-gray-100">
                                 {attendee.name || attendee.email}
                                 {attendee.email && attendee.name && ` (${attendee.email})`}
+                                {attendee.absent === true && (
+                                  <span className="ml-2 text-xs text-amber-600 dark:text-amber-400 font-medium">No-show</span>
+                                )}
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+                      {booking.absentHost === true && (
+                        <div className="text-amber-600 dark:text-amber-400 text-sm">
+                          Host was marked absent (no-show).
                         </div>
                       )}
                     </div>

@@ -17,10 +17,16 @@ export default function FunnelAnalyticsTab({ funnelId }: FunnelAnalyticsTabProps
     loadAnalytics();
   }, [funnelId, timeRange]);
 
-  const loadAnalytics = async () => {
+  // Live polling for accurate analytics (refresh every 60s; bypass cache so data is fresh)
+  useEffect(() => {
+    const interval = setInterval(() => loadAnalytics(true), 60 * 1000);
+    return () => clearInterval(interval);
+  }, [funnelId, timeRange]);
+
+  const loadAnalytics = async (forceRefresh = false) => {
     try {
       setLoading(true);
-      const data = await apiClient.getFunnelAnalytics(funnelId, timeRange);
+      const data = await apiClient.getFunnelAnalytics(funnelId, timeRange, forceRefresh);
       setAnalytics(data);
       setError(null);
     } catch (err: any) {
@@ -44,7 +50,7 @@ export default function FunnelAnalyticsTab({ funnelId }: FunnelAnalyticsTabProps
       <div className="glass-card p-4 border-red-400/40">
         <p className="text-red-800 dark:text-red-200">Error: {error || 'Failed to load analytics'}</p>
         <button
-          onClick={loadAnalytics}
+          onClick={() => loadAnalytics()}
           className="mt-2 text-red-600 dark:text-red-300 hover:text-red-200 underline"
         >
           Retry
@@ -80,7 +86,7 @@ export default function FunnelAnalyticsTab({ funnelId }: FunnelAnalyticsTabProps
           <option value={365}>365 days</option>
         </select>
         <button
-          onClick={loadAnalytics}
+          onClick={() => loadAnalytics(true)}
           className="text-sm text-blue-400 hover:text-blue-200"
         >
           Refresh

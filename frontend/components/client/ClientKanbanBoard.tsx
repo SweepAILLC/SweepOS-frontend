@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   DndContext,
-  closestCenter,
+  pointerWithin,
   KeyboardSensor,
   PointerSensor,
   useSensor,
@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { apiClient } from '@/lib/api';
 import { Client } from '@/types/client';
-import ClientCard from './ClientCard';
+import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
 import ShinyButton from '../ui/ShinyButton';
 
@@ -56,6 +56,9 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     program_start_date: '',
     program_end_date: '',
   });
+  const [syncingRefreshing, setSyncingRefreshing] = useState(false);
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+  const [mergingCards, setMergingCards] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -91,15 +94,23 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     };
   }, []);
 
-  const loadClients = async (forceRefresh = false) => {
+  const loadClients = async (forceRefresh = false, skipSync = false) => {
     try {
       if (forceRefresh) {
         console.log('[KanbanBoard] Force refreshing clients...');
       } else {
         console.log('[KanbanBoard] Loading clients...');
       }
-      
-      const data = await apiClient.getClients();
+      // Sync calendar bookings so new attendees (Cal.com/Calendly) become warm leads on the board.
+      // Skip sync when refetching after a delete so we don't re-create the same client from their booking.
+      if (!skipSync) {
+        try {
+          await apiClient.syncCheckIns();
+        } catch (syncErr) {
+          console.warn('[KanbanBoard] Check-in sync failed (board will still load):', syncErr);
+        }
+      }
+      const data = await apiClient.getClients(undefined, forceRefresh);
       const stateCounts = data.reduce((acc: Record<string, number>, client: Client) => {
         acc[client.lifecycle_state] = (acc[client.lifecycle_state] || 0) + 1;
         return acc;
@@ -149,6 +160,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
   const handleDragOver = (event: DragOverEvent) => {
     const { over } = event;
+    setDragOverId(over ? (over.id as string) : null);
     if (over && COLUMNS.some(col => col.id === over.id)) {
       setActiveColumn(over.id as ColumnId);
     }
@@ -157,6 +169,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveColumn(null);
+    setDragOverId(null);
 
     if (!over) {
       return;
@@ -169,23 +182,74 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       return filteredClients.find((c) => c.id === sortableId);
     };
 
-    // Find the client being dragged using the sortable ID
     const draggedClient = findClientBySortableId(activeId);
-
     if (!draggedClient) {
       console.error('[KANBAN] Could not find dragged client with sortable ID:', activeId);
       return;
     }
 
-    // Check if dropped on a column
-    const columnId = COLUMNS.find(col => col.id === overId);
-    if (columnId) {
-      // Dropped on a column header - move to that column
-      const newColumnId = columnId.id;
-      await updateClientState(draggedClient.id, newColumnId, draggedClient);
+    // Drop on another card = merge (dragged card merges into target)
+    if (overId.startsWith('merge-')) {
+      const targetId = overId.replace(/^merge-/, '');
+      if (targetId && targetId !== activeId) {
+        const targetClient = findClientBySortableId(targetId);
+        if (targetClient) {
+          const draggedName = [draggedClient.first_name, draggedClient.last_name].filter(Boolean).join(' ') || draggedClient.email || 'Unknown';
+          const targetName = [targetClient.first_name, targetClient.last_name].filter(Boolean).join(' ') || targetClient.email || 'Unknown';
+          const confirmed = window.confirm(
+            `Merge "${draggedName}" into "${targetName}"? This will combine their data into one client and remove the other card.`
+          );
+          if (!confirmed) return;
+          setMergingCards(true);
+          try {
+            const keptClient = await apiClient.mergeClients([draggedClient.id, targetClient.id]);
+            const keptId = keptClient?.id;
+            const removedId = keptId === draggedClient.id ? targetClient.id : draggedClient.id;
+            // Optimistically remove the merged-away card so it disappears immediately
+            setClients((prev) =>
+              prev.filter((c) => c.id !== removedId).map((c) => (c.id === keptId && keptClient ? { ...c, ...keptClient } : c))
+            );
+            // If drawer was showing the removed client, show the kept client instead
+            if (selectedClient?.id === removedId) {
+              setSelectedClient(keptClient || selectedClient);
+            } else if (selectedClient?.id === keptId && keptClient) {
+              setSelectedClient(keptClient);
+            }
+            await loadClients(true);
+          } catch (err: any) {
+            alert(err?.response?.data?.detail || 'Failed to merge clients.');
+          } finally {
+            setMergingCards(false);
+          }
+        }
+        return;
+      }
+    }
+
+    // Drop on slot above a card = insert above (reorder or move)
+    if (overId.startsWith('slot-')) {
+      const insertAboveClientId = overId.replace(/^slot-/, '');
+      const targetClient = findClientBySortableId(insertAboveClientId);
+      if (targetClient) {
+        const newColumnId = targetClient.lifecycle_state as ColumnId;
+        const currentColumnId = draggedClient.lifecycle_state as ColumnId;
+        if (newColumnId === currentColumnId) {
+          await reorderClientInColumn(draggedClient, targetClient, newColumnId);
+        } else {
+          await updateClientState(draggedClient.id, newColumnId, draggedClient);
+        }
+      }
       return;
     }
 
+    // Drop on column
+    const columnId = COLUMNS.find(col => col.id === overId);
+    if (columnId) {
+      await updateClientState(draggedClient.id, columnId.id, draggedClient);
+      return;
+    }
+
+    // Fallback: over is sortable id (card) – treat as reorder/move
     const targetClient = findClientBySortableId(overId);
     if (targetClient) {
       const newColumnId = targetClient.lifecycle_state as ColumnId;
@@ -384,6 +448,20 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     }
   };
 
+  const handleRefreshSync = async () => {
+    setSyncingRefreshing(true);
+    try {
+      await apiClient.syncCheckIns();
+      await apiClient.syncStripeData(false);
+      await loadClients(true);
+    } catch (err: any) {
+      console.error('[KanbanBoard] Refresh sync failed:', err);
+      alert(err?.response?.data?.detail || 'Sync failed. Please try again.');
+    } finally {
+      setSyncingRefreshing(false);
+    }
+  };
+
   // Filter clients by search query (no in-memory merge; one client per record)
   const filteredClients = useMemo(() => {
     if (!searchQuery.trim()) return clients;
@@ -456,16 +534,19 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   };
 
   const handleDeleteClient = async (client: Client) => {
-      const confirmMessage = `Are you sure you want to delete "${[client.first_name, client.last_name].filter(Boolean).join(' ') || 'this client'}"?`;
+    const confirmMessage = `Are you sure you want to delete "${[client.first_name, client.last_name].filter(Boolean).join(' ') || 'this client'}"?`;
     if (!window.confirm(confirmMessage)) return;
 
     try {
       await apiClient.deleteClient(client.id, false);
-      await loadClients();
+      // Remove from local state immediately so the card disappears
+      setClients((prev) => prev.filter((c) => c.id !== client.id));
       if (selectedClient?.id === client.id) {
         setIsDrawerOpen(false);
         setSelectedClient(null);
       }
+      // Refetch without running check-in sync so we don't re-create this client from their calendar booking
+      await loadClients(true, true);
     } catch (error: any) {
       console.error('Failed to delete client:', error);
       alert(error?.response?.data?.detail || 'Failed to delete client. Please try again.');
@@ -533,20 +614,32 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
   return (
     <>
-      <div className="mb-4 space-y-4">
-        <div className="flex justify-between items-center">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
-          <div className="flex items-center gap-2">
+      <div className="mb-4 space-y-4 min-w-0">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
+          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
+          <div className="flex flex-wrap items-center gap-2">
             {duplicateGroups.length > 0 && (
               <button
                 type="button"
                 onClick={handleMergeDuplicates}
                 disabled={mergingDuplicates}
-                className="px-3 py-1.5 text-sm glass-button neon-glow rounded-md disabled:opacity-50"
+                className="px-3 py-2.5 text-sm glass-button neon-glow rounded-md disabled:opacity-50 min-h-[44px]"
               >
                 {mergingDuplicates ? 'Merging...' : `Merge ${duplicateGroups.length} duplicate group(s)`}
               </button>
             )}
+            <button
+              type="button"
+              onClick={handleRefreshSync}
+              disabled={syncingRefreshing}
+              className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50 flex items-center gap-2 min-h-[44px]"
+              title="Sync calendar and Stripe so client details and columns are up to date"
+            >
+              <svg className={`w-4 h-4 flex-shrink-0 ${syncingRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+              {syncingRefreshing ? 'Syncing...' : 'Refresh'}
+            </button>
             <ShinyButton onClick={() => setIsCreateModalOpen(true)}>
             <svg className="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -595,14 +688,13 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={pointerWithin}
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-1 px-1 sm:mx-0 sm:px-0 scroll-smooth touch-pan-x min-w-0">
           {COLUMNS.map((column) => {
             const columnClients = getClientsForColumn(column.id);
-            // Hide column if filtered and doesn't match
             if (filteredColumn && filteredColumn !== column.id) {
               return null;
             }
@@ -613,6 +705,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                 title={column.title}
                 clients={columnClients}
                 isActive={activeColumn === column.id}
+                dragOverId={dragOverId}
+                mergingCards={mergingCards}
                 onClientClick={(client) => {
                   setSelectedClient(client);
                   setIsDrawerOpen(true);
@@ -816,6 +910,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           </div>
         </div>
       )}
+
     </>
   );
 }
@@ -825,20 +920,22 @@ interface KanbanColumnProps {
   title: string;
   clients: Client[];
   isActive: boolean;
+  dragOverId: string | null;
+  mergingCards: boolean;
   onClientClick: (client: Client) => void;
   onClientDelete?: (client: Client) => void;
 }
 
-function KanbanColumn({ id, title, clients, isActive, onClientClick, onClientDelete }: KanbanColumnProps) {
+function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: id,
   });
 
   return (
-    <div className="flex-shrink-0 w-64">
+    <div className="flex-shrink-0 w-[260px] min-w-[260px] sm:w-64 sm:min-w-64">
       <div
         ref={setNodeRef}
-        className={`glass-card p-4 min-h-[400px] transition-shadow ${
+        className={`glass-card p-3 sm:p-4 min-h-[280px] sm:min-h-[400px] transition-shadow ${
           isActive ? 'neon-glow' : ''
         }`}
       >
@@ -856,6 +953,8 @@ function KanbanColumn({ id, title, clients, isActive, onClientClick, onClientDel
                 client={client}
                 onClick={() => onClientClick(client)}
                 onDelete={onClientDelete}
+                isMergeTarget={dragOverId === MERGE_DROP_ID(client.id)}
+                showSlotLineAbove={dragOverId === SLOT_DROP_ID(client.id)}
               />
             ))}
           </div>

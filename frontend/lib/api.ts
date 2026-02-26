@@ -253,11 +253,8 @@ class ApiClient {
     return response.data;
   }
 
-  async updateCheckIn(checkInId: string, completed?: boolean, cancelled?: boolean) {
-    const response = await this.client.patch(`/clients/check-ins/${checkInId}`, {
-      completed,
-      cancelled
-    });
+  async updateCheckIn(checkInId: string, updates: { completed?: boolean; cancelled?: boolean; no_show?: boolean }) {
+    const response = await this.client.patch(`/clients/check-ins/${checkInId}`, updates);
     return response.data;
   }
 
@@ -266,12 +263,22 @@ class ApiClient {
     return response.data;
   }
 
-  async createManualCheckIn(clientId: string, title: string, startTime: string, endTime?: string) {
-    const response = await this.client.post(`/clients/${clientId}/check-ins`, {
+  async createManualCheckIn(
+    clientId: string,
+    title: string,
+    startTime: string,
+    endTime?: string,
+    options?: { completed?: boolean; cancelled?: boolean; no_show?: boolean }
+  ) {
+    const payload: Record<string, unknown> = {
       title,
       start_time: startTime,
       end_time: endTime
-    });
+    };
+    if (options?.completed !== undefined) payload.completed = options.completed;
+    if (options?.cancelled !== undefined) payload.cancelled = options.cancelled;
+    if (options?.no_show !== undefined) payload.no_show = options.no_show;
+    const response = await this.client.post(`/clients/${clientId}/check-ins`, payload);
     return response.data;
   }
 
@@ -283,7 +290,6 @@ class ApiClient {
 
   async disconnectStripe() {
     const response = await this.client.delete('/oauth/stripe/disconnect');
-    cache.deleteByPrefix('stripe_');
     return response.data;
   }
 
@@ -297,8 +303,6 @@ class ApiClient {
     const response = await this.client.post(`/oauth/stripe/callback/manual?code=${code}&org_id=${orgId}`, null, {
       timeout: 300000, // 5 minutes for initial sync
     });
-    cache.deleteByPrefix('stripe_');
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -309,8 +313,6 @@ class ApiClient {
     }, {
       timeout: 300000, // 5 minutes for initial sync
     });
-    cache.deleteByPrefix('stripe_');
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -321,8 +323,15 @@ class ApiClient {
       params: { force_full: forceFull },
       timeout: 300000, // 5 minutes for sync operations
     });
-    cache.deleteByPrefix('stripe_');
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    return response.data;
+  }
+
+  /** Single call: sync from Stripe then reconcile. One round-trip for speed. */
+  async syncAndReconcileStripeData(forceFull: boolean = false, syncRecent: boolean = false) {
+    const response = await this.client.post('/integrations/stripe/sync-and-reconcile', null, {
+      params: { force_full: forceFull, sync_recent: syncRecent },
+      timeout: 300000, // 5 minutes
+    });
     return response.data;
   }
 
@@ -331,7 +340,6 @@ class ApiClient {
     const response = await this.client.post('/integrations/stripe/reconcile', null, {
       timeout: 120000, // 2 minutes for reconciliation
     });
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -460,23 +468,33 @@ class ApiClient {
   }
 
   // Integrations (Stripe endpoints cached for fast dashboard tab switching)
-  async getStripeStatus() {
-    const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
-    if (cached != null) return cached;
+  async getStripeStatus(bypassCache?: boolean) {
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
+      if (cached != null) return cached;
+    }
     const response = await this.client.get('/integrations/stripe/status');
     const data = response.data;
-    cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
-  async getStripeSummary(range?: number) {
+  /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
+  async getStripeLastUpdated(): Promise<{ last_updated: string | null }> {
+    const response = await this.client.get('/integrations/stripe/last-updated');
+    return response.data;
+  }
+
+  async getStripeSummary(range?: number, bypassCache?: boolean) {
     const cacheKey = `stripe_summary_${range ?? 'all'}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params = range ? { range } : {};
     const response = await this.client.get('/integrations/stripe/summary', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
@@ -632,41 +650,47 @@ class ApiClient {
     return response.data;
   }
 
-  // Stripe Analytics
-  async getStripeRevenueTimeline(range?: number, groupBy?: 'day' | 'week') {
+  // Stripe Analytics (bypassCache=true used by Stripe tab so it never overwrites Terminal's cache)
+  async getStripeRevenueTimeline(range?: number, groupBy?: 'day' | 'week', bypassCache?: boolean) {
     const cacheKey = `stripe_revenue_${range ?? 'all'}_${groupBy ?? 'day'}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params: any = {};
     if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/revenue-timeline', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
-  async getStripeChurn(months?: number) {
+  async getStripeChurn(months?: number, bypassCache?: boolean) {
     const cacheKey = `stripe_churn_${months ?? 6}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params = months ? { months } : {};
     const response = await this.client.get('/integrations/stripe/churn', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
-  async getStripeMRRTrend(range?: number, groupBy?: 'day' | 'week' | 'month') {
+  async getStripeMRRTrend(range?: number, groupBy?: 'day' | 'week' | 'month', bypassCache?: boolean) {
     const cacheKey = `stripe_mrr_${range ?? 'all'}_${groupBy ?? 'day'}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params: any = {};
     if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/mrr-trend', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
@@ -675,11 +699,14 @@ class ApiClient {
     range?: number,
     page?: number,
     pageSize?: number,
-    useTreasury?: boolean
+    useTreasury?: boolean,
+    bypassCache?: boolean
   ) {
     const cacheKey = `stripe_payments_${status ?? 'all'}_${range ?? 'all'}_${page ?? 1}_${pageSize ?? 100}_${useTreasury ?? false}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params: any = {};
     if (status) params.status = status;
     if (range !== undefined) params.range = range; // undefined means all time
@@ -688,7 +715,7 @@ class ApiClient {
     if (useTreasury !== undefined) params.use_treasury = useTreasury;
     const response = await this.client.get('/integrations/stripe/payments', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
@@ -699,17 +726,19 @@ class ApiClient {
     return response.data;
   }
 
-  async getStripeFailedPayments(page?: number, pageSize?: number, excludeResolved?: boolean) {
+  async getStripeFailedPayments(page?: number, pageSize?: number, excludeResolved?: boolean, bypassCache?: boolean) {
     const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params: any = {};
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
     if (excludeResolved !== undefined) params.exclude_resolved = excludeResolved;
     const response = await this.client.get('/integrations/stripe/failed-payments', { params });
     const data = response.data;
-    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
@@ -802,10 +831,12 @@ class ApiClient {
     return response.data;
   }
 
-  async getFunnelAnalytics(funnelId: string, range?: number) {
+  async getFunnelAnalytics(funnelId: string, range?: number, forceRefresh?: boolean) {
     const cacheKey = `funnel_analytics_${funnelId}_${range ?? 30}`;
-    const cached = cache.get<unknown>(cacheKey);
-    if (cached != null) return cached;
+    if (!forceRefresh) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
     const params = range ? { range } : {};
     const response = await this.client.get(`/funnels/${funnelId}/analytics`, { params });
     const data = response.data;

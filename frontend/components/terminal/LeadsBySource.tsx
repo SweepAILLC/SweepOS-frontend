@@ -21,7 +21,13 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     loadLeadSources();
   }, []);
 
-  const loadLeadSources = async () => {
+  // Live polling for accurate terminal funnel data (refresh every 60s; bypass cache)
+  useEffect(() => {
+    const interval = setInterval(() => loadLeadSources(true), 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const loadLeadSources = async (forceRefresh = false) => {
     try {
       setLoading(true);
       
@@ -29,12 +35,11 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
       const funnels = await apiClient.getFunnels();
       
       // Aggregate data from all funnels (last 30 days)
-      // Note: Currently using event count as proxy for visitors until backend tracks unique visitors per referrer/UTM
       const sourceMap = new Map<string, { visitors: number; conversions: number }>();
       
       for (const funnel of funnels) {
         try {
-          const analytics = await apiClient.getFunnelAnalytics(funnel.id, 30);
+          const analytics = await apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh);
           
           // Process UTM sources
           analytics.top_utm_sources?.forEach((utm: any) => {
@@ -109,10 +114,10 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
   };
 
   return (
-    <div className="glass-card p-6">
-      <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+    <div className="glass-card p-4 sm:p-6 min-w-0">
+      <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
         Leads by Source
-        <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">(Last 30d)</span>
+        <span className="text-xs sm:text-sm font-normal text-gray-500 dark:text-gray-400 ml-1 sm:ml-2">(Last 30d)</span>
       </h3>
 
       {loading ? (
@@ -129,18 +134,18 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
           {leadSources.map((source) => (
             <div
               key={source.source}
-              className="flex items-center justify-between p-3 glass-panel rounded-lg"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 glass-panel rounded-lg"
             >
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                   {source.source}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   {getConversionRate(source.conversions, source.visitors)}% conversion rate
                 </p>
               </div>
-              <div className="text-right ml-4">
-                <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              <div className="text-left sm:text-right sm:ml-4 flex-shrink-0">
+                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
                   {source.visitors.toLocaleString()}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
