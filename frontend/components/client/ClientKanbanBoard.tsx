@@ -67,16 +67,16 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     })
   );
 
+  // Load client list only on mount; no sync unless user clicks the refresh/sync button
   useEffect(() => {
-    loadClients();
+    loadClients(false, true);
   }, []);
 
-  // Listen for Stripe connection events to refresh clients
+  // Listen for Stripe connection events to refetch client list (no sync)
   useEffect(() => {
     const handleStripeConnected = () => {
-      // Wait a bit for sync to complete, then refresh
       setTimeout(() => {
-        loadClients();
+        loadClients(true, true);
       }, 3000);
     };
 
@@ -279,17 +279,17 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       return; // No change needed
     }
 
-    // Reorder the array
+    // Insert index: after removing dragged, target "slot above" means insert so dragged ends up above targetClient
+    const insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
     const reorderedClients = [...columnClients];
     const [removed] = reorderedClients.splice(draggedIndex, 1);
-    reorderedClients.splice(targetIndex, 0, removed);
+    reorderedClients.splice(insertIndex, 0, removed);
 
     const updates: Array<{ clientId: string; sortOrder: number }> = [];
     reorderedClients.forEach((client, index) => {
       updates.push({ clientId: client.id, sortOrder: index });
     });
 
-    // Optimistic update
     const originalClients = [...clients];
     const updatedClients = clients.map((c) => {
       const update = updates.find(u => u.clientId === c.id);
@@ -310,12 +310,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     setClients(updatedClients);
 
     try {
-      // Update all affected clients on server
       await Promise.all(
         updates.map(({ clientId, sortOrder }) => {
           const client = clients.find(c => c.id === clientId);
           if (!client) return Promise.resolve();
-          
           const currentMeta = client.meta || {};
           return apiClient.updateClient(clientId, {
             meta: {
@@ -328,11 +326,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           });
         })
       );
-      
-      // Reload to ensure consistency
-      await loadClients();
+      // No refresh: optimistic update already reordered; avoid full board reload for smooth UX.
     } catch (error) {
-      // Revert on error
       setClients(originalClients);
       console.error('Failed to reorder clients:', error);
       alert('Failed to reorder clients. Please try again.');
@@ -395,18 +390,13 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     setClients(updatedClients);
 
     try {
-      // Update all underlying clients on server
       await Promise.all(
         clientIdsToUpdate.map((id: string) =>
           apiClient.updateClient(id, updateData)
         )
       );
-      
-      // Reload clients to ensure merged clients are recalculated with new state
-      // This ensures the card appears in the correct column
-      await loadClients();
+      // No refresh: optimistic update already moved the card; avoid full board reload.
     } catch (error) {
-      // Revert on error
       setClients(originalClients);
       console.error('Failed to update client:', error);
       alert('Failed to update client. Please try again.');

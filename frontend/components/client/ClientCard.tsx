@@ -4,7 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
 import React, { memo, useMemo, useCallback } from 'react';
 
-const SLOT_HEIGHT_PX = 12;
+const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
 const SLOT_DROP_ID = (id: string) => `slot-${id}`;
 
@@ -61,10 +61,10 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
 
   return (
     <div className="relative">
-      {/* Slot: drop zone for "insert above" – space between cards */}
+      {/* Slot: drop zone for "insert above" – space between cards; larger for easier drag target */}
       <div
         ref={slotDroppable.setNodeRef}
-        className={`transition-colors rounded ${showSlotLineAbove ? 'bg-primary-500/30 ring-1 ring-primary-500 ring-inset' : 'bg-transparent'}`}
+        className={`transition-all duration-150 rounded ${showSlotLineAbove ? 'bg-primary-500/30 ring-2 ring-primary-500 ring-inset' : 'hover:bg-gray-500/10 dark:hover:bg-gray-400/10'}`}
         style={{ minHeight: SLOT_HEIGHT_PX }}
       />
       <div
