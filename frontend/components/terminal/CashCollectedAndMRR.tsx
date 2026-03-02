@@ -36,7 +36,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
     if (!s) return false;
     const cash = s.cash_collected;
     const mrr = s.mrr?.current_mrr ?? 0;
-    return (cash && (cash.today > 0 || cash.last_7_days > 0 || cash.last_30_days > 0)) || mrr > 0;
+    return (cash && ((cash.today ?? 0) > 0 || (cash.last_7_days ?? 0) > 0 || (cash.last_30_days ?? 0) > 0)) || mrr > 0;
   };
 
   const normalizeEmail = (email: string | undefined | null): string | null => {
