@@ -10,6 +10,7 @@ import NotificationsCard from './calendar/NotificationsCard';
 import { useLoading } from '@/contexts/LoadingContext';
 import { apiClient } from '@/lib/api';
 import { invalidateStripeCache, TERMINAL_STRIPE_UPDATED_KEY } from '@/lib/cache';
+import type { TerminalSummaryForWidgets } from '@/types/integration';
 
 // Keys that must be loaded before we hide the global overlay (above-the-fold only)
 const ABOVE_THE_FOLD_KEYS = ['topRevenue', 'cashCollected', 'notifications', 'failedPayments'];
@@ -18,6 +19,8 @@ export default function TerminalDashboard() {
   const [filteredColumn, setFilteredColumn] = useState<string | null>(null);
   const { setLoading: setGlobalLoading } = useLoading();
   const [showBelowFold, setShowBelowFold] = useState(false);
+  const [terminalSummary, setTerminalSummary] = useState<TerminalSummaryForWidgets | null>(null);
+  const [terminalSummarySettled, setTerminalSummarySettled] = useState(false);
   const [componentLoadingStates, setComponentLoadingStates] = useState<Record<string, boolean>>({
     topRevenue: true,
     cashCollected: true,
@@ -38,6 +41,32 @@ export default function TerminalDashboard() {
       loadingInitialized.current = true;
     }
   }, [setGlobalLoading]);
+
+  // Single fetch for terminal summary; Cash & MRR and Top Revenue use it so one request serves both
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const summary = await apiClient.getTerminalSummary();
+        if (cancelled) return;
+        setTerminalSummary(summary ?? null);
+        const hasCash = (summary?.cash_collected && (summary.cash_collected.today > 0 || summary.cash_collected.last_7_days > 0 || summary.cash_collected.last_30_days > 0)) || (summary?.mrr?.current_mrr ?? 0) > 0;
+        const hasContributors = (summary?.top_contributors_30d?.length ?? 0) > 0 || (summary?.top_contributors_90d?.length ?? 0) > 0;
+        if (hasCash || hasContributors) {
+          setComponentLoadingStates(prev => ({
+            ...prev,
+            ...(prev.cashCollected !== false ? { cashCollected: false } : {}),
+            ...(prev.topRevenue !== false ? { topRevenue: false } : {}),
+          }));
+        }
+      } catch {
+        if (!cancelled) setTerminalSummary(null);
+      } finally {
+        if (!cancelled) setTerminalSummarySettled(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // On terminal tab focus: only invalidate Stripe cache if a webhook has fired since we last loaded (fast tab switch)
   useEffect(() => {
@@ -98,13 +127,21 @@ export default function TerminalDashboard() {
         <NotificationsCard onLoadComplete={() => handleComponentLoaded('notifications')} />
 
         {/* Cash Collected & Current MRR */}
-        <CashCollectedAndMRR onLoadComplete={() => handleComponentLoaded('cashCollected')} />
+        <CashCollectedAndMRR
+          initialSummary={terminalSummary}
+          initialSummarySettled={terminalSummarySettled}
+          onLoadComplete={() => handleComponentLoaded('cashCollected')}
+        />
       </div>
 
       {/* Revenue Contributors & Failed Payment Queue Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Top 5 Revenue Contributors */}
-        <TopRevenueContributors onLoadComplete={() => handleComponentLoaded('topRevenue')} />
+        <TopRevenueContributors
+          initialSummary={terminalSummary}
+          initialSummarySettled={terminalSummarySettled}
+          onLoadComplete={() => handleComponentLoaded('topRevenue')}
+        />
 
         {/* Failed Payment Queue */}
         <FailedPaymentQueue onLoadComplete={() => handleComponentLoaded('failedPayments')} />

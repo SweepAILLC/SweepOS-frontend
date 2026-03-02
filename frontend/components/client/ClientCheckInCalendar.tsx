@@ -27,6 +27,8 @@ interface ClientCheckInCalendarProps {
   isOpen: boolean;
   onClose: () => void;
   onCloseBoth?: () => void; // Callback to close both calendar and drawer
+  /** When true, render inside parent (no fixed overlay); for side-by-side with health score */
+  inline?: boolean;
 }
 
 export default function ClientCheckInCalendar({
@@ -34,6 +36,7 @@ export default function ClientCheckInCalendar({
   isOpen,
   onClose,
   onCloseBoth,
+  inline = false,
 }: ClientCheckInCalendarProps) {
   const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -301,36 +304,9 @@ export default function ClientCheckInCalendar({
 
   const selectedDateCheckIns = selectedDate ? getCheckInsForDate(selectedDate) : [];
 
-  const content = (
-    <div className="fixed inset-0 z-[100]">
-      {/* Clickable area between modals - closes both */}
-      <div 
-        className="fixed inset-0 pointer-events-auto bg-transparent"
-        style={{ left: 'calc(672px + 24rem + 1rem)' }} // Start after the calendar panel + modal width (w-96 = 24rem)
-        onClick={() => {
-          if (onCloseBoth) {
-            onCloseBoth();
-          } else {
-            onClose();
-          }
-        }}
-      />
-      
-      {/* Slide-in panel */}
-      <Transition
-        show={isOpen}
-        as={React.Fragment}
-        enter="transform transition ease-out duration-300"
-        enterFrom="-translate-x-full"
-        enterTo="translate-x-0"
-        leave="transform transition ease-in duration-200"
-        leaveFrom="translate-x-0"
-        leaveTo="-translate-x-full"
-      >
-        <div 
-          className="fixed left-0 top-0 bottom-0 w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl overflow-hidden pointer-events-auto relative flex flex-col z-[100]"
-        >
-            <div className="p-6 flex flex-col h-full overflow-hidden">
+  const panelContent = (
+    <>
+    <div className="p-6 flex flex-col h-full overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between mb-6 flex-shrink-0">
                 <div>
@@ -647,13 +623,11 @@ export default function ClientCheckInCalendar({
                 </>
               )}
             </div>
-          </div>
-        </Transition>
 
       {/* Day Details Modal - shows when a date is selected */}
       {selectedDate && (
         <div 
-          className="fixed left-[calc(672px+1rem)] top-0 bottom-0 z-[110] pointer-events-auto flex items-start pt-6"
+          className={inline ? "absolute left-full top-0 ml-2 z-10 flex items-start pt-0" : "fixed left-[calc(672px+1rem)] top-0 bottom-0 z-[110] pointer-events-auto flex items-start pt-6"}
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -866,12 +840,37 @@ export default function ClientCheckInCalendar({
           </div>
         </div>
       )}
+    </>
+  );
+
+  const wrapped = inline ? (
+    <div className="w-full max-w-2xl h-full flex flex-col overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg relative">
+      {panelContent}
+    </div>
+  ) : (
+    <div className="fixed inset-0 z-[100]">
+      <div
+        className="fixed inset-0 pointer-events-auto bg-transparent"
+        style={{ left: 'calc(672px + 24rem + 1rem)' }}
+        onClick={() => { if (onCloseBoth) onCloseBoth(); else onClose(); }}
+      />
+      <Transition
+        show={isOpen}
+        as={React.Fragment}
+        enter="transform transition ease-out duration-300"
+        enterFrom="-translate-x-full"
+        enterTo="translate-x-0"
+        leave="transform transition ease-in duration-200"
+        leaveFrom="translate-x-0"
+        leaveTo="-translate-x-full"
+      >
+        <div className="fixed left-0 top-0 bottom-0 w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl overflow-hidden pointer-events-auto relative flex flex-col z-[100]">
+          {panelContent}
+        </div>
+      </Transition>
     </div>
   );
 
-  // Render using portal to escape Dialog's focus trap
-  return typeof window !== 'undefined' 
-    ? createPortal(content, document.body)
-    : null;
+  return inline ? wrapped : (typeof window !== 'undefined' ? createPortal(wrapped, document.body) : null);
 }
 

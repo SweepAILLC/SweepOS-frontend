@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import { Client, ClientPayment } from '@/types/client';
+import type { TerminalSummaryForWidgets } from '@/types/integration';
 
 interface TopContributor {
   client_id: string;
@@ -11,6 +12,10 @@ interface TopContributor {
 }
 
 interface TopRevenueContributorsProps {
+  /** When provided with data, used immediately so no loading wait; parent fetches once for Terminal. */
+  initialSummary?: TerminalSummaryForWidgets | null;
+  /** When true and initialSummary is empty/null, run fallback fetch. */
+  initialSummarySettled?: boolean;
   onLoadComplete?: () => void;
 }
 
@@ -19,12 +24,17 @@ function normalizeEmail(email: string | undefined | null): string | null {
   return email.replace(/\s+/g, '').toLowerCase().trim() || null;
 }
 
-export default function TopRevenueContributors({ onLoadComplete }: TopRevenueContributorsProps = {}) {
+export default function TopRevenueContributors({ initialSummary, initialSummarySettled, onLoadComplete }: TopRevenueContributorsProps = {}) {
   const [contributors30, setContributors30] = useState<TopContributor[]>([]);
   const [contributors90, setContributors90] = useState<TopContributor[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<30 | 90>(30);
   const hasCalledOnLoadComplete = useRef(false);
+
+  const hasDataFromSummary = (s: TerminalSummaryForWidgets | null | undefined) => {
+    if (!s) return false;
+    return (s.top_contributors_30d?.length ?? 0) > 0 || (s.top_contributors_90d?.length ?? 0) > 0;
+  };
 
   const loadFromSummary = async (): Promise<{ top30: TopContributor[]; top90: TopContributor[] } | null> => {
     const summary = await apiClient.getTerminalSummary();
@@ -125,7 +135,19 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
     return { top30, top90 };
   };
 
+  // Use initial summary from parent when available (avoids duplicate request and shows data immediately)
   useEffect(() => {
+    if (initialSummary && hasDataFromSummary(initialSummary)) {
+      setContributors30(initialSummary.top_contributors_30d ?? []);
+      setContributors90(initialSummary.top_contributors_90d ?? []);
+      setLoading(false);
+    }
+  }, [initialSummary]);
+
+  // When parent's fetch settled with no data (or error), run fallback
+  useEffect(() => {
+    if (!initialSummarySettled) return;
+    if (hasDataFromSummary(initialSummary)) return;
     let cancelled = false;
     (async () => {
       try {
@@ -155,7 +177,39 @@ export default function TopRevenueContributors({ onLoadComplete }: TopRevenueCon
       }
     })();
     return () => { cancelled = true; };
-  }, [onLoadComplete]);
+  }, [initialSummarySettled]); // eslint-disable-line react-hooks/exhaustive-deps -- only when settled
+
+  // When no parent summary (e.g. used outside TerminalDashboard), fetch on mount
+  useEffect(() => {
+    if (initialSummarySettled !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        let result: { top30: TopContributor[]; top90: TopContributor[] } | null = null;
+        try {
+          result = await loadFromSummary();
+        } catch (err) {
+          console.warn('Terminal summary failed for contributors, using fallback:', err);
+        }
+        if (!result) result = await loadFallback();
+        if (cancelled) return;
+        setContributors30(result!.top30);
+        setContributors90(result!.top90);
+      } catch (error) {
+        if (!cancelled) console.error('Failed to load revenue contributors:', error);
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+          if (!hasCalledOnLoadComplete.current && onLoadComplete) {
+            hasCalledOnLoadComplete.current = true;
+            onLoadComplete();
+          }
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- mount only when no parent
 
   const contributors = timeRange === 30 ? contributors30 : contributors90;
 

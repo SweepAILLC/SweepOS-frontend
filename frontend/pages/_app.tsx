@@ -92,9 +92,9 @@ export default function App({ Component, pageProps }: AppProps) {
     // Run keep-alive immediately on mount (if conditions are met)
     keepSessionAlive();
 
-    // Set up interval to keep session alive every 30 minutes
-    // Token expires in 60 minutes, so refreshing every 30 minutes keeps it alive
-    keepAliveIntervalRef.current = setInterval(keepSessionAlive, 30 * 60 * 1000); // 30 minutes
+    // Set up interval to keep session alive every 20 minutes
+    // Token expires in 24 hours; keep-alive validates token is still valid
+    keepAliveIntervalRef.current = setInterval(keepSessionAlive, 20 * 60 * 1000); // 20 minutes
 
     // Also refresh when tab becomes visible (user switches back to tab)
     const handleVisibilityChange = () => {

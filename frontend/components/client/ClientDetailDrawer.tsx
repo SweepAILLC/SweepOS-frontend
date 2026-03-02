@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
+import ClientHealthScoreContent from './ClientHealthScoreContent';
 
 interface ClientDetailDrawerProps {
   client: Client | null;
@@ -56,10 +57,7 @@ export default function ClientDetailDrawer({
   });
 
   useEffect(() => {
-    // Close calendar modal when drawer opens or client changes
-    if (isOpen) {
-      setShowCheckInCalendar(false);
-    }
+    if (isOpen) setShowCheckInCalendar(false);
     
     if (client) {
       setFormData({
@@ -374,7 +372,7 @@ export default function ClientDetailDrawer({
     }).format(amount);
   };
 
-  const totalPaid = payments?.total_amount_paid || (client.lifetime_revenue_cents || 0) / 100;
+  const totalPaid = payments?.total_amount_paid || (client?.lifetime_revenue_cents ?? 0) / 100;
 
   return (
     <>
@@ -382,13 +380,7 @@ export default function ClientDetailDrawer({
       <Dialog 
         as="div" 
         className="relative z-50" 
-        static={showCheckInCalendar} // Prevent Dialog from blocking when calendar is open
-        onClose={(e) => {
-          // Don't close if calendar is open
-          if (!showCheckInCalendar) {
-            onClose();
-          }
-        }}
+        onClose={onClose}
       >
         <Transition.Child
           as={Fragment}
@@ -414,16 +406,15 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl">
-                  <div className="flex h-full flex-col overflow-y-scroll bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
-                    {/* Header */}
-                    <div className="px-4 py-6 sm:px-6 border-b border-gray-200 dark:border-white/10">
-                        <div className="flex items-center justify-between">
+                <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                  <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
+                    <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                    <div className="flex-shrink-0 px-4 py-6 sm:px-6 border-b border-gray-200 dark:border-white/10">
+                        <div className="flex items-center justify-between gap-2">
                         <Dialog.Title className="text-lg font-medium">
                           Client Profile
                         </Dialog.Title>
-                        <div className="flex gap-2">
-                          {isEditing ? (
+                        {isEditing ? (
                             <>
                               <button
                                 type="button"
@@ -487,12 +478,14 @@ export default function ClientDetailDrawer({
                             </>
                           )}
                         </div>
-                      </div>
                     </div>
 
-                    {/* Content */}
-                    <div className="flex-1 px-4 py-5 sm:px-6">
+                    {/* Content - scrollable: Health Score first, then rest */}
+                    <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                       <div className="space-y-6">
+                        {/* Health Score - always visible when client card is opened */}
+                        <ClientHealthScoreContent client={client} />
+
                         {/* Basic Info */}
                         <div>
                           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Contact Information</h3>
@@ -1012,27 +1005,29 @@ export default function ClientDetailDrawer({
                                       <div>
                                         <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
                                         <dd className="mt-1">
-                                          <div className="flex items-center justify-between text-sm mb-1">
-                                            <span className="text-gray-900 dark:text-gray-100">{client.program_progress_percent.toFixed(1)}% Complete</span>
-                                            <span className="text-gray-500 dark:text-gray-100">
-                                              {client.program_progress_percent >= 100 
-                                                ? 'Expired' 
-                                                : client.program_progress_percent >= 75 
-                                                ? 'Offboarding' 
-                                                : 'Active'}
-                                            </span>
-                                          </div>
-                                          <div className="w-full bg-gray-200 rounded-full h-3">
-                                            <div
-                                              className={`h-3 rounded-full transition-all ${
-                                                client.program_progress_percent >= 100
-                                                  ? 'bg-red-500'
-                                                  : client.program_progress_percent >= 75
-                                                  ? 'bg-yellow-500'
-                                                  : 'bg-blue-500'
-                                              }`}
-                                              style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
-                                            />
+                                          <div className="space-y-1">
+                                            <div className="flex items-center justify-between text-sm">
+                                              <span className="text-gray-900 dark:text-gray-100">{client.program_progress_percent.toFixed(1)}% Complete</span>
+                                              <span className="text-gray-500 dark:text-gray-100">
+                                                {client.program_progress_percent >= 100 
+                                                  ? 'Expired' 
+                                                  : client.program_progress_percent >= 75 
+                                                  ? 'Offboarding' 
+                                                  : 'Active'}
+                                              </span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-3">
+                                              <div
+                                                className={`h-3 rounded-full transition-all ${
+                                                  client.program_progress_percent >= 100
+                                                    ? 'bg-red-500'
+                                                    : client.program_progress_percent >= 75
+                                                    ? 'bg-yellow-500'
+                                                    : 'bg-blue-500'
+                                                }`}
+                                                style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
+                                              />
+                                            </div>
                                           </div>
                                         </dd>
                                       </div>
@@ -1097,6 +1092,7 @@ export default function ClientDetailDrawer({
                       </div>
                     </div>
                   </div>
+                  </div>
                 </Dialog.Panel>
               </Transition.Child>
             </div>
@@ -1104,6 +1100,23 @@ export default function ClientDetailDrawer({
         </div>
       </Dialog>
     </Transition>
+
+    {/* Calendar modal - overlay to the right of the drawer (original position) */}
+    {showCheckInCalendar && client && (
+      <ClientCheckInCalendar
+        client={client}
+        isOpen={showCheckInCalendar}
+        onClose={() => {
+          setShowCheckInCalendar(false);
+          loadNextCheckIn();
+        }}
+        onCloseBoth={() => {
+          setShowCheckInCalendar(false);
+          onClose();
+        }}
+        inline={false}
+      />
+    )}
 
     {/* Email Composer Modal */}
     {showEmailComposer && client && getAllClientEmails(client).length > 0 && (
@@ -1121,21 +1134,6 @@ export default function ClientDetailDrawer({
       />
     )}
 
-    {/* Check-In Calendar Modal */}
-    {isOpen && (
-      <ClientCheckInCalendar
-        client={client}
-        isOpen={showCheckInCalendar}
-        onClose={() => {
-          setShowCheckInCalendar(false);
-          loadNextCheckIn(); // Refresh next check-in after closing
-        }}
-        onCloseBoth={() => {
-          setShowCheckInCalendar(false);
-          onClose(); // Close the drawer as well
-        }}
-      />
-    )}
     </>
   );
 }

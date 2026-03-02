@@ -99,6 +99,11 @@ export default function Dashboard() {
           }
         }
         
+        // Prefetch terminal summary so Cash & MRR / Top Revenue load instantly when user opens Terminal tab
+        if (isMounted) {
+          apiClient.getTerminalSummary().catch(() => {});
+        }
+        
         if (isMounted) {
           setLoadingState(false);
         }

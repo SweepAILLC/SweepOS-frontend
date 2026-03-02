@@ -18,9 +18,24 @@ interface ClientCardProps {
   isMergeTarget?: boolean;
   /** When another card is dragged over the slot above this card (insert between) */
   showSlotLineAbove?: boolean;
+  /** Health score grade for board tag (e.g. "A", "B") */
+  healthGrade?: string | null;
+  /** Health score 0–100 for display in tag (e.g. "85% A") */
+  healthScore?: number | null;
 }
 
-function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlotLineAbove = false }: ClientCardProps) {
+function gradeTagColor(grade: string): string {
+  switch (grade) {
+    case 'A': return 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-400/30';
+    case 'B': return 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-400/30';
+    case 'C': return 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-400/30';
+    case 'D': return 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-400/30';
+    case 'F': return 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30';
+    default: return 'bg-gray-500/20 text-gray-600 dark:text-gray-400 border-gray-400/30';
+  }
+}
+
+function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlotLineAbove = false, healthGrade = null, healthScore = null }: ClientCardProps) {
   const sortableId = client.id;
 
   const slotDroppable = useDroppable({ id: SLOT_DROP_ID(sortableId) });
@@ -105,12 +120,22 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
         </div>
 
         {/* Clickable content */}
-        <div onClick={handleClick}>
-          <div className="font-medium text-gray-900 dark:text-gray-100">
+        <div onClick={handleClick} className="min-w-0">
+          <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0 truncate">
             {fullName}
           </div>
           {client.email && (
-            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1">{client.email}</div>
+            <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 min-w-0 truncate" title={client.email}>
+              {client.email}
+            </div>
+          )}
+          {healthGrade != null && healthGrade !== '' && (
+            <span
+              className={`inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${gradeTagColor(healthGrade)}`}
+              title="Health score"
+            >
+              {healthScore != null && !Number.isNaN(healthScore) ? `${Math.round(healthScore)}% ` : ''}{healthGrade}
+            </span>
           )}
           {client.estimated_mrr > 0 && (
             <div className="text-sm font-semibold text-green-600 dark:text-green-400 mt-2">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import { Client, ClientPayment } from '@/types/client';
+import type { TerminalSummaryForWidgets } from '@/types/integration';
 
 interface CashCollectedData {
   today: number;
@@ -14,6 +15,10 @@ interface MRRData {
 }
 
 interface CashCollectedAndMRRProps {
+  /** When provided with data, used immediately so no loading wait; parent fetches once for Terminal. */
+  initialSummary?: TerminalSummaryForWidgets | null;
+  /** When true and initialSummary is empty/null, run fallback fetch. */
+  initialSummarySettled?: boolean;
   onLoadComplete?: () => void;
 }
 
@@ -21,11 +26,18 @@ function getLocalDate(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAndMRRProps = {}) {
+export default function CashCollectedAndMRR({ initialSummary, initialSummarySettled, onLoadComplete }: CashCollectedAndMRRProps = {}) {
   const [cashCollected, setCashCollected] = useState<CashCollectedData | null>(null);
   const [mrrData, setMrrData] = useState<MRRData | null>(null);
   const [loading, setLoading] = useState(true);
   const hasCalledOnLoadComplete = useRef(false);
+
+  const hasDataFromSummary = (s: TerminalSummaryForWidgets | null | undefined) => {
+    if (!s) return false;
+    const cash = s.cash_collected;
+    const mrr = s.mrr?.current_mrr ?? 0;
+    return (cash && (cash.today > 0 || cash.last_7_days > 0 || cash.last_30_days > 0)) || mrr > 0;
+  };
 
   const normalizeEmail = (email: string | undefined | null): string | null => {
     if (!email) return null;
@@ -187,8 +199,40 @@ export default function CashCollectedAndMRR({ onLoadComplete }: CashCollectedAnd
     }
   };
 
+  // Use initial summary from parent when available (avoids duplicate request and shows data immediately)
   useEffect(() => {
-    loadData();
+    if (initialSummary && hasDataFromSummary(initialSummary)) {
+      const cash = initialSummary.cash_collected;
+      const mrr = initialSummary.mrr;
+      setCashCollected({
+        today: cash?.today ?? 0,
+        last7Days: cash?.last_7_days ?? 0,
+        last30Days: cash?.last_30_days ?? 0,
+      });
+      setMrrData({
+        currentMRR: mrr?.current_mrr ?? 0,
+        arr: mrr?.arr ?? 0,
+      });
+      setLoading(false);
+    }
+  }, [initialSummary]);
+
+  // When parent's fetch settled with no data (or error), run fallback
+  useEffect(() => {
+    if (initialSummarySettled && !hasDataFromSummary(initialSummary)) {
+      loadData();
+    }
+  }, [initialSummarySettled]); // eslint-disable-line react-hooks/exhaustive-deps -- only when settled changes
+
+  // When no parent summary (e.g. used outside TerminalDashboard), fetch on mount
+  useEffect(() => {
+    if (initialSummarySettled === undefined) {
+      loadData();
+    }
+  // initialSummarySettled intentionally omitted: run only when parent does not pass it (mount)
+  }, []);
+
+  useEffect(() => {
     const handlePaymentCreated = () => {
       loadData();
     };

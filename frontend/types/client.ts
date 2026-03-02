@@ -46,3 +46,21 @@ export interface ClientPaymentsResponse {
   payments: ClientPayment[];
 }
 
+/** Health score factor (AI-ready for future referral/testimonial/retention/upsell). */
+export interface ClientHealthFactor {
+  key: string;
+  label: string;
+  value?: number | null;
+  raw?: Record<string, unknown> | null;
+  unit?: string | null;
+  description?: string | null;
+}
+
+export interface ClientHealthScoreResponse {
+  client_id: string;
+  score: number;
+  grade: string;
+  factors: ClientHealthFactor[];
+  computed_at?: string | null;
+}
+

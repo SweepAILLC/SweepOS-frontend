@@ -75,7 +75,7 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
                   />
                 </div>
               )}
-              <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100 truncate">Sweep Coach OS</h1>
+              <h1 className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100 truncate">Sweep OS</h1>
             </div>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
               {shouldShowTab('brevo') && (

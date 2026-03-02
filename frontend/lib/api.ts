@@ -32,6 +32,16 @@ class ApiClient {
       (response) => response,
       (error) => {
         if (error.response?.status === 401 || error.response?.status === 403) {
+          // Don't treat 401/403 from integration connect-direct as session expiry: show error in UI instead of logging out
+          const requestUrl = String(error.config?.url ?? error.config?.baseURL ?? '');
+          const isIntegrationConnect =
+            requestUrl.includes('stripe/connect-direct') ||
+            requestUrl.includes('brevo/connect-direct') ||
+            requestUrl.includes('calcom/connect-direct') ||
+            requestUrl.includes('calendly/connect-direct');
+          if (isIntegrationConnect) {
+            return Promise.reject(error);
+          }
           // Unauthorized/Forbidden - session expired or invalid credentials
           clearSessionCaches();
           Cookies.remove('access_token');
@@ -246,6 +256,21 @@ class ApiClient {
       params: { limit }
     });
     return response.data;
+  }
+
+  /** Client/lead health score (logic-based; AI-ready factors). */
+  async getClientHealthScore(clientId: string) {
+    const response = await this.client.get(`/clients/${clientId}/health-score`);
+    return response.data;
+  }
+
+  /** Batch health scores for board tags (score + grade only, no Brevo). */
+  async getClientsHealthScores(clientIds: string[]): Promise<Record<string, { score: number; grade: string }>> {
+    if (clientIds.length === 0) return {};
+    const response = await this.client.get('/clients/health-scores', {
+      params: { client_ids: clientIds.join(',') }
+    });
+    return response.data || {};
   }
 
   async getNextCheckIn(clientId: string) {

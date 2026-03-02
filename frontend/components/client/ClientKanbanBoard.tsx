@@ -59,6 +59,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const [syncingRefreshing, setSyncingRefreshing] = useState(false);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [mergingCards, setMergingCards] = useState(false);
+  const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -143,7 +144,12 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       
       // Force state update by creating a new array reference
       setClients([...data]);
-      
+      // Batch fetch health scores for board tags (no Brevo in batch for performance)
+      if (data.length > 0) {
+        apiClient.getClientsHealthScores(data.map((c: Client) => c.id)).then(setHealthScores).catch(() => setHealthScores({}));
+      } else {
+        setHealthScores({});
+      }
       // Return the data for use in onUpdate callback
       return data;
     } catch (error) {
@@ -702,6 +708,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                   setIsDrawerOpen(true);
                 }}
                 onClientDelete={handleDeleteClient}
+                healthScores={healthScores}
               />
             );
           })}
@@ -914,9 +921,10 @@ interface KanbanColumnProps {
   mergingCards: boolean;
   onClientClick: (client: Client) => void;
   onClientDelete?: (client: Client) => void;
+  healthScores?: Record<string, { score: number; grade: string }>;
 }
 
-function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete }: KanbanColumnProps) {
+function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete, healthScores = {} }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: id,
   });
@@ -945,6 +953,8 @@ function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, 
                 onDelete={onClientDelete}
                 isMergeTarget={dragOverId === MERGE_DROP_ID(client.id)}
                 showSlotLineAbove={dragOverId === SLOT_DROP_ID(client.id)}
+                healthGrade={healthScores[client.id]?.grade}
+                healthScore={healthScores[client.id]?.score}
               />
             ))}
           </div>
