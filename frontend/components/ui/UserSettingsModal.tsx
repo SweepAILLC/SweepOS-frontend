@@ -22,6 +22,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
   const [success, setSuccess] = useState<string | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
@@ -34,6 +35,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
     data_sharing_enabled: true,
     analytics_enabled: true
   });
+  const [fathomApiKey, setFathomApiKey] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -57,6 +59,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
         data_sharing_enabled: settings.data_sharing_enabled ?? true,
         analytics_enabled: settings.analytics_enabled ?? true
       });
+      setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
       const orgId = user?.org_id != null ? String(user.org_id) : null;
       setCurrentOrgId(orgId);
       if (settings.email) {
@@ -115,7 +118,8 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
       const updateData: any = {
         email: formData.email,
         data_sharing_enabled: formData.data_sharing_enabled,
-        analytics_enabled: formData.analytics_enabled
+        analytics_enabled: formData.analytics_enabled,
+        fathom_api_key: fathomApiKey || undefined
       };
 
       if (formData.new_password) {
@@ -271,6 +275,52 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
                           })}
                         </ul>
                       )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Intelligence dropdown */}
+                <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
+                  <button
+                    type="button"
+                    onClick={() => setIntelligenceOpen((o) => !o)}
+                    className="flex items-center justify-between w-full text-left py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    aria-expanded={intelligenceOpen}
+                  >
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">Intelligence</h4>
+                    <svg className={`w-5 h-5 text-gray-500 transition-transform ${intelligenceOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </button>
+                  {intelligenceOpen && (
+                    <div className="mt-3 space-y-3 pl-0">
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Connect Fathom to use call summaries and transcripts for client health insights.
+                      </p>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          Fathom API Key
+                        </label>
+                        <input
+                          type="password"
+                          value={fathomApiKey}
+                          onChange={(e) => setFathomApiKey(e.target.value)}
+                          placeholder="Enter your Fathom API key"
+                          className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono placeholder-gray-400 dark:placeholder-gray-500"
+                          autoComplete="off"
+                        />
+                        <p className="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                          <a
+                            href="https://app.usefathom.com/settings/api"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            Get your API key
+                          </a>
+                          {' '}from Fathom → Settings → API.
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>

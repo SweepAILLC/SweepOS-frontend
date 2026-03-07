@@ -145,6 +145,7 @@ class ApiClient {
     new_password?: string;
     data_sharing_enabled?: boolean;
     analytics_enabled?: boolean;
+    fathom_api_key?: string;
   }) {
     const response = await this.client.put('/auth/me/settings', data);
     return response.data;

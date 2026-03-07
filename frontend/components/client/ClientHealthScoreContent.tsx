@@ -86,23 +86,28 @@ export default function ClientHealthScoreContent({ client, compact = false }: Cl
                 key={factor.key}
                 className="flex items-start justify-between gap-3 py-1.5 px-2.5 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="text-xs font-medium text-gray-900 dark:text-gray-100">
                     {factor.label}
                   </p>
                   {factor.description && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       {factor.description}
                     </p>
                   )}
                 </div>
                 {factor.value !== undefined && factor.value !== null && (
-                  <span className="flex-shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-200 tabular-nums">
+                  <span className="flex-shrink-0 text-xs font-semibold text-gray-700 dark:text-gray-200 tabular-nums ml-2">
                     {factor.unit === 'percent'
                       ? `${factor.value}%`
                       : factor.unit === 'days'
                         ? `${factor.value}d`
                         : String(factor.value)}
+                  </span>
+                )}
+                {(factor.value === undefined || factor.value === null) && (
+                  <span className="flex-shrink-0 text-xs text-gray-400 dark:text-gray-500 ml-2">
+                    N/A
                   </span>
                 )}
               </div>
