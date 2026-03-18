@@ -10,6 +10,7 @@ import FunnelListPanel from '@/components/FunnelListPanel';
 import AdminPanel from '@/components/AdminPanel';
 import UsersPanel from '@/components/UsersPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
+import SettingsPanel from '@/components/ui/SettingsPanel';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
 
@@ -18,21 +19,21 @@ export default function Dashboard() {
   const { setLoading: setGlobalLoading } = useLoading();
   
   // New session (after login) starts on terminal; refresh keeps current tab via localStorage
-  const getInitialTab = (): 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' => {
+  const getInitialTab = (): 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings' => {
     if (typeof window === 'undefined') return 'terminal';
     if (sessionStorage.getItem('newSession') === '1') {
       sessionStorage.removeItem('newSession');
       return 'terminal';
     }
     const savedTab = localStorage.getItem('activeTab');
-    const validTabs = ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'];
+    const validTabs = ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom', 'settings'];
     if (savedTab && validTabs.includes(savedTab)) {
-      return savedTab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
+      return savedTab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings';
     }
     return 'terminal';
   };
 
-  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom'>(() => getInitialTab());
+  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings'>(() => getInitialTab());
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
@@ -194,8 +195,8 @@ export default function Dashboard() {
     }
     
     // Handle standalone tab navigation (only if no OAuth params)
-    if (tab && typeof tab === 'string' && ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom'].includes(tab)) {
-      const tabValue = tab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
+    if (tab && typeof tab === 'string' && ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom', 'settings'].includes(tab)) {
+      const tabValue = tab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings';
       setActiveTab(tabValue);
       // Clear the query parameter after setting the tab
       router.replace('/', undefined, { shallow: true });
@@ -334,6 +335,13 @@ export default function Dashboard() {
           ) : (
             <RestrictedTabView tabName="calcom" />
           )
+        )}
+
+        {activeTab === 'settings' && (
+          <div className="w-full">
+            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
+            <SettingsPanel />
+          </div>
         )}
       </main>
     </div>

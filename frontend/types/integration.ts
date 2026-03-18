@@ -14,6 +14,8 @@ export interface CalComStatus {
 
 export interface CalComBooking {
   id: number;
+  /** Cal.com booking UID (string). Use this for GET /v2/bookings/{bookingUid}. */
+  uid?: string;
   title?: string;
   description?: string;
   startTime: string; // ISO 8601 datetime string
@@ -53,10 +55,15 @@ export interface CalComBooking {
   metadata?: Record<string, any>;
   /** Form responses keyed by field name/slug (from booking details API) */
   responses?: Record<string, unknown>;
+  /** Cal.com JSON: bookingFieldsResponses (booking field slug -> value). Prefer this for form display. */
+  bookingFieldsResponses?: Record<string, unknown>;
   /** Event type booking field definitions */
   bookingFields?: Array<Record<string, unknown>>;
   /** Routing form responses (pre-call info) */
   routingFormResponses?: Array<{ formId?: string; response?: Record<string, unknown>; createdAt?: string }>;
+  /** Sales call tracking (calendar tab) */
+  is_sales_call?: boolean;
+  sale_closed?: boolean | null;
 }
 
 export interface CalComEventType {
@@ -151,6 +158,9 @@ export interface CalendlyScheduledEvent {
   event_guests?: Array<Record<string, any>>;
   calendar_event?: Record<string, any>;
   tracking?: Record<string, any>;
+  /** Sales call tracking (calendar tab) */
+  is_sales_call?: boolean;
+  sale_closed?: boolean | null;
   [key: string]: any; // Allow extra fields
 }
 

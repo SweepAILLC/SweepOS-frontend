@@ -8,6 +8,7 @@ interface EventDetailsModalProps {
   provider: 'calcom' | 'calendly';
   eventId: string | number;
   eventUri?: string; // For Calendly
+  onSalesUpdated?: () => void;
 }
 
 export default function EventDetailsModal({
@@ -15,12 +16,14 @@ export default function EventDetailsModal({
   onClose,
   provider,
   eventId,
-  eventUri
+  eventUri,
+  onSalesUpdated
 }: EventDetailsModalProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [booking, setBooking] = useState<CalComBooking | null>(null);
   const [event, setEvent] = useState<CalendlyScheduledEvent | null>(null);
+  const [salesUpdating, setSalesUpdating] = useState(false);
 
   useEffect(() => {
     if (isOpen && eventId) {
@@ -40,7 +43,7 @@ export default function EventDetailsModal({
       setError(null);
       
       if (provider === 'calcom') {
-        const data = await apiClient.getCalComBookingDetails(Number(eventId));
+        const data = await apiClient.getCalComBookingDetails(String(eventId));
         setBooking(data);
       } else {
         // For Calendly, use the event URI
@@ -53,6 +56,30 @@ export default function EventDetailsModal({
       setError(err?.response?.data?.detail || err?.message || 'Failed to load event details');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const updateSalesFlags = async (updates: { is_sales_call?: boolean; sale_closed?: boolean | null }) => {
+    const eventIdStr = provider === 'calcom'
+      ? String((booking as CalComBooking)?.uid ?? (booking as CalComBooking)?.id ?? eventId)
+      : String(eventId);
+    const payload: Parameters<typeof apiClient.updateCalendarBookingSales>[2] = { ...updates };
+    if (provider === 'calendly' && (eventUri || (event as CalendlyScheduledEvent)?.uri)) {
+      payload.event_uri = eventUri || (event as CalendlyScheduledEvent)?.uri;
+    }
+    setSalesUpdating(true);
+    try {
+      await apiClient.updateCalendarBookingSales(provider, eventIdStr, payload);
+      if (provider === 'calcom' && booking) {
+        setBooking({ ...booking, ...updates });
+      } else if (provider === 'calendly' && event) {
+        setEvent({ ...event, ...updates });
+      }
+      onSalesUpdated?.();
+    } catch (err) {
+      console.error('Failed to update sales flags:', err);
+    } finally {
+      setSalesUpdating(false);
     }
   };
 
@@ -76,15 +103,18 @@ export default function EventDetailsModal({
 
   const renderFormResponses = () => {
     if (provider === 'calcom' && booking) {
-      // Cal.com form responses
-      const responses = booking.responses || {};
+      // Cal.com form responses: use bookingFieldsResponses from JSON when present, else responses
+      const responses = (booking.bookingFieldsResponses && typeof booking.bookingFieldsResponses === 'object')
+        ? (booking.bookingFieldsResponses as Record<string, unknown>)
+        : (booking.responses || {});
       const bookingFields = booking.bookingFields || [];
       const routingFormResponses = booking.routingFormResponses || [];
-      
-      const hasBookingFields = bookingFields.length > 0 && Object.keys(responses).length > 0;
+
+      const hasResponses = Object.keys(responses).length > 0;
+      const hasBookingFields = bookingFields.length > 0 && hasResponses;
       const hasRoutingForms = routingFormResponses.length > 0;
-      
-      if (!hasBookingFields && !hasRoutingForms) {
+
+      if (!hasResponses && !hasRoutingForms) {
         return (
           <div className="text-sm text-gray-500 dark:text-gray-400">
             No form responses collected for this booking.
@@ -129,36 +159,55 @@ export default function EventDetailsModal({
             </div>
           )}
           
-          {/* Booking Field Responses */}
-          {hasBookingFields && (
+          {/* Booking Form Responses: from bookingFields when available, else raw key/value */}
+          {hasResponses && (
             <div>
               <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
                 Booking Form Responses
               </h5>
-              {bookingFields.map((field: any, idx: number) => {
-                const fieldValue = responses[field.name] || responses[field.label] || field.value;
-                if (!fieldValue) return null;
-                
-                return (
-                  <div key={idx} className="border-b border-gray-200 dark:border-gray-700 pb-3 mb-3">
-                    <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      {field.label || field.name || `Question ${idx + 1}`}
-                    </div>
-                    <div className="text-sm text-gray-900 dark:text-gray-100">
-                      {typeof fieldValue === 'object' ? JSON.stringify(fieldValue) : String(fieldValue)}
-                    </div>
-                  </div>
-                );
-              })}
-              
-              {/* Direct responses object */}
-              {Object.keys(responses).length > 0 && (
-                <div className="mt-4">
+              {bookingFields.length > 0 ? (
+                <>
+                  {bookingFields.map((field: any, idx: number) => {
+                    const fieldValue = responses[field.name] ?? responses[field.label] ?? responses[field.slug] ?? field.value;
+                    if (fieldValue == null || fieldValue === '') return null;
+                    return (
+                      <div key={idx} className="border-b border-gray-200 dark:border-gray-700 pb-3 mb-3">
+                        <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                          {field.label || field.name || field.slug || `Question ${idx + 1}`}
+                        </div>
+                        <div className="text-sm text-gray-900 dark:text-gray-100">
+                          {typeof fieldValue === 'object' ? JSON.stringify(fieldValue) : String(fieldValue)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {/* Unmapped response keys (slug in responses but not in bookingFields) */}
+                  {(() => {
+                    const mappedKeys = new Set(
+                      bookingFields.flatMap((f: any) => [f.name, f.label, f.slug].filter(Boolean))
+                    );
+                    const unmapped = Object.entries(responses).filter(([k]) => !mappedKeys.has(k));
+                    if (unmapped.length === 0) return null;
+                    return (
+                      <div className="mt-4">
+                        {unmapped.map(([key, value]) => (
+                          <div key={key} className="border-b border-gray-200 dark:border-gray-700 pb-2 mb-2">
+                            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{key}</div>
+                            <div className="text-sm text-gray-900 dark:text-gray-100">
+                              {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </>
+              ) : (
+                /* No bookingFields: show all responses by key (e.g. from bookingFieldsResponses only) */
+                <div className="space-y-2">
                   {Object.entries(responses).map(([key, value]) => (
                     <div key={key} className="border-b border-gray-200 dark:border-gray-700 pb-2 mb-2">
-                      <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                        {key}
-                      </div>
+                      <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{key}</div>
                       <div className="text-sm text-gray-900 dark:text-gray-100">
                         {typeof value === 'object' ? JSON.stringify(value) : String(value)}
                       </div>
@@ -194,36 +243,43 @@ export default function EventDetailsModal({
               <h5 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
                 Pre-Call Routing Form Submissions
               </h5>
-              {routingFormSubmissions.map((submission: any, idx: number) => (
-                <div key={idx} className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                  <div className="text-xs text-blue-600 dark:text-blue-400 mb-2">
-                    Submitted by: {submission.submitter_email || submission.email || 'N/A'}
+              {routingFormSubmissions.map((submission: any, idx: number) => {
+                // Prefer questions_and_answers from Calendly API GET /routing_form_submissions/{uuid}
+                const qa = Array.isArray(submission.questions_and_answers)
+                  ? submission.questions_and_answers
+                  : (submission.answers || []);
+                const hasQa = qa.length > 0;
+                return (
+                  <div key={idx} className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div className="text-xs text-blue-600 dark:text-blue-400 mb-2">
+                      Submitted by: {submission.submitter_email || submission.email || 'N/A'}
+                    </div>
+                    {hasQa ? (
+                      <div className="space-y-2">
+                        {qa.map((item: any, answerIdx: number) => (
+                          <div key={answerIdx} className="border-b border-blue-200 dark:border-blue-700 pb-2">
+                            <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                              {item.question || item.label || `Question ${answerIdx + 1}`}
+                            </div>
+                            <div className="text-sm text-gray-900 dark:text-gray-100">
+                              {item.answer ?? item.value ?? 'No answer provided'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        No answers in this submission.
+                      </div>
+                    )}
+                    {(submission.submitted_at || submission.created_at) && (
+                      <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        Submitted: {new Date(submission.submitted_at || submission.created_at).toLocaleString()}
+                      </div>
+                    )}
                   </div>
-                  {submission.answers && submission.answers.length > 0 ? (
-                    <div className="space-y-2">
-                      {submission.answers.map((answer: any, answerIdx: number) => (
-                        <div key={answerIdx} className="border-b border-blue-200 dark:border-blue-700 pb-2">
-                          <div className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            {answer.question || answer.label || `Question ${answerIdx + 1}`}
-                          </div>
-                          <div className="text-sm text-gray-900 dark:text-gray-100">
-                            {answer.answer || answer.value || 'No answer provided'}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      No answers in this submission.
-                    </div>
-                  )}
-                  {submission.submitted_at && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                      Submitted: {new Date(submission.submitted_at).toLocaleString()}
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
           
@@ -394,6 +450,43 @@ export default function EventDetailsModal({
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Sales call tracking */}
+                <div>
+                  <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                    Sales call tracking
+                  </h4>
+                  <div className="flex flex-wrap items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!(provider === 'calcom' ? booking?.is_sales_call : event?.is_sales_call)}
+                        disabled={salesUpdating}
+                        onChange={(e) => updateSalesFlags({ is_sales_call: e.target.checked, sale_closed: e.target.checked ? (provider === 'calcom' ? booking?.sale_closed : event?.sale_closed) ?? false : null })}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Mark as sales call</span>
+                    </label>
+                    {(provider === 'calcom' ? booking?.is_sales_call : event?.is_sales_call) && (
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!(provider === 'calcom' ? booking?.sale_closed : event?.sale_closed)}
+                          disabled={salesUpdating}
+                          onChange={(e) => updateSalesFlags({ sale_closed: e.target.checked })}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">Sale closed</span>
+                      </label>
+                    )}
+                    {salesUpdating && (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Updating…</span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                    Sales calls are used for close-rate tracking. If this contact pays (Stripe), their latest sales call is auto-marked closed.
+                  </p>
                 </div>
 
                 {/* Form Responses */}

@@ -6,8 +6,20 @@ interface NotificationsCardProps {
   onLoadComplete?: () => void;
 }
 
+interface CloseRateSection {
+  total_sales_calls: number;
+  closed_count: number;
+  close_rate_pct: number | null;
+}
+
+interface CloseRateData {
+  all_time: CloseRateSection;
+  last_30d: CloseRateSection;
+}
+
 export default function NotificationsCard({ onLoadComplete }: NotificationsCardProps = {}) {
   const [summary, setSummary] = useState<CalendarNotificationsSummary | null>(null);
+  const [closeRateData, setCloseRateData] = useState<CloseRateData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -19,6 +31,18 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
     const interval = setInterval(loadSummary, 5 * 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!summary?.connected) {
+      setCloseRateData(null);
+      return;
+    }
+    const loadCloseRate = () =>
+      apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
+    loadCloseRate();
+    const interval = setInterval(loadCloseRate, 2 * 60 * 1000); // refetch every 2 min so terminal updates after webhooks
+    return () => clearInterval(interval);
+  }, [summary?.connected]);
 
   const loadSummary = async () => {
     const startTime = Date.now();
@@ -34,9 +58,9 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
       console.log('[NOTIFICATIONS] Data type:', typeof data);
       console.log('[NOTIFICATIONS] Data keys:', Object.keys(data || {}));
       setSummary(data);
-      // Clear error if we successfully got data
-      if (data) {
+      if (data?.connected) {
         setError(null);
+        apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
       }
     } catch (err: any) {
       console.error('[NOTIFICATIONS] Failed to load calendar summary:', err);
@@ -65,6 +89,30 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
       }
     }
   };
+
+  // Refresh immediately after sales flag changes from the calendar modal.
+  useEffect(() => {
+    const handler = () => {
+      loadSummary();
+    };
+
+    window.addEventListener('calendarSalesFlagsUpdated', handler);
+    return () => {
+      window.removeEventListener('calendarSalesFlagsUpdated', handler);
+    };
+  }, []);
+
+  // Refresh immediately after calendar manual bookings are rescheduled.
+  useEffect(() => {
+    const handler = () => {
+      loadSummary();
+    };
+
+    window.addEventListener('calendarBookingsUpdated', handler);
+    return () => {
+      window.removeEventListener('calendarBookingsUpdated', handler);
+    };
+  }, []);
 
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
@@ -164,7 +212,6 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
     );
   }
 
-  const weekChange = summary.last_week_percentage_change;
   const monthChange = summary.last_month_percentage_change;
 
   return (
@@ -212,24 +259,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
           </div>
         </div>
 
-        {/* Last Week Comparison */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
-              {summary.last_week_count}
-            </div>
-            {weekChange !== null && weekChange !== undefined && (
-              <span className={`text-xs font-medium ${weekChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                {weekChange >= 0 ? '+' : ''}{weekChange.toFixed(1)}%
-              </span>
-            )}
-          </div>
-          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
-            Last 7 Days
-          </div>
-        </div>
-
-        {/* Last Month Comparison */}
+        {/* Last 30 Days */}
         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
@@ -244,6 +274,22 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
           <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
             Last 30 Days
           </div>
+        </div>
+
+        {/* Sales Close Rate */}
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+            {closeRateData?.all_time?.close_rate_pct != null ? `${closeRateData.all_time.close_rate_pct}%` : '—'}
+          </div>
+          <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
+            Sales close rate
+          </div>
+          {closeRateData && closeRateData.all_time.total_sales_calls > 0 && (
+            <div className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+              All time: {closeRateData.all_time.closed_count} / {closeRateData.all_time.total_sales_calls} closed
+            </div>
+          )}
+          {/* Terminal display: show all-time close rate only */}
         </div>
 
         {/* Show-up Rate */}

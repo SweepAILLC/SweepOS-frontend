@@ -409,17 +409,17 @@ export default function ClientDetailDrawer({
                 <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
-                    <div className="flex-shrink-0 px-4 py-6 sm:px-6 border-b border-gray-200 dark:border-white/10">
-                        <div className="flex items-center justify-between gap-2">
-                        <Dialog.Title className="text-lg font-medium">
+                    <div className="flex-shrink-0 px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-white/10">
+                        <div className="flex items-center justify-between gap-3">
+                        <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
                           Client Profile
                         </Dialog.Title>
                         {isEditing ? (
-                            <>
+                            <div className="flex items-center gap-2 flex-shrink-0">
                               <button
                                 type="button"
                                 onClick={handleCancel}
-                                className="px-3 py-1 text-sm text-gray-700 hover:bg-gray-100 rounded"
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 rounded-lg transition-colors border border-transparent"
                                 disabled={loading}
                               >
                                 Cancel
@@ -428,54 +428,75 @@ export default function ClientDetailDrawer({
                                 type="button"
                                 onClick={handleSave}
                                 disabled={loading}
-                                className="px-3 py-1 text-sm glass-button neon-glow rounded disabled:opacity-50"
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg transition-colors shadow-sm disabled:opacity-50"
                               >
                                 {loading ? 'Saving...' : 'Save'}
                               </button>
-                            </>
+                            </div>
                           ) : (
-                            <>
-                              {client.first_name && client.last_name && brevoStatus?.connected && (
-                                <>
-                                  {clientInBrevo && getAllClientEmails(client).length > 0 ? (
-                                    <button
-                                      type="button"
-                                      onClick={handleEmailClient}
-                                      disabled={checkingBrevoContact}
-                                      className="px-3 py-1 text-sm glass-button-secondary hover:bg-white/20 rounded disabled:opacity-50"
-                                      title="Send email to this client via Brevo"
-                                    >
-                                      {checkingBrevoContact ? 'Checking...' : 'Email'}
-                                    </button>
-                                  ) : (
-                                    <button
-                                        type="button"
-                                        onClick={handleAddToBrevo}
-                                        disabled={addingToBrevo || getAllClientEmails(client).length === 0}
-                                      className="px-3 py-1 text-sm glass-button-secondary hover:bg-white/20 rounded disabled:opacity-50"
-                                      title="Add this client as a contact in Brevo"
-                                    >
-                                      {addingToBrevo ? 'Adding...' : 'Add to Brevo'}
-                                    </button>
-                                  )}
-                                </>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {client?.first_name && client?.last_name && brevoStatus?.connected && (
+                                clientInBrevo && getAllClientEmails(client).length > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={handleEmailClient}
+                                    disabled={checkingBrevoContact}
+                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    title="Send email to this client via Brevo"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                    </svg>
+                                    {checkingBrevoContact ? 'Checking...' : 'Email'}
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={handleAddToBrevo}
+                                    disabled={addingToBrevo || getAllClientEmails(client).length === 0}
+                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    title="Add this client as a contact in Brevo"
+                                  >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                                    </svg>
+                                    {addingToBrevo ? 'Adding...' : 'Add to Brevo'}
+                                  </button>
+                                )
                               )}
                               <button
                                 type="button"
-                                onClick={() => setIsEditing(true)}
-                                className="px-3 py-1 text-sm glass-button neon-glow rounded"
+                                onClick={() => setShowCheckInCalendar(true)}
+                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-green-300 dark:border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                                title="View and sync check-in calendar"
                               >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                Calendar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setIsEditing(true)}
+                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
+                                title="Edit client details"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
                                 Edit
                               </button>
                               <button
                                 type="button"
-                                className="text-gray-400 hover:text-gray-500"
                                 onClick={onClose}
+                                className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                                aria-label="Close"
                               >
-                                <span className="sr-only">Close</span>
-                                ✕
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
                               </button>
-                            </>
+                            </div>
                           )}
                         </div>
                     </div>
@@ -649,16 +670,7 @@ export default function ClientDetailDrawer({
 
                         {/* Check-Ins Section */}
                         <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Check-Ins</h3>
-                            <button
-                              onClick={() => setShowCheckInCalendar(true)}
-                              className="text-xs px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors"
-                            >
-                              View Calendar
-                            </button>
-                          </div>
-                          
+                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Check-Ins</h3>
                           {nextCheckIn ? (
                             <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
                               <div className="flex items-start gap-3">
@@ -700,7 +712,7 @@ export default function ClientDetailDrawer({
                           ) : (
                             <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
                               <p className="text-sm text-gray-600 dark:text-gray-400">
-                                No upcoming check-ins. Click &quot;View Calendar&quot; to sync with your calendar and view check-in history.
+                                No upcoming check-ins. Use the <strong>Calendar</strong> button in the header to sync with your calendar and view check-in history.
                               </p>
                             </div>
                           )}

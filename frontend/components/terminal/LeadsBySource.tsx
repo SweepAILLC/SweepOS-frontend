@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
-import { Funnel } from '@/types/funnel';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface LeadSource {
   source: string;
@@ -113,6 +113,19 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     return ((conversions / visitors) * 100).toFixed(1);
   };
 
+  const COLORS = [
+    '#93c5fd',
+    '#60a5fa',
+    '#3b82f6',
+    '#2563eb',
+    '#1d4ed8',
+    '#93c5fd',
+    '#60a5fa',
+    '#3b82f6',
+    '#2563eb',
+    '#1d4ed8',
+  ];
+
   return (
     <div className="glass-card p-4 sm:p-6 min-w-0">
       <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
@@ -130,30 +143,81 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
           No lead source data available.
         </p>
       ) : (
-        <div className="space-y-3">
-          {leadSources.map((source) => (
-            <div
-              key={source.source}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 glass-panel rounded-lg"
-            >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                  {source.source}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  {getConversionRate(source.conversions, source.visitors)}% conversion rate
-                </p>
-              </div>
-              <div className="text-left sm:text-right sm:ml-4 flex-shrink-0">
-                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
-                  {source.visitors.toLocaleString()}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
-                  visitors
-                </p>
-              </div>
-            </div>
-          ))}
+        <div className="flex flex-col gap-4">
+          <div className="w-full h-[220px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip
+                  content={({ payload }: any) => {
+                    const p0 = payload?.[0];
+                    if (!p0) return null;
+                    const data = p0.payload as LeadSource;
+                    return (
+                      <div className="glass-panel px-3 py-2 rounded-lg text-xs text-gray-900 dark:text-gray-100">
+                        <div className="font-semibold">{data.source}</div>
+                        <div className="text-gray-600 dark:text-gray-300">
+                          {data.visitors.toLocaleString()} visitors
+                        </div>
+                        <div className="text-gray-600 dark:text-gray-300">
+                          {getConversionRate(data.conversions, data.visitors)}% conversion rate
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                <Pie
+                  data={leadSources}
+                  dataKey="visitors"
+                  nameKey="source"
+                  innerRadius={45}
+                  outerRadius={72}
+                  paddingAngle={2}
+                  cornerRadius={10}
+                  isAnimationActive={true}
+                  animationDuration={500}
+                  labelLine={false}
+                  label={({ percent }: any) =>
+                    percent != null && percent > 0.04 ? `${Math.round(percent * 100)}%` : ''
+                  }
+                >
+                  {leadSources.map((entry, index) => (
+                    <Cell key={`cell-${entry.source}`} fill={COLORS[index % COLORS.length]} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Legend */}
+          <div className="space-y-2">
+            {leadSources.map((source, index) => {
+              const color = COLORS[index % COLORS.length];
+              return (
+                <div
+                  key={source.source}
+                  className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span
+                      className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                      style={{ backgroundColor: color }}
+                    />
+                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                      {source.source}
+                    </span>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 digitized-text">
+                      {source.visitors.toLocaleString()}
+                    </div>
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      {getConversionRate(source.conversions, source.visitors)}% conv.
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>

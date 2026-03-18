@@ -306,7 +306,7 @@ export default function ClientCheckInCalendar({
 
   const panelContent = (
     <>
-    <div className="p-6 flex flex-col h-full overflow-hidden">
+    <div className="p-6 flex flex-col h-full min-h-0 overflow-hidden">
               {/* Header */}
               <div className="flex items-center justify-between mb-6 flex-shrink-0">
                 <div>
@@ -358,9 +358,9 @@ export default function ClientCheckInCalendar({
                   <p className="mt-2 text-gray-600 dark:text-gray-400">Loading check-ins...</p>
                 </div>
               ) : (
-                <>
+                <div className="flex flex-col flex-1 min-h-0">
                   {/* Calendar View */}
-                  <div className="mb-6">
+                  <div className="mb-4 flex-shrink-0">
                     <div className="flex items-center justify-between mb-4">
                       <button
                         onClick={() => navigateMonth('prev')}
@@ -477,8 +477,8 @@ export default function ClientCheckInCalendar({
                     </div>
                   </div>
 
-                  {/* Check-in List */}
-                  <div className="flex-1 overflow-y-auto min-h-0">
+                  {/* Check-in List - scrollable */}
+                  <div className="flex-1 min-h-0 overflow-y-auto">
                     <div className="flex items-center justify-between mb-4 flex-shrink-0">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                         Check-Ins ({monthCheckIns.length})
@@ -620,7 +620,7 @@ export default function ClientCheckInCalendar({
                       </div>
                     )}
                   </div>
-                </>
+                </div>
               )}
             </div>
 

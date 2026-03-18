@@ -122,6 +122,21 @@ class ApiClient {
     return response.data;
   }
 
+  /** Refresh session (sliding window). Call when same tab is active to avoid re-login. */
+  async refreshSession(): Promise<{ access_token?: string } | null> {
+    const response = await this.client.post<{ access_token: string; token_type: string }>('/auth/refresh');
+    if (response.data?.access_token) {
+      Cookies.set('access_token', response.data.access_token, {
+        expires: 1,
+        sameSite: COOKIE_SAME_SITE,
+        secure: typeof window !== 'undefined' && window.location.protocol === 'https:',
+        path: '/',
+      });
+      return { access_token: response.data.access_token };
+    }
+    return null;
+  }
+
   // Invitation acceptance (public; no auth required for validate)
   async validateInviteToken(token: string) {
     const response = await this.client.get('/auth/invite/validate', { params: { token } });
@@ -284,6 +299,35 @@ class ApiClient {
     return response.data;
   }
 
+  /** Update a manual check-in details (status + sales-call flags). */
+  async updateCheckInDetails(
+    checkInId: string,
+    updates: {
+      completed?: boolean;
+      cancelled?: boolean;
+      no_show?: boolean;
+      is_sales_call?: boolean;
+      sale_closed?: boolean | null;
+    }
+  ) {
+    const response = await this.client.patch(`/clients/check-ins/${checkInId}`, updates);
+    return response.data;
+  }
+
+  /** Reschedule a manual check-in (drag/drop on calendar). */
+  async rescheduleCheckIn(
+    checkInId: string,
+    startTimeISO: string,
+    endTimeISO?: string
+  ) {
+    const payload: Record<string, unknown> = {
+      start_time: startTimeISO
+    };
+    if (endTimeISO) payload.end_time = endTimeISO;
+    const response = await this.client.patch(`/clients/check-ins/${checkInId}`, payload);
+    return response.data;
+  }
+
   async deleteCheckIn(checkInId: string) {
     const response = await this.client.delete(`/clients/check-ins/${checkInId}`);
     return response.data;
@@ -424,8 +468,9 @@ class ApiClient {
     return response.data;
   }
 
-  async getCalComBookingDetails(bookingId: number) {
-    const response = await this.client.get(`/integrations/calcom/booking/${bookingId}`);
+  /** Fetch Cal.com booking by UID (string). Uses GET /v2/bookings/{bookingUid} with cal-api-version 2026-02-25. */
+  async getCalComBookingDetails(bookingUid: string) {
+    const response = await this.client.get(`/integrations/calcom/booking/${encodeURIComponent(bookingUid)}`);
     return response.data;
   }
 
@@ -473,6 +518,19 @@ class ApiClient {
     return response.data;
   }
 
+  async getCalendarSalesCloseRate() {
+    const response = await this.client.get('/integrations/calendar/sales-close-rate');
+    return response.data;
+  }
+
+  /** Manual check-ins for the calendar grid (date range YYYY-MM-DD). */
+  async getCalendarManualEvents(start: string, end: string) {
+    const response = await this.client.get('/integrations/calendar/manual-events', {
+      params: { start, end },
+    });
+    return response.data;
+  }
+
   async getCalendlyEventTypes(params?: {
     count?: number;
     page_token?: string;
@@ -490,6 +548,35 @@ class ApiClient {
     // Encode the URI for the path parameter
     const encodedUri = encodeURIComponent(eventUri);
     const response = await this.client.get(`/integrations/calendly/event/${encodedUri}`);
+    return response.data;
+  }
+
+  // Calendar sales call tracking (sales vs check-in, close rate)
+  async updateCalendarBookingSales(provider: 'calcom' | 'calendly', eventId: string, updates: { is_sales_call?: boolean; sale_closed?: boolean | null; event_uri?: string }) {
+    const response = await this.client.patch('/integrations/calendar/bookings/sales', {
+      provider,
+      event_id: eventId,
+      ...updates
+    });
+    return response.data;
+  }
+  async listSalesCallEventTypes(provider: 'calcom' | 'calendly') {
+    const response = await this.client.get('/integrations/calendar/event-types/sales-call', {
+      params: { provider }
+    });
+    return response.data;
+  }
+  async addSalesCallEventType(provider: 'calcom' | 'calendly', eventTypeId: string) {
+    const response = await this.client.post('/integrations/calendar/event-types/sales-call', {
+      provider,
+      event_type_id: eventTypeId
+    });
+    return response.data;
+  }
+  async removeSalesCallEventType(provider: 'calcom' | 'calendly', eventTypeId: string) {
+    const response = await this.client.delete('/integrations/calendar/event-types/sales-call', {
+      params: { provider, event_type_id: eventTypeId }
+    });
     return response.data;
   }
 

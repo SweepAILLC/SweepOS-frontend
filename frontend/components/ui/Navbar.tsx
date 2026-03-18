@@ -1,12 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
-import UserSettingsModal from './UserSettingsModal';
 import { clearSessionCaches } from '@/lib/cache';
 
 interface NavbarProps {
-  activeTab: 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom';
-  onTabChange: (tab: 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom') => void;
+  activeTab: 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings';
+  onTabChange: (tab: 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings') => void;
   isOwner?: boolean;
   tabPermissions?: Record<string, boolean>;
   userRole?: string; // 'owner' | 'admin' | 'member'
@@ -43,16 +42,11 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
     return tabPermissions[tab] !== false;
   };
   const router = useRouter();
-  const [showSettings, setShowSettings] = useState(false);
 
   const handleLogout = () => {
     clearSessionCaches();
     Cookies.remove('access_token');
     router.push('/login');
-  };
-
-  const handleSettingsClick = () => {
-    setShowSettings(true);
   };
 
   return (
@@ -187,7 +181,7 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
           </div>
           <div className="flex items-center space-x-2 sm:space-x-4">
             <button
-              onClick={handleSettingsClick}
+              onClick={() => onTabChange('settings')}
               className="glass-button-secondary px-2 py-2 sm:px-3 sm:py-2 rounded-md text-sm font-medium flex items-center min-h-[44px] min-w-[44px] sm:min-w-0 justify-center sm:justify-start"
               aria-label="Open settings"
             >
@@ -206,7 +200,6 @@ export default function Navbar({ activeTab, onTabChange, isOwner = false, tabPer
           </div>
         </div>
       </div>
-      <UserSettingsModal isOpen={showSettings} onClose={() => setShowSettings(false)} />
     </nav>
   );
 }

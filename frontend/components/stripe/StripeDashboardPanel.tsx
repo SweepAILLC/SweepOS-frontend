@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
+import { TERMINAL_STRIPE_UPDATED_KEY, invalidateStripeAndTerminalAfterWebhook, STRIPE_DATA_UPDATED_EVENT } from '@/lib/cache';
 import { Client } from '@/types/client';
 import { StripeSummary, RevenueTimeline, ChurnData, MRRTrend, Payment, FailedPayment } from '@/types/integration';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -69,6 +70,25 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     loadBrevoStatus();
   }, [timeRange]);
 
+  // Poll while Stripe tab is visible so new payments show without refresh
+  const STRIPE_POLL_MS = 45000;
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const { last_updated } = await apiClient.getStripeLastUpdated();
+        if (!last_updated) return;
+        const stored = sessionStorage.getItem(TERMINAL_STRIPE_UPDATED_KEY);
+        if (stored != null && stored >= last_updated) return;
+        invalidateStripeAndTerminalAfterWebhook(last_updated);
+        window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+        await loadAllData(true);
+      } catch {
+        // keep existing data
+      }
+    }, STRIPE_POLL_MS);
+    return () => clearInterval(interval);
+  }, []);
+
   const loadBrevoStatus = async () => {
     try {
       const status = await apiClient.getBrevoStatus();
@@ -80,10 +100,53 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   };
 
   const checkConnectionAndLoad = async () => {
-    setLoading(true);
-    setGlobalLoading(true, 'Loading Stripe dashboard...');
     setError(null);
     try {
+      const { last_updated } = await apiClient.getStripeLastUpdated();
+      const stored = typeof window !== 'undefined' ? sessionStorage.getItem(TERMINAL_STRIPE_UPDATED_KEY) : null;
+      const noWebhookUpdate = !last_updated || (stored != null && stored >= last_updated);
+
+      if (noWebhookUpdate) {
+        // Use cache so tab switch is instant (no loading)
+        const status = await apiClient.getStripeStatus(false);
+        setIsConnected(status.connected);
+        if (status.connected) {
+          const summaryRange = timeRange === 'all' ? 365 : timeRange;
+          const summaryData = await apiClient.getStripeSummary(summaryRange, false);
+          setSummary(summaryData);
+          setIsConnected(true);
+          setLoading(false);
+          setGlobalLoading(false);
+          const alignedRangeDays = timeRange === 'all' ? 365 : timeRange;
+          const useTreasuryForPayments = timeRange === 'all' ? false : true;
+          setPaymentsPage(1);
+          const [revenue, churn, mrr, paymentsData, failedData] = await Promise.all([
+            apiClient.getStripeRevenueTimeline(alignedRangeDays, 'day', false),
+            apiClient.getStripeChurn(6, false),
+            apiClient.getStripeMRRTrend(alignedRangeDays, 'day', false),
+            apiClient.getStripePayments('succeeded', alignedRangeDays, 1, paymentsPageSize, useTreasuryForPayments, false),
+            apiClient.getStripeFailedPayments(1, 20, undefined, false),
+          ]);
+          setRevenueTimeline(revenue);
+          setChurnData(churn);
+          setMrrTrend(mrr);
+          const sortedPayments = [...(paymentsData || [])].sort((a: any, b: any) => ((b.created_at || 0) - (a.created_at || 0)));
+          setPayments(sortedPayments);
+          setPaymentsHasMore(Array.isArray(paymentsData) && paymentsData.length === paymentsPageSize);
+          setFailedPayments(failedData || []);
+        } else {
+          setLoading(false);
+          setGlobalLoading(false);
+        }
+        return;
+      }
+
+      invalidateStripeAndTerminalAfterWebhook(last_updated!);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+      }
+      setLoading(true);
+      setGlobalLoading(true, 'Loading Stripe dashboard...');
       const status = await apiClient.getStripeStatus(true);
       setIsConnected(status.connected);
       if (status.connected) {
@@ -161,10 +224,12 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     }
   };
 
-  const loadAllData = async () => {
-    setError(null);
-    setLoading(true);
-    setGlobalLoading(true, 'Loading Stripe dashboard...');
+  const loadAllData = async (silent = false) => {
+    if (!silent) {
+      setError(null);
+      setLoading(true);
+      setGlobalLoading(true, 'Loading Stripe dashboard...');
+    }
     try {
       const summaryRange = timeRange === 'all' ? 365 : timeRange;
       const summaryData = await apiClient.getStripeSummary(summaryRange, true);
@@ -210,8 +275,10 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
         setIsConnected(false);
       }
     } finally {
-      setLoading(false);
-      setGlobalLoading(false);
+      if (!silent) {
+        setLoading(false);
+        setGlobalLoading(false);
+      }
     }
   };
 

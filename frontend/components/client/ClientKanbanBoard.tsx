@@ -17,6 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { apiClient } from '@/lib/api';
 import { Client } from '@/types/client';
+import { TERMINAL_CLIENTS_UPDATED_EVENT } from '@/lib/cache';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
 import ShinyButton from '../ui/ShinyButton';
@@ -68,9 +69,9 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     })
   );
 
-  // Load client list only on mount; no sync unless user clicks the refresh/sync button
+  // Load client list only on mount; no sync unless user clicks the refresh/sync button; skip pipeline notify on first load
   useEffect(() => {
-    loadClients(false, true);
+    loadClients(false, true, false);
   }, []);
 
   // Listen for Stripe connection events to refetch client list (no sync)
@@ -95,7 +96,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     };
   }, []);
 
-  const loadClients = async (forceRefresh = false, skipSync = false) => {
+  const loadClients = async (forceRefresh = false, skipSync = false, notifyPipeline = true) => {
     try {
       if (forceRefresh) {
         console.log('[KanbanBoard] Force refreshing clients...');
@@ -144,6 +145,9 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       
       // Force state update by creating a new array reference
       setClients([...data]);
+      if (notifyPipeline && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+      }
       // Batch fetch health scores for board tags (no Brevo in batch for performance)
       if (data.length > 0) {
         apiClient.getClientsHealthScores(data.map((c: Client) => c.id)).then(setHealthScores).catch(() => setHealthScores({}));
@@ -401,7 +405,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           apiClient.updateClient(id, updateData)
         )
       );
-      // No refresh: optimistic update already moved the card; avoid full board reload.
+      // No board refresh: optimistic update already moved the card. Notify pipeline so it refetches counts.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+      }
     } catch (error) {
       setClients(originalClients);
       console.error('Failed to update client:', error);

@@ -139,3 +139,18 @@ export function invalidateStripeCache(): void {
   cache.deleteByPrefix('stripe_');
 }
 
+/** Invalidate Stripe + terminal summary after a webhook so next reads get fresh data. Updates sessionStorage so we don't refetch again until next webhook. */
+export function invalidateStripeAndTerminalAfterWebhook(lastUpdated: string): void {
+  cache.deleteByPrefix('stripe_');
+  cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(TERMINAL_STRIPE_UPDATED_KEY, lastUpdated);
+  }
+}
+
+/** Custom event name: dispatch when Stripe data was updated by webhook so components can refetch in background without full loading. */
+export const STRIPE_DATA_UPDATED_EVENT = 'stripeDataUpdated';
+
+/** Dispatched when client list/board was updated (move, create, delete, drawer save) so Pipeline Snapshot can refetch. */
+export const TERMINAL_CLIENTS_UPDATED_EVENT = 'terminalClientsUpdated';
+

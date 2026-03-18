@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
+import { STRIPE_DATA_UPDATED_EVENT } from '@/lib/cache';
 import EmailComposer from '../brevo/EmailComposer';
 
 interface FailedPayment {
@@ -33,6 +34,29 @@ export default function FailedPaymentQueue({ onLoadComplete }: FailedPaymentQueu
   useEffect(() => {
     loadFailedPayments();
     loadBrevoStatus();
+  }, []);
+
+  // When Stripe data is updated by webhook (poll or tab), refetch in background without full loading
+  useEffect(() => {
+    const handleStripeUpdated = () => {
+      apiClient.getStripeFailedPayments(1, 10, true).then((response: any) => {
+        const paymentsArray = Array.isArray(response) ? response : [];
+        setFailedPayments(paymentsArray.map((payment: any) => ({
+          id: payment.id || payment.stripe_id,
+          client_name: payment.client_name || 'Unknown',
+          client_email: payment.client_email || '',
+          amount: (payment.amount_cents || 0) / 100,
+          failed_at: payment.latest_attempt_at
+            ? new Date(payment.latest_attempt_at * 1000).toISOString()
+            : payment.created_at
+              ? new Date(payment.created_at * 1000).toISOString()
+              : new Date().toISOString(),
+          failure_reason: payment.failure_reason || payment.status || 'Unknown',
+        })));
+      }).catch(() => {});
+    };
+    window.addEventListener(STRIPE_DATA_UPDATED_EVENT, handleStripeUpdated);
+    return () => window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, handleStripeUpdated);
   }, []);
 
   const loadBrevoStatus = async () => {

@@ -76,10 +76,9 @@ export default function App({ Component, pageProps }: AppProps) {
       }
 
       try {
-        // Call /auth/me to refresh the session
-        // This will extend the session if the backend supports it
-        // or at least validate the token is still valid
+        // Validate token and extend session (sliding window) so same tab rarely needs re-login
         await apiClient.getCurrentUser();
+        await apiClient.refreshSession();
       } catch (error: any) {
         // If we get a 401/403, the interceptor will handle logout
         // Just silently fail here - the error handler will take care of it
