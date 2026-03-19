@@ -48,7 +48,7 @@ export default function ClientHealthScoreContent({ client, compact = false }: Cl
         })
         .finally(() => setLoading(false));
     }
-  }, [client?.id]);
+  }, [client?.id, client?.updated_at]);
 
   if (!client) return null;
 

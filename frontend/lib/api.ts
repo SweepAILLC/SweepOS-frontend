@@ -299,6 +299,11 @@ class ApiClient {
     return response.data;
   }
 
+  async getCheckIn(checkInId: string) {
+    const response = await this.client.get(`/clients/check-ins/${checkInId}`);
+    return response.data;
+  }
+
   /** Update a manual check-in details (status + sales-call flags). */
   async updateCheckInDetails(
     checkInId: string,
@@ -551,6 +556,23 @@ class ApiClient {
     return response.data;
   }
 
+  async cancelCalComBooking(bookingUid: string, reason?: string) {
+    const response = await this.client.post(
+      `/integrations/calcom/booking/${encodeURIComponent(bookingUid)}/cancel`,
+      reason ? { reason } : {}
+    );
+    return response.data;
+  }
+
+  async cancelCalendlyEvent(eventUriOrUuid: string, reason?: string) {
+    const encoded = encodeURIComponent(eventUriOrUuid);
+    const response = await this.client.post(
+      `/integrations/calendly/event/${encoded}/cancel`,
+      reason ? { reason } : {}
+    );
+    return response.data;
+  }
+
   // Calendar sales call tracking (sales vs check-in, close rate)
   async updateCalendarBookingSales(provider: 'calcom' | 'calendly', eventId: string, updates: { is_sales_call?: boolean; sale_closed?: boolean | null; event_uri?: string }) {
     const response = await this.client.patch('/integrations/calendar/bookings/sales', {
@@ -593,7 +615,7 @@ class ApiClient {
   }
 
   /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
-  async getStripeLastUpdated(): Promise<{ last_updated: string | null }> {
+  async getStripeLastUpdated(): Promise<{ last_updated: string | null; last_updated_ms: number | null }> {
     const response = await this.client.get('/integrations/stripe/last-updated');
     return response.data;
   }

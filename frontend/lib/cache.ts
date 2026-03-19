@@ -122,8 +122,23 @@ export const TERMINAL_CACHE_TTL_MS = 90 * 1000;
 // Terminal summary: keep until session ends (24h) or until invalidated by Stripe sync / manual payment / connect
 export const TERMINAL_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
-/** SessionStorage key for terminal: last Stripe webhook time we've seen (so we only refetch on webhook, not refresh). */
+/** Legacy ISO key (still cleared on logout). Prefer TERMINAL_STRIPE_MS_KEY for comparison. */
 export const TERMINAL_STRIPE_UPDATED_KEY = 'terminal_last_stripe_updated';
+/** Milliseconds since epoch when client last synced with server Stripe data version (numeric compare, no string bugs). */
+export const TERMINAL_STRIPE_MS_KEY = 'terminal_last_stripe_ms';
+
+export function getSeenStripeDataMs(): number {
+  if (typeof sessionStorage === 'undefined') return 0;
+  const v = sessionStorage.getItem(TERMINAL_STRIPE_MS_KEY);
+  const n = v ? parseInt(v, 10) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function setSeenStripeDataMs(ms: number): void {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(TERMINAL_STRIPE_MS_KEY, String(ms));
+  }
+}
 
 /** Clear caches that should not persist across logout. Call on logout. Terminal Stripe data refetches on next load. */
 export function clearSessionCaches(): void {
@@ -131,6 +146,7 @@ export function clearSessionCaches(): void {
   cache.deleteByPrefix('stripe_');
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem(TERMINAL_STRIPE_UPDATED_KEY);
+    sessionStorage.removeItem(TERMINAL_STRIPE_MS_KEY);
   }
 }
 
@@ -139,13 +155,11 @@ export function invalidateStripeCache(): void {
   cache.deleteByPrefix('stripe_');
 }
 
-/** Invalidate Stripe + terminal summary after a webhook so next reads get fresh data. Updates sessionStorage so we don't refetch again until next webhook. */
-export function invalidateStripeAndTerminalAfterWebhook(lastUpdated: string): void {
+/** Invalidate caches after webhook/sync; mark client as having seen this server data version (ms). */
+export function invalidateStripeAndTerminalAfterWebhook(seenMs: number): void {
   cache.deleteByPrefix('stripe_');
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
-  if (typeof sessionStorage !== 'undefined') {
-    sessionStorage.setItem(TERMINAL_STRIPE_UPDATED_KEY, lastUpdated);
-  }
+  setSeenStripeDataMs(seenMs);
 }
 
 /** Custom event name: dispatch when Stripe data was updated by webhook so components can refetch in background without full loading. */

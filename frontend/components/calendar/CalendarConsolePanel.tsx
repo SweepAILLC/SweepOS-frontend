@@ -118,7 +118,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
 
   // Event details modal state (bookings table → full API modal)
   const [selectedEvent, setSelectedEvent] = useState<{
-    provider: 'calcom' | 'calendly';
+    provider: 'calcom' | 'calendly' | 'manual';
     id: string | number;
     uri?: string;
   } | null>(null);
@@ -1375,18 +1375,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                               if (dragInProgressRef.current) return;
                               setSelectedCalendarEvent(null);
                               if (ev.provider === 'manual') {
-                                setSelectedCalendarEvent({
-                                  id: ev.id,
-                                  title: ev.title,
-                                  start: ev.start,
-                                  provider: ev.provider,
-                                  is_sales_call: ev.is_sales_call,
-                                  sale_closed: ev.sale_closed,
-                                  completed: ev.completed,
-                                  cancelled: ev.cancelled,
-                                  no_show: ev.no_show,
-                                  eventStatus: ev.eventStatus
-                                });
+                                setSelectedEvent({ provider: 'manual', id: ev.id });
                               } else if (ev.provider === 'calcom') {
                                 setSelectedEvent({ provider: 'calcom', id: ev.id });
                               } else if (ev.provider === 'calendly') {
@@ -1782,18 +1771,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                       setSelectedDayMoreEvents(null);
                       setSelectedCalendarEvent(null);
                       if (ev.provider === 'manual') {
-                        setSelectedCalendarEvent({
-                          id: ev.id,
-                          title: ev.title,
-                          start: ev.start,
-                          provider: ev.provider,
-                          is_sales_call: ev.is_sales_call,
-                          sale_closed: ev.sale_closed,
-                          completed: ev.completed,
-                          cancelled: ev.cancelled,
-                          no_show: ev.no_show,
-                          eventStatus: ev.eventStatus,
-                        });
+                        setSelectedEvent({ provider: 'manual', id: ev.id });
                       } else if (ev.provider === 'calcom') {
                         setSelectedEvent({ provider: 'calcom', id: ev.id });
                       } else if (ev.provider === 'calendly') {

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
-import { TERMINAL_STRIPE_UPDATED_KEY, invalidateStripeAndTerminalAfterWebhook, STRIPE_DATA_UPDATED_EVENT } from '@/lib/cache';
+import { getSeenStripeDataMs, invalidateStripeAndTerminalAfterWebhook, STRIPE_DATA_UPDATED_EVENT } from '@/lib/cache';
 import { Client } from '@/types/client';
 import { StripeSummary, RevenueTimeline, ChurnData, MRRTrend, Payment, FailedPayment } from '@/types/integration';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -70,23 +70,28 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     loadBrevoStatus();
   }, [timeRange]);
 
-  // Poll while Stripe tab is visible so new payments show without refresh
-  const STRIPE_POLL_MS = 45000;
+  const pollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const STRIPE_POLL_MS = 90000;
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
-        const { last_updated } = await apiClient.getStripeLastUpdated();
-        if (!last_updated) return;
-        const stored = sessionStorage.getItem(TERMINAL_STRIPE_UPDATED_KEY);
-        if (stored != null && stored >= last_updated) return;
-        invalidateStripeAndTerminalAfterWebhook(last_updated);
-        window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
-        await loadAllData(true);
+        const { last_updated_ms } = await apiClient.getStripeLastUpdated();
+        if (last_updated_ms == null || getSeenStripeDataMs() >= last_updated_ms) return;
+        if (pollDebounceRef.current) clearTimeout(pollDebounceRef.current);
+        pollDebounceRef.current = setTimeout(async () => {
+          pollDebounceRef.current = null;
+          invalidateStripeAndTerminalAfterWebhook(last_updated_ms);
+          window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+          await loadAllData(true);
+        }, 1800);
       } catch {
-        // keep existing data
+        /* keep */
       }
     }, STRIPE_POLL_MS);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      if (pollDebounceRef.current) clearTimeout(pollDebounceRef.current);
+    };
   }, []);
 
   const loadBrevoStatus = async () => {
@@ -102,11 +107,12 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   const checkConnectionAndLoad = async () => {
     setError(null);
     try {
-      const { last_updated } = await apiClient.getStripeLastUpdated();
-      const stored = typeof window !== 'undefined' ? sessionStorage.getItem(TERMINAL_STRIPE_UPDATED_KEY) : null;
-      const noWebhookUpdate = !last_updated || (stored != null && stored >= last_updated);
+      const { last_updated_ms } = await apiClient.getStripeLastUpdated();
+      const seen = getSeenStripeDataMs();
+      const dataMatchesServer =
+        last_updated_ms != null && seen >= last_updated_ms;
 
-      if (noWebhookUpdate) {
+      if (dataMatchesServer) {
         // Use cache so tab switch is instant (no loading)
         const status = await apiClient.getStripeStatus(false);
         setIsConnected(status.connected);
@@ -141,7 +147,9 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
         return;
       }
 
-      invalidateStripeAndTerminalAfterWebhook(last_updated!);
+      if (last_updated_ms != null) {
+        invalidateStripeAndTerminalAfterWebhook(last_updated_ms);
+      }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
       }
@@ -281,6 +289,31 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       }
     }
   };
+
+  // When user returns to the tab, pick up new webhooks/sync without waiting for the 90s poll
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState !== 'visible') return;
+      void (async () => {
+        try {
+          const { last_updated_ms } = await apiClient.getStripeLastUpdated();
+          if (last_updated_ms == null || getSeenStripeDataMs() >= last_updated_ms) return;
+          if (pollDebounceRef.current) clearTimeout(pollDebounceRef.current);
+          pollDebounceRef.current = setTimeout(async () => {
+            pollDebounceRef.current = null;
+            invalidateStripeAndTerminalAfterWebhook(last_updated_ms);
+            window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+            await loadAllData(true);
+          }, 1200);
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- loadAllData uses current timeRange
+  }, [timeRange]);
 
   const handleLoadMorePayments = async () => {
     try {
@@ -589,7 +622,10 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     
     try {
       const result = await apiClient.assignPaymentToClient(assigningPayment, clientId, true);
-      
+      if (result?.stripe_data_updated_ms != null) {
+        invalidateStripeAndTerminalAfterWebhook(result.stripe_data_updated_ms);
+        window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+      }
       // Update recent payments table immediately without full dashboard reload
       await refetchPaymentsOnly();
       
@@ -639,7 +675,10 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
       message += `Reconciled: ${recon.clients_reconciled || 0} clients, ${recon.revenue_recalculated || 0} revenue updated.`;
       alert(message);
       window.dispatchEvent(new Event('stripe-connected'));
-      await loadAllData();
+      if (result.stripe_data_updated_ms != null) {
+        invalidateStripeAndTerminalAfterWebhook(result.stripe_data_updated_ms);
+      }
+      await loadAllData(false);
     } catch (error: any) {
       console.error('Sync & reconcile failed:', error);
       let errorMessage = error?.response?.data?.detail || error?.message || 'Sync & reconcile failed.';

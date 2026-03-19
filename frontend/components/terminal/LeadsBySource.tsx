@@ -188,36 +188,46 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
             </ResponsiveContainer>
           </div>
 
-          {/* Legend */}
-          <div className="space-y-2">
-            {leadSources.map((source, index) => {
-              const color = COLORS[index % COLORS.length];
-              return (
-                <div
-                  key={source.source}
-                  className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className="inline-block w-3 h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: color }}
-                    />
-                    <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                      {source.source}
-                    </span>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-sm font-bold text-gray-900 dark:text-gray-100 digitized-text">
-                      {source.visitors.toLocaleString()}
+          {/* Legend dropdown */}
+          <details className="glass-panel rounded-lg px-3 py-2">
+            <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-3">
+              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Sources
+              </span>
+              <span className="text-gray-500 dark:text-gray-400 text-xs group-open:rotate-180 transition-transform">
+                ▼
+              </span>
+            </summary>
+            <div className="mt-3 space-y-2">
+              {leadSources.map((source, index) => {
+                const color = COLORS[index % COLORS.length];
+                return (
+                  <div
+                    key={source.source}
+                    className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: color }}
+                      />
+                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {source.source}
+                      </span>
                     </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {getConversionRate(source.conversions, source.visitors)}% conv.
+                    <div className="text-right flex-shrink-0">
+                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100 digitized-text">
+                        {source.visitors.toLocaleString()}
+                      </div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">
+                        {getConversionRate(source.conversions, source.visitors)}% conv.
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </details>
         </div>
       )}
     </div>

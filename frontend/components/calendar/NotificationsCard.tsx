@@ -90,9 +90,10 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
     }
   };
 
-  // Refresh immediately after sales flag changes from the calendar modal.
+  // Refresh immediately after sales flag changes (don’t wait for loadSummary’s min animation delay).
   useEffect(() => {
     const handler = () => {
+      apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
       loadSummary();
     };
 

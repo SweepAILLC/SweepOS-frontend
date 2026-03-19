@@ -758,6 +758,23 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
               console.warn('[KanbanBoard] Could not find updated client with ID:', previousSelectedId);
             }
           }
+
+          // Keep card health tag in sync with the drawer health score.
+          // The drawer uses the full endpoint (`/clients/{id}/health-score`, includes Brevo stats),
+          // while the batch endpoint used during board loading omits Brevo for performance.
+          if (previousSelectedId) {
+            try {
+              const full = await apiClient.getClientHealthScore(previousSelectedId);
+              if (full?.score != null && full?.grade) {
+                setHealthScores((prev) => ({
+                  ...prev,
+                  [previousSelectedId]: { score: full.score, grade: full.grade },
+                }));
+              }
+            } catch (err) {
+              console.warn('[KanbanBoard] Failed to refresh full health score for client', previousSelectedId, err);
+            }
+          }
         }}
       />
 

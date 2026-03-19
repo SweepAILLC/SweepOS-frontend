@@ -58,7 +58,7 @@ export default function ClientHealthScoreDrawer({
           setLoading(false);
         });
     }
-  }, [isOpen, client?.id]);
+  }, [isOpen, client?.id, client?.updated_at]);
 
   if (!isOpen) return null;
 

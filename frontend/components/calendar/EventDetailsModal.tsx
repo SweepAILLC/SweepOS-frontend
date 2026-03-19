@@ -5,11 +5,28 @@ import { CalComBooking, CalendlyScheduledEvent } from '@/types/integration';
 interface EventDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  provider: 'calcom' | 'calendly';
+  provider: 'calcom' | 'calendly' | 'manual';
   eventId: string | number;
   eventUri?: string; // For Calendly
   onSalesUpdated?: () => void;
 }
+
+type ManualCheckIn = {
+  id: string;
+  provider: 'manual';
+  title?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  cancelled?: boolean;
+  completed?: boolean;
+  no_show?: boolean;
+  is_sales_call?: boolean;
+  sale_closed?: boolean | null;
+  location?: string | null;
+  meeting_url?: string | null;
+  attendee_name?: string | null;
+  attendee_email?: string | null;
+};
 
 export default function EventDetailsModal({
   isOpen,
@@ -23,7 +40,13 @@ export default function EventDetailsModal({
   const [error, setError] = useState<string | null>(null);
   const [booking, setBooking] = useState<CalComBooking | null>(null);
   const [event, setEvent] = useState<CalendlyScheduledEvent | null>(null);
+  const [manualCheckIn, setManualCheckIn] = useState<ManualCheckIn | null>(null);
   const [salesUpdating, setSalesUpdating] = useState(false);
+  const [actionUpdating, setActionUpdating] = useState<'cancel' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [rescheduleDraft, setRescheduleDraft] = useState<{ start?: string; end?: string }>({});
+  const [rescheduleUpdating, setRescheduleUpdating] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && eventId) {
@@ -32,6 +55,7 @@ export default function EventDetailsModal({
       // Reset state when modal closes
       setBooking(null);
       setEvent(null);
+      setManualCheckIn(null);
       setError(null);
       setLoading(false);
     }
@@ -45,11 +69,28 @@ export default function EventDetailsModal({
       if (provider === 'calcom') {
         const data = await apiClient.getCalComBookingDetails(String(eventId));
         setBooking(data);
+        setManualCheckIn(null);
+        setRescheduleDraft({});
       } else {
-        // For Calendly, use the event URI
-        const uri = eventUri || eventId;
-        const data = await apiClient.getCalendlyEventDetails(String(uri));
-        setEvent(data);
+        if (provider === 'manual') {
+          const raw = String(eventId);
+          const checkInId = raw.replace(/^manual_/, '');
+          const data = await apiClient.getCheckIn(checkInId);
+          setManualCheckIn({ ...data, provider: 'manual' });
+          setBooking(null);
+          setEvent(null);
+          setRescheduleDraft({
+            start: data?.start_time ? toDateTimeLocalInputValue(data.start_time) : undefined,
+            end: data?.end_time ? toDateTimeLocalInputValue(data.end_time) : undefined,
+          });
+        } else {
+          // For Calendly, use the event URI
+          const uri = eventUri || eventId;
+          const data = await apiClient.getCalendlyEventDetails(String(uri));
+          setEvent(data);
+          setManualCheckIn(null);
+          setRescheduleDraft({});
+        }
       }
     } catch (err: any) {
       console.error('Failed to load event details:', err);
@@ -59,21 +100,61 @@ export default function EventDetailsModal({
     }
   };
 
-  const updateSalesFlags = async (updates: { is_sales_call?: boolean; sale_closed?: boolean | null }) => {
-    const eventIdStr = provider === 'calcom'
-      ? String((booking as CalComBooking)?.uid ?? (booking as CalComBooking)?.id ?? eventId)
-      : String(eventId);
-    const payload: Parameters<typeof apiClient.updateCalendarBookingSales>[2] = { ...updates };
+  const updateSalesFlags = async (updates: { sale_closed?: boolean | null }) => {
+    if (provider === 'manual') {
+      // Manual: sale_closed is stored directly on the check-in
+      const raw = String(eventId);
+      const checkInId = raw.replace(/^manual_/, '');
+      setSalesUpdating(true);
+      try {
+        const updated = await apiClient.updateCheckInDetails(checkInId, { sale_closed: updates.sale_closed ?? null });
+        setManualCheckIn({ ...(updated as any), provider: 'manual' });
+        onSalesUpdated?.();
+      } catch (err) {
+        console.error('Failed to update manual sales flags:', err);
+      } finally {
+        setSalesUpdating(false);
+      }
+      return;
+    }
+    const payloadBase: Parameters<typeof apiClient.updateCalendarBookingSales>[2] = { ...updates };
+
+    // Cal.com stores sales-call tracking in multiple places; close-rate queries are tied to
+    // `ClientCheckIn.event_id` which is populated from Cal.com numeric `id` in check-in sync.
+    // The modal booking object often has both `id` and `uid`, so we write to both when possible.
+    const eventIdCandidates: string[] = (() => {
+      if (provider !== 'calcom') return [String(eventId)];
+      const b = booking as CalComBooking | null;
+      const idCandidate = b?.id != null ? String(b.id) : null;
+      const uidCandidate = b?.uid ? String(b.uid) : null;
+      return Array.from(new Set([idCandidate, uidCandidate].filter(Boolean))) as string[];
+    })();
+
+    const payloadForCalendly: Parameters<typeof apiClient.updateCalendarBookingSales>[2] = {
+      ...payloadBase,
+    };
     if (provider === 'calendly' && (eventUri || (event as CalendlyScheduledEvent)?.uri)) {
-      payload.event_uri = eventUri || (event as CalendlyScheduledEvent)?.uri;
+      payloadForCalendly.event_uri = eventUri || (event as CalendlyScheduledEvent)?.uri;
     }
     setSalesUpdating(true);
     try {
-      await apiClient.updateCalendarBookingSales(provider, eventIdStr, payload);
-      if (provider === 'calcom' && booking) {
-        setBooking({ ...booking, ...updates });
-      } else if (provider === 'calendly' && event) {
-        setEvent({ ...event, ...updates });
+      let firstUpdated: Awaited<ReturnType<typeof apiClient.updateCalendarBookingSales>> | null = null;
+      for (const cand of eventIdCandidates) {
+        const payload = provider === 'calendly' ? payloadForCalendly : payloadBase;
+        const updated = await apiClient.updateCalendarBookingSales(provider, cand, payload);
+        if (!firstUpdated) firstUpdated = updated;
+      }
+
+      if (firstUpdated) {
+        if (provider === 'calcom' && booking) {
+          setBooking({
+            ...booking,
+            is_sales_call: firstUpdated.is_sales_call,
+            sale_closed: firstUpdated.sale_closed,
+          });
+        } else if (provider === 'calendly' && event) {
+          setEvent({ ...event, is_sales_call: firstUpdated.is_sales_call, sale_closed: firstUpdated.sale_closed });
+        }
       }
       onSalesUpdated?.();
     } catch (err) {
@@ -100,6 +181,60 @@ export default function EventDetailsModal({
   };
 
   if (!isOpen) return null;
+
+  function toDateTimeLocalInputValue(isoString: string): string {
+    // Convert ISO to datetime-local (yyyy-MM-ddTHH:mm)
+    const d = new Date(isoString);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const mm = pad(d.getMonth() + 1);
+    const dd = pad(d.getDate());
+    const hh = pad(d.getHours());
+    const mi = pad(d.getMinutes());
+    return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+  }
+
+  const openProviderPage = () => {
+    try {
+      if (provider === 'calcom' && booking) {
+        const uid = booking.uid || String(booking.id);
+        window.open(`https://app.cal.com/bookings/${encodeURIComponent(uid)}`, '_blank', 'noopener,noreferrer');
+      } else if (provider === 'calendly') {
+        const uri = (event as any)?.uri || eventUri || String(eventId);
+        // If we have full API URI, try to open Calendly UI fallback
+        // (Calendly doesn't expose a consistent public URL here, so we open the integrations page)
+        window.open('https://calendly.com/app/scheduled_events', '_blank', 'noopener,noreferrer');
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const cancelEvent = async () => {
+    setActionError(null);
+    setActionUpdating('cancel');
+    try {
+      const reason = window.prompt('Cancellation reason (optional):') || undefined;
+      if (provider === 'calcom') {
+        const uid = booking?.uid || (booking?.id != null ? String(booking.id) : String(eventId));
+        await apiClient.cancelCalComBooking(String(uid), reason);
+      } else if (provider === 'manual') {
+        const raw = String(eventId);
+        const checkInId = raw.replace(/^manual_/, '');
+        await apiClient.updateCheckInDetails(checkInId, { cancelled: true, completed: false, no_show: false });
+      } else {
+        const uri = (event as any)?.uri || eventUri || String(eventId);
+        await apiClient.cancelCalendlyEvent(String(uri), reason);
+      }
+      await loadEventDetails();
+      onSalesUpdated?.();
+    } catch (err: any) {
+      console.error('Failed to cancel event:', err);
+      setActionError(err?.response?.data?.detail || err?.message || 'Failed to cancel event');
+    } finally {
+      setActionUpdating(null);
+    }
+  };
 
   const renderFormResponses = () => {
     if (provider === 'calcom' && booking) {
@@ -328,6 +463,7 @@ export default function EventDetailsModal({
   };
 
   const currentEvent = provider === 'calcom' ? booking : event;
+  const effectiveEvent = provider === 'manual' ? manualCheckIn : currentEvent;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" onClick={onClose}>
@@ -370,8 +506,30 @@ export default function EventDetailsModal({
                   Retry
                 </button>
               </div>
-            ) : currentEvent ? (
+            ) : effectiveEvent ? (
               <div className="space-y-6 max-h-[70vh] overflow-y-auto">
+                {/* Actions */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={openProviderPage}
+                    className="px-3 py-1.5 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20"
+                    type="button"
+                  >
+                    Open in {provider === 'calcom' ? 'Cal.com' : 'Calendly'}
+                  </button>
+                  <button
+                    onClick={cancelEvent}
+                    disabled={actionUpdating === 'cancel'}
+                    className="px-3 py-1.5 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+                    type="button"
+                  >
+                    {actionUpdating === 'cancel' ? 'Cancelling…' : 'Cancel event'}
+                  </button>
+                  {actionError && (
+                    <div className="text-sm text-red-600 dark:text-red-400">{actionError}</div>
+                  )}
+                </div>
+
                 {/* Basic Information */}
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
@@ -383,19 +541,33 @@ export default function EventDetailsModal({
                       <span className="text-gray-900 dark:text-gray-100 font-medium">
                         {provider === 'calcom' 
                           ? (booking?.title || booking?.eventType?.title || 'Untitled')
+                          : provider === 'manual'
+                          ? (manualCheckIn?.title || 'Manual check-in')
                           : (event?.name || 'Untitled Event')}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500 dark:text-gray-400">Start Time:</span>
                       <span className="text-gray-900 dark:text-gray-100">
-                        {formatDateTime(provider === 'calcom' ? booking!.startTime : event!.start_time)}
+                        {formatDateTime(
+                          provider === 'calcom'
+                            ? booking!.startTime
+                            : provider === 'manual'
+                            ? String(manualCheckIn?.start_time || '')
+                            : event!.start_time
+                        )}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500 dark:text-gray-400">End Time:</span>
                       <span className="text-gray-900 dark:text-gray-100">
-                        {formatDateTime(provider === 'calcom' ? booking!.endTime : event!.end_time)}
+                        {formatDateTime(
+                          provider === 'calcom'
+                            ? booking!.endTime
+                            : provider === 'manual'
+                            ? String(manualCheckIn?.end_time || '')
+                            : event!.end_time
+                        )}
                       </span>
                     </div>
                     {/* Status: cancelled / no-show / confirmed (Cal.com and Calendly) */}
@@ -430,6 +602,14 @@ export default function EventDetailsModal({
                             : event.status === 'active'
                             ? <span className="text-green-600 dark:text-green-400">Active</span>
                             : <span>{event.status || '—'}</span>
+                        ) : manualCheckIn ? (
+                          manualCheckIn.cancelled
+                            ? <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
+                            : manualCheckIn.no_show
+                            ? <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>
+                            : manualCheckIn.completed
+                            ? <span className="text-green-600 dark:text-green-400 font-medium">Completed</span>
+                            : <span className="text-gray-700 dark:text-gray-300">Scheduled</span>
                         ) : '—'}
                       </span>
                     </div>
@@ -461,33 +641,83 @@ export default function EventDetailsModal({
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={!!(provider === 'calcom' ? booking?.is_sales_call : event?.is_sales_call)}
+                        checked={!!(provider === 'calcom' ? booking?.sale_closed : provider === 'manual' ? manualCheckIn?.sale_closed : event?.sale_closed)}
                         disabled={salesUpdating}
-                        onChange={(e) => updateSalesFlags({ is_sales_call: e.target.checked, sale_closed: e.target.checked ? (provider === 'calcom' ? booking?.sale_closed : event?.sale_closed) ?? false : null })}
+                        onChange={(e) => updateSalesFlags({ sale_closed: e.target.checked })}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
                       />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">Mark as sales call</span>
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Sale closed</span>
                     </label>
-                    {(provider === 'calcom' ? booking?.is_sales_call : event?.is_sales_call) && (
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!(provider === 'calcom' ? booking?.sale_closed : event?.sale_closed)}
-                          disabled={salesUpdating}
-                          onChange={(e) => updateSalesFlags({ sale_closed: e.target.checked })}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span className="text-sm text-gray-700 dark:text-gray-300">Sale closed</span>
-                      </label>
-                    )}
                     {salesUpdating && (
                       <span className="text-xs text-gray-500 dark:text-gray-400">Updating…</span>
                     )}
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    Sales calls are used for close-rate tracking. If this contact pays (Stripe), their latest sales call is auto-marked closed.
+                    Sales call close-rate counts as <span className="font-medium">closed</span> when either the sale is marked closed or the client has a succeeded Stripe payment. Setting “Sale closed” also marks it as a sales call for tracking.
                   </p>
                 </div>
+
+                {/* Reschedule (manual only) */}
+                {provider === 'manual' && manualCheckIn && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                      Reschedule
+                    </h4>
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="text-sm text-gray-700 dark:text-gray-300">
+                          <span className="block mb-1 text-gray-500 dark:text-gray-400">Start</span>
+                          <input
+                            type="datetime-local"
+                            value={rescheduleDraft.start || ''}
+                            onChange={(e) => setRescheduleDraft((p) => ({ ...p, start: e.target.value }))}
+                            className="w-full px-3 py-2 glass-input rounded-md"
+                          />
+                        </label>
+                        <label className="text-sm text-gray-700 dark:text-gray-300">
+                          <span className="block mb-1 text-gray-500 dark:text-gray-400">End (optional)</span>
+                          <input
+                            type="datetime-local"
+                            value={rescheduleDraft.end || ''}
+                            onChange={(e) => setRescheduleDraft((p) => ({ ...p, end: e.target.value }))}
+                            className="w-full px-3 py-2 glass-input rounded-md"
+                          />
+                        </label>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          disabled={rescheduleUpdating || !rescheduleDraft.start}
+                          onClick={async () => {
+                            setRescheduleError(null);
+                            setRescheduleUpdating(true);
+                            try {
+                              const raw = String(eventId);
+                              const checkInId = raw.replace(/^manual_/, '');
+                              const startISO = new Date(rescheduleDraft.start!).toISOString();
+                              const endISO = rescheduleDraft.end ? new Date(rescheduleDraft.end).toISOString() : undefined;
+                              await apiClient.rescheduleCheckIn(checkInId, startISO, endISO);
+                              await loadEventDetails();
+                              onSalesUpdated?.();
+                            } catch (err: any) {
+                              console.error('Failed to reschedule manual event:', err);
+                              setRescheduleError(err?.response?.data?.detail || err?.message || 'Failed to reschedule');
+                            } finally {
+                              setRescheduleUpdating(false);
+                            }
+                          }}
+                          className="px-3 py-1.5 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
+                        >
+                          {rescheduleUpdating ? 'Saving…' : 'Save new time'}
+                        </button>
+                        {rescheduleError && <span className="text-sm text-red-600 dark:text-red-400">{rescheduleError}</span>}
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Manual events can be rescheduled here or by dragging on the calendar.
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Form Responses */}
                 <div>
