@@ -863,7 +863,7 @@ class ApiClient {
     return response.data;
   }
 
-  async getStripeSummary(range?: number | 'mtd', bypassCache?: boolean) {
+  async getStripeSummary(range?: number | 'mtd' | 'all', bypassCache?: boolean) {
     const cacheKey = `stripe_summary_${range ?? 'all'}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
@@ -1095,7 +1095,7 @@ class ApiClient {
     else if (range !== undefined) params.range = range;
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
-    if (useTreasury !== undefined) params.use_treasury = useTreasury;
+    if (useTreasury !== undefined) params.use_treasury = String(useTreasury);
     const response = await this.client.get('/integrations/stripe/payments', { params });
     const data = response.data;
     if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
