@@ -108,8 +108,6 @@ export default function AIRecommendationsSection({
     }
   };
 
-  if (!client) return null;
-
   const { visibleActions, queuedBehindHint, allIncomplete, totalActions } = useMemo(() => {
     const actions = (data?.actions as AIRecommendationAction[]) || [];
     if (!embedded) {
@@ -142,6 +140,8 @@ export default function AIRecommendationsSection({
       totalActions: actions.length,
     };
   }, [data, embedded]);
+
+  if (!client) return null;
 
   const outer = embedded
     ? 'pt-4 mt-2 border-t border-gray-200 dark:border-white/10 space-y-3'
