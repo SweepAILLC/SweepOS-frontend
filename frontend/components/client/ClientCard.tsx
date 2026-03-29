@@ -3,6 +3,7 @@ import { useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
 import React, { memo, useMemo, useCallback } from 'react';
+import { gradeFromHealthScore } from '@/lib/api';
 
 const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
@@ -22,6 +23,8 @@ interface ClientCardProps {
   healthGrade?: string | null;
   /** Health score 0–100 for display in tag (e.g. "85% A") */
   healthScore?: number | null;
+  /** Opportunity tags from call insights (subset shown) */
+  insightTags?: string[];
 }
 
 function gradeTagColor(grade: string): string {
@@ -35,8 +38,30 @@ function gradeTagColor(grade: string): string {
   }
 }
 
-function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlotLineAbove = false, healthGrade = null, healthScore = null }: ClientCardProps) {
+const INSIGHT_TAG_STYLES: Record<string, string> = {
+  upsell: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-400/30',
+  testimonial: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-400/30',
+  referral: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-400/30',
+  conversion: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30',
+  win_back: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-400/30',
+};
+
+function insightChipClass(tag: string): string {
+  return INSIGHT_TAG_STYLES[tag] || 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-400/30';
+}
+
+function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlotLineAbove = false, healthGrade = null, healthScore = null, insightTags = undefined }: ClientCardProps) {
   const sortableId = client.id;
+
+  const numericHealthScore =
+    healthScore != null && !Number.isNaN(Number(healthScore)) ? Number(healthScore) : null;
+  const gradeForTag =
+    healthGrade != null && String(healthGrade).trim() !== ''
+      ? String(healthGrade).trim()
+      : numericHealthScore != null
+        ? gradeFromHealthScore(numericHealthScore)
+        : null;
+  const showHealthTag = numericHealthScore != null || gradeForTag != null;
 
   const slotDroppable = useDroppable({ id: SLOT_DROP_ID(sortableId) });
   const mergeDroppable = useDroppable({ id: MERGE_DROP_ID(sortableId) });
@@ -56,9 +81,21 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const fullName = useMemo(() => {
-    return [client.first_name, client.last_name].filter(Boolean).join(' ') || 'Unnamed Client';
-  }, [client.first_name, client.last_name]);
+  /** Primary line: name if set, else primary email, else first additional email — never hide email-only leads. */
+  const displayTitle = useMemo(() => {
+    const name = [client.first_name, client.last_name].filter(Boolean).join(' ').trim();
+    if (name) return name;
+    const primary = client.email?.trim();
+    if (primary) return primary;
+    const firstExtra = client.emails?.find((e) => e && String(e).trim());
+    if (firstExtra) return String(firstExtra).trim();
+    return 'Unnamed client';
+  }, [client.first_name, client.last_name, client.email, client.emails]);
+
+  const showEmailSubline = useMemo(() => {
+    if (!client.email?.trim()) return false;
+    return displayTitle !== client.email.trim();
+  }, [client.email, displayTitle]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
     // Prevent click if dragging
@@ -121,22 +158,35 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
 
         {/* Clickable content */}
         <div onClick={handleClick} className="min-w-0">
-          <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0 truncate">
-            {fullName}
+          <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0 truncate" title={displayTitle}>
+            {displayTitle}
           </div>
-          {client.email && (
+          {showEmailSubline && (
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 min-w-0 truncate" title={client.email}>
               {client.email}
             </div>
           )}
-          {healthGrade != null && healthGrade !== '' && (
-            <span
-              className={`inline-block mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border ${gradeTagColor(healthGrade)}`}
-              title="Health score"
-            >
-              {healthScore != null && !Number.isNaN(healthScore) ? `${Math.round(healthScore)}% ` : ''}{healthGrade}
-            </span>
-          )}
+          <div className="flex flex-wrap gap-1 mt-1">
+            {showHealthTag && gradeForTag && (
+              <span
+                className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded border ${gradeTagColor(gradeForTag)}`}
+                title="Health score"
+              >
+                {numericHealthScore != null ? `${Math.round(numericHealthScore)}% ` : ''}
+                {gradeForTag}
+              </span>
+            )}
+            {insightTags &&
+              insightTags.slice(0, 3).map((t) => (
+                <span
+                  key={t}
+                  className={`inline-block text-[9px] font-semibold uppercase px-1 py-0.5 rounded border ${insightChipClass(t)}`}
+                  title="Call insight"
+                >
+                  {t.replace(/_/g, ' ')}
+                </span>
+              ))}
+          </div>
           {client.estimated_mrr > 0 && (
             <div className="text-sm font-semibold text-green-600 dark:text-green-400 mt-2">
               ${client.estimated_mrr.toFixed(2)}/mo

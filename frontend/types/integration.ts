@@ -338,7 +338,7 @@ export interface CalendarNotificationsSummary {
 
 /** Terminal dashboard summary (cash, MRR, top contributors). Used by CashCollectedAndMRR and TopRevenueContributors. */
 export interface TerminalSummaryForWidgets {
-  cash_collected?: { today?: number; last_7_days?: number; last_30_days?: number };
+  cash_collected?: { today?: number; last_7_days?: number; last_30_days?: number; last_mtd?: number };
   mrr?: { current_mrr?: number; arr?: number };
   top_contributors_30d?: Array<{ client_id: string; display_name: string; revenue: number; last_payment_date: string | null; merged_client_ids?: string[] | null }>;
   top_contributors_90d?: Array<{ client_id: string; display_name: string; revenue: number; last_payment_date: string | null; merged_client_ids?: string[] | null }>;

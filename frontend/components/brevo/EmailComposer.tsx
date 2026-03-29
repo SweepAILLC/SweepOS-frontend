@@ -115,8 +115,8 @@ export default function EmailComposer({
       return;
     }
 
-    if (!useTemplate && !htmlContent && !textContent) {
-      setError('Please provide email content or use a template');
+    if (!useTemplate && !textContent && !htmlContent) {
+      setError('Please provide plain text (or HTML fallback) or use a template');
       return;
     }
 
@@ -160,8 +160,9 @@ export default function EmailComposer({
       if (useTemplate) {
         payload.templateId = templateId;
       } else {
-        if (htmlContent) payload.htmlContent = htmlContent;
+        // Plain text is primary; HTML is optional fallback for HTML-capable clients
         if (textContent) payload.textContent = textContent;
+        if (htmlContent) payload.htmlContent = htmlContent;
       }
 
       const result = await apiClient.sendBrevoTransactionalEmail(payload);
@@ -379,31 +380,34 @@ export default function EmailComposer({
             </div>
           ) : (
             <>
-              {/* HTML Content */}
+              {/* Plain text: primary body */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  HTML Content
-                </label>
-                <textarea
-                  value={htmlContent}
-                  onChange={(e) => setHtmlContent(e.target.value)}
-                  rows={10}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
-                  placeholder="<html><body><h1>Your email content</h1></body></html>"
-                />
-              </div>
-
-              {/* Text Content */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Plain Text Content (fallback)
+                  Plain text <span className="text-gray-500 dark:text-gray-400 font-normal">(primary)</span>
                 </label>
                 <textarea
                   value={textContent}
                   onChange={(e) => setTextContent(e.target.value)}
-                  rows={5}
+                  rows={12}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
-                  placeholder="Plain text version of your email"
+                  placeholder="Write the main message recipients see in plain-text clients…"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  This is the default body. Add HTML below only if you want a richer layout for clients that support it.
+                </p>
+              </div>
+
+              {/* HTML: optional fallback / rich alternative */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  HTML <span className="text-gray-500 dark:text-gray-400 font-normal">(optional fallback)</span>
+                </label>
+                <textarea
+                  value={htmlContent}
+                  onChange={(e) => setHtmlContent(e.target.value)}
+                  rows={8}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
+                  placeholder="<html><body><p>Optional HTML version…</p></body></html>"
                 />
               </div>
             </>

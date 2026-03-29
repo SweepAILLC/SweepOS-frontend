@@ -30,7 +30,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   const [mrrTrend, setMrrTrend] = useState<MRRTrend | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [failedPayments, setFailedPayments] = useState<FailedPayment[]>([]);
-  const [timeRange, setTimeRange] = useState<number | 'all'>(30);
+  const [timeRange, setTimeRange] = useState<number | 'mtd' | 'all'>('mtd');
   const [showManualOAuth, setShowManualOAuth] = useState(false);
   const [manualOAuthCode, setManualOAuthCode] = useState('');
   const [completingManual, setCompletingManual] = useState(false);
@@ -882,10 +882,11 @@ Your Team
               value={timeRange}
               onChange={(e) => {
                 const value = e.target.value;
-                setTimeRange(value === 'all' ? 'all' : Number(value));
+                setTimeRange(value === 'all' ? 'all' : value === 'mtd' ? 'mtd' : Number(value));
               }}
               className="text-sm glass-input rounded-md px-3 py-1"
             >
+              <option value="mtd">Month to Date</option>
               <option value={7}>Last 7 days</option>
               <option value={30}>Last 30 days</option>
               <option value={90}>Last 90 days</option>
@@ -922,7 +923,7 @@ Your Team
             <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCurrency(summary.total_arr || 0)}</p>
           </div>
           <div className="glass-panel rounded-lg p-4">
-            <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Revenue {timeRange === 'all' ? '(All Time)' : `(${timeRange}d)`}</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Revenue {timeRange === 'all' ? '(All Time)' : timeRange === 'mtd' ? '(MTD)' : `(${timeRange}d)`}</p>
             <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{formatCurrency(summary.last_30_days_revenue)}</p>
           </div>
           <div className="glass-panel rounded-lg p-4">

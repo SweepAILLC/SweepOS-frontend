@@ -47,7 +47,7 @@ export default function ClientHealthScoreDrawer({
       setLoading(true);
       setData(null);
       apiClient
-        .getClientHealthScore(client.id)
+        .getClientHealthScore(client.id, { useAi: true })
         .then((res) => {
           setData(res);
         })

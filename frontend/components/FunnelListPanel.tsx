@@ -36,7 +36,7 @@ export default function FunnelListPanel() {
   };
 
   const handleFunnelClick = (funnelId: string) => {
-    router.push(`/funnels/${funnelId}`);
+    router.push({ pathname: '/', query: { tab: 'funnels', funnelId } }, undefined, { shallow: true });
   };
 
   if (loading) {

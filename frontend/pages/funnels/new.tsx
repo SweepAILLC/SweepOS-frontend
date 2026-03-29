@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar from '@/components/ui/Navbar';
+import { APP_MAIN_PL_OFFSET } from '@/components/ui/layoutConstants';
+import { useCurrentOrgName } from '@/hooks/useCurrentOrgName';
 import ShinyButton from '@/components/ui/ShinyButton';
 
 export default function NewFunnelPage() {
   const router = useRouter();
+  const organizationName = useCurrentOrgName();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -35,7 +38,7 @@ export default function NewFunnelPage() {
       if (formData.env) payload.env = formData.env;
 
       const funnel = await apiClient.createFunnel(payload);
-      router.push(`/funnels/${funnel.id}`);
+      router.push({ pathname: '/', query: { tab: 'funnels', funnelId: funnel.id } }, undefined, { shallow: true });
     } catch (err: any) {
       alert('Failed to create funnel: ' + err.message);
     } finally {
@@ -45,8 +48,12 @@ export default function NewFunnelPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-        <Navbar activeTab="funnels" onTabChange={(tab) => router.push(`/?tab=${tab}`)} />
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 pt-24">
+        <Navbar
+          activeTab="funnels"
+          onTabChange={(tab) => router.push(`/?tab=${tab}`)}
+          organizationName={organizationName}
+        />
+      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${APP_MAIN_PL_OFFSET}`}>
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}

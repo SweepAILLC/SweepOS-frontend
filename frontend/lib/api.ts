@@ -1,8 +1,162 @@
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
 import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clearSessionCaches } from './cache';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+
+function isRetryable(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false;
+  const s = (err as AxiosError).response?.status;
+  if (s === 429 || s === 502 || s === 503) return true;
+  if (!s && (err as AxiosError).code === 'ECONNABORTED') return true;
+  return false;
+}
+
+async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, delayMs = 1500): Promise<T> {
+  for (let i = 0; i < maxAttempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < maxAttempts - 1 && isRetryable(err)) {
+        await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('withRetry: unreachable');
+}
+
+/** Response from POST /integrations/fathom/sync */
+export interface FathomSyncResponse {
+  skipped?: boolean;
+  reason?: string;
+  ingested?: number;
+  processed?: number;
+  meetings_seen?: number;
+  skipped_no_client_match?: number;
+  call_insights_queued?: number;
+  pending_insight_record_ids?: string[];
+}
+
+/** GET /auth/me/sales-content-themes — org-wide recurring objection/circumstance themes. */
+export interface OrgSalesContentTheme {
+  theme_key: string;
+  label: string;
+  distinct_client_count: number;
+  occurrence_count: number;
+  sample_quotes: string[];
+}
+
+/** Performance tab — matches backend `PerformanceSnapshotResponse` / task rows. */
+export interface PerformanceTask {
+  id: string;
+  title: string;
+  category: string;
+  impact_score: number;
+  confidence?: number;
+  evidence: Record<string, unknown>;
+  recommended_actions: string[];
+  why: string;
+  prescription: string;
+  next_step: string;
+  completed: boolean;
+}
+
+export interface PerformanceSnapshot {
+  generated_at: string;
+  pipeline: Record<string, unknown>;
+  revenue: Record<string, unknown>;
+  failed_payments: Record<string, unknown>;
+  funnels: unknown[];
+  diagnosis: {
+    traffic: string;
+    nurture: string;
+    conversion: string;
+    traffic_hint?: string;
+    nurture_hint?: string;
+    conversion_hint?: string;
+    pipeline_strip?: {
+      segments: Array<{ id: string; title: string; count: number }>;
+      total_clients: number;
+    };
+    revenue_compare?: {
+      cash_last_30_days?: number;
+      cash_prior_30_days?: number;
+      pct_change_30d?: number | null;
+      cash_mtd?: number;
+      cash_mtd_prev_month_same_range?: number;
+      pct_change_mtd?: number | null;
+      mrr?: number;
+    };
+    funnel_compare?: {
+      visitors_last_30?: number;
+      visitors_prior_30?: number;
+      conversions_last_30?: number;
+      conversions_prior_30?: number;
+      conversion_rate_last_30?: number;
+      conversion_rate_prior_30?: number;
+      pct_change_visitors?: number | null;
+      pct_change_conversions?: number | null;
+    };
+    insights?: string[];
+  };
+  tasks: PerformanceTask[];
+}
+
+/** Content Studio — matches backend content_studio schemas (v2 bundle). */
+export interface ContentStudioSectionIdea {
+  id: string;
+  stage: 'TOF' | 'MOF' | 'BOF';
+  hook: string;
+  concept: string;
+  why_it_works: string;
+  format: string;
+}
+
+export interface ContentStudioSection {
+  id: string;
+  title: string;
+  body: string;
+  ideas: ContentStudioSectionIdea[];
+}
+
+export interface ContentStudioVoiceMarketing {
+  title: string;
+  body: string;
+  bullets: string[];
+}
+
+export interface ContentStudioBundle {
+  version: number;
+  signals_fingerprint: string;
+  batch_id: string;
+  generated_at?: string | null;
+  source: 'llm' | 'default' | 'fathom';
+  sections: ContentStudioSection[];
+  voice_marketing: ContentStudioVoiceMarketing;
+}
+
+export interface ContentStudioBootstrap {
+  knowledge: { objections: string[]; closing: string[]; reframes: string[] };
+  sales_playbook: {
+    source: 'fathom' | 'default';
+    paragraphs: string[];
+  };
+  content_bundle: ContentStudioBundle | null;
+  completed_idea_ids: string[];
+  batch_id: string | null;
+}
+
+/** Matches backend `client_health_score._grade_from_score` for batch responses missing `grade`. */
+export function gradeFromHealthScore(score: number): string {
+  if (score >= 80) return 'A';
+  if (score >= 65) return 'B';
+  if (score >= 50) return 'C';
+  if (score >= 35) return 'D';
+  return 'F';
+}
+
 // For cross-origin (e.g. frontend on Vercel, API on Render): set to 'none' so cookies are sent
 const COOKIE_SAME_SITE = (process.env.NEXT_PUBLIC_COOKIE_SAME_SITE as 'lax' | 'strict' | 'none') || 'lax';
 
@@ -161,6 +315,7 @@ class ApiClient {
     data_sharing_enabled?: boolean;
     analytics_enabled?: boolean;
     fathom_api_key?: string;
+    ai_profile?: Record<string, unknown>;
   }) {
     const response = await this.client.put('/auth/me/settings', data);
     return response.data;
@@ -274,17 +429,105 @@ class ApiClient {
     return response.data;
   }
 
-  /** Client/lead health score (logic-based; AI-ready factors). */
-  async getClientHealthScore(clientId: string) {
-    const response = await this.client.get(`/clients/${clientId}/health-score`);
+  /** Client/lead health score (optional AI overlay when backend LLM is configured). */
+  async getClientHealthScore(clientId: string, options?: { useAi?: boolean }) {
+    const params: Record<string, boolean> = {};
+    if (options?.useAi) {
+      params.use_ai = true;
+    }
+    const response = await this.client.get(`/clients/${clientId}/health-score`, {
+      params: Object.keys(params).length ? params : undefined,
+    });
     return response.data;
   }
 
-  /** Batch health scores for board tags (score + grade only, no Brevo). */
-  async getClientsHealthScores(clientIds: string[]): Promise<Record<string, { score: number; grade: string }>> {
+  /** Lifecycle (and later AI) recommendation checklist for a client. */
+  async getClientAIRecommendations(clientId: string) {
+    const response = await this.client.get(`/clients/${clientId}/ai-recommendations`);
+    return response.data;
+  }
+
+  async patchClientAIRecommendationAction(clientId: string, actionId: string, completed: boolean) {
+    const response = await this.client.patch(
+      `/clients/${clientId}/ai-recommendations/actions/${encodeURIComponent(actionId)}`,
+      { completed }
+    );
+    return response.data;
+  }
+
+  /** Generate email draft (LLM or template) for a recommendation action */
+  async postAIRecommendationEmailDraft(clientId: string, actionId: string) {
+    const response = await this.client.post(
+      `/clients/${clientId}/ai-recommendations/actions/${encodeURIComponent(actionId)}/email-draft`
+    );
+    return response.data;
+  }
+
+  /** Batch health scores for board tags — same resolution as drawer (Brevo + AI when configured). */
+  async getClientsHealthScores(
+    clientIds: string[]
+  ): Promise<Record<string, { score: number; grade: string; source?: string }>> {
     if (clientIds.length === 0) return {};
     const response = await this.client.get('/clients/health-scores', {
       params: { client_ids: clientIds.join(',') }
+    });
+    const raw = response.data || {};
+    const out: Record<string, { score: number; grade: string; source?: string }> = {};
+    for (const [id, v] of Object.entries(raw)) {
+      if (!v || typeof v !== 'object') continue;
+      const row = v as { score?: unknown; grade?: unknown; source?: unknown };
+      const score = typeof row.score === 'number' ? row.score : Number(row.score);
+      if (Number.isNaN(score)) continue;
+      const grade =
+        typeof row.grade === 'string' && row.grade.trim() !== ''
+          ? row.grade.trim()
+          : gradeFromHealthScore(score);
+      out[id] = {
+        score,
+        grade,
+        ...(typeof row.source === 'string' ? { source: row.source } : {}),
+      };
+    }
+    return out;
+  }
+
+  /** Call insights (ROI, clips, opportunity tags) — from Fathom + LLM. */
+  async getClientCallInsights(clientId: string) {
+    const response = await this.client.get(`/clients/${clientId}/call-insights`);
+    return response.data;
+  }
+
+  async getOrgSalesContentThemes(): Promise<{ themes: OrgSalesContentTheme[] }> {
+    const response = await this.client.get('/auth/me/sales-content-themes');
+    return response.data;
+  }
+
+  async postClientCallInsightsRefresh(clientId: string) {
+    // LLM call can exceed default 10s; avoid false "failed" in dev.
+    const response = await this.client.post(`/clients/${clientId}/call-insights/refresh`, undefined, {
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
+  /**
+   * Pull recent meetings from Fathom (matches clients by invitee email → ingests summaries/transcripts).
+   * Uses the Fathom API key from Settings or FATHOM_API_KEY env.
+   */
+  async syncFathomMeetings(): Promise<FathomSyncResponse> {
+    const response = await this.client.post('/integrations/fathom/sync', null, {
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
+  /** Batch opportunity tags for board chips. */
+  async getClientsCallInsightTags(
+    clientIds: string[]
+  ): Promise<Record<string, { tags: string[]; headline: string }>> {
+    if (clientIds.length === 0) return {};
+    const response = await this.client.get('/clients/call-insight-tags', {
+      params: { client_ids: clientIds.join(',') },
     });
     return response.data || {};
   }
@@ -391,11 +634,11 @@ class ApiClient {
     return response.data;
   }
 
-  async syncStripeData(forceFull: boolean = false) {
+  async syncStripeData(forceFull: boolean = false, syncRecent: boolean = false) {
     // Sync operations can take a long time, especially for full historical syncs
     // Use a longer timeout (5 minutes) for sync operations
     const response = await this.client.post('/integrations/stripe/sync', null, {
-      params: { force_full: forceFull },
+      params: { force_full: forceFull, sync_recent: syncRecent },
       timeout: 300000, // 5 minutes for sync operations
     });
     return response.data;
@@ -620,13 +863,15 @@ class ApiClient {
     return response.data;
   }
 
-  async getStripeSummary(range?: number, bypassCache?: boolean) {
+  async getStripeSummary(range?: number | 'mtd', bypassCache?: boolean) {
     const cacheKey = `stripe_summary_${range ?? 'all'}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params = range ? { range } : {};
+    const params: Record<string, string | number> = {};
+    if (range === 'mtd') params.scope = 'mtd';
+    else if (range && range !== 'all') params.range = range;
     const response = await this.client.get('/integrations/stripe/summary', { params });
     const data = response.data;
     if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
@@ -786,14 +1031,15 @@ class ApiClient {
   }
 
   // Stripe Analytics (bypassCache=true used by Stripe tab so it never overwrites Terminal's cache)
-  async getStripeRevenueTimeline(range?: number, groupBy?: 'day' | 'week', bypassCache?: boolean) {
+  async getStripeRevenueTimeline(range?: number | 'mtd', groupBy?: 'day' | 'week', bypassCache?: boolean) {
     const cacheKey = `stripe_revenue_${range ?? 'all'}_${groupBy ?? 'day'}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: any = {};
-    if (range) params.range = range;
+    const params: Record<string, string | number> = {};
+    if (range === 'mtd') params.scope = 'mtd';
+    else if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/revenue-timeline', { params });
     const data = response.data;
@@ -814,14 +1060,15 @@ class ApiClient {
     return data;
   }
 
-  async getStripeMRRTrend(range?: number, groupBy?: 'day' | 'week' | 'month', bypassCache?: boolean) {
+  async getStripeMRRTrend(range?: number | 'mtd', groupBy?: 'day' | 'week' | 'month', bypassCache?: boolean) {
     const cacheKey = `stripe_mrr_${range ?? 'all'}_${groupBy ?? 'day'}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: any = {};
-    if (range) params.range = range;
+    const params: Record<string, string | number> = {};
+    if (range === 'mtd') params.scope = 'mtd';
+    else if (range) params.range = range;
     if (groupBy) params.group_by = groupBy;
     const response = await this.client.get('/integrations/stripe/mrr-trend', { params });
     const data = response.data;
@@ -831,7 +1078,7 @@ class ApiClient {
 
   async getStripePayments(
     status?: string,
-    range?: number,
+    range?: number | 'mtd',
     page?: number,
     pageSize?: number,
     useTreasury?: boolean,
@@ -842,9 +1089,10 @@ class ApiClient {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: any = {};
+    const params: Record<string, string | number> = {};
     if (status) params.status = status;
-    if (range !== undefined) params.range = range; // undefined means all time
+    if (range === 'mtd') params.scope = 'mtd';
+    else if (range !== undefined) params.range = range;
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
     if (useTreasury !== undefined) params.use_treasury = useTreasury;
@@ -1170,6 +1418,73 @@ class ApiClient {
     const response = await this.client.delete(`/users/${userId}`);
     cache.delete(CACHE_KEYS.USERS);
     return response.data;
+  }
+
+  // Performance tab
+  async getPerformanceSnapshot(): Promise<PerformanceSnapshot> {
+    const response = await this.client.get('/performance/snapshot');
+    return response.data;
+  }
+
+  async patchPerformanceTasks(completed_task_ids: string[]) {
+    const response = await this.client.patch('/performance/tasks', { completed_task_ids });
+    return response.data as { completed_task_ids: string[]; updated_at?: string };
+  }
+
+  async postPerformancePrescription(task_ids?: string[]) {
+    const response = await this.client.post(
+      '/performance/prescription',
+      { task_ids: task_ids ?? [] },
+      { timeout: 60000 }
+    );
+    return response.data as {
+      tasks: { id: string; why: string; prescription: string; next_step: string }[];
+      source: string;
+    };
+  }
+
+  // Content Studio (bootstrap may draft the v2 bundle via LLM when signals change — long timeout)
+  async getContentStudioBootstrap(): Promise<ContentStudioBootstrap> {
+    return withRetry(async () => {
+      const response = await this.client.get('/content-studio/bootstrap', { timeout: 120000 });
+      return response.data;
+    });
+  }
+
+  async putContentStudioKnowledge(body: {
+    objections: string[];
+    closing: string[];
+    reframes: string[];
+  }) {
+    const response = await this.client.put('/content-studio/knowledge', body, { timeout: 60000 });
+    return response.data as ContentStudioBootstrap['knowledge'];
+  }
+
+  async patchContentStudioCompletions(completed_idea_ids: string[]) {
+    const response = await this.client.patch(
+      '/content-studio/ideas/complete',
+      { completed_idea_ids },
+      { timeout: 30000 }
+    );
+    return response.data as { completed_idea_ids: string[]; batch_id?: string; updated_at?: string };
+  }
+
+  async postContentStudioTranscriptAnalyze(body: {
+    transcript: string;
+    purpose: 'TOF' | 'MOF' | 'BOF' | 'mixed';
+    mixed_note?: string;
+  }) {
+    const response = await this.client.post('/content-studio/transcripts/analyze', body, { timeout: 120000 });
+    return response.data as { id: string; purpose: string; analysis: Record<string, unknown> };
+  }
+
+  async getContentStudioTranscripts(limit?: number) {
+    const response = await this.client.get('/content-studio/transcripts', {
+      params: limit ? { limit } : undefined,
+    });
+    return response.data as {
+      items: { id: string; purpose: string; mixed_note?: string; created_at?: string; summary?: string }[];
+    };
   }
 
   // Tab Permissions

@@ -170,7 +170,8 @@ export default function AdminPanel() {
         { tab_name: 'clients', enabled: true },
         { tab_name: 'stripe', enabled: true },
         { tab_name: 'funnels', enabled: true },
-        { tab_name: 'users', enabled: true }
+        { tab_name: 'content_studio', enabled: true },
+        { tab_name: 'users', enabled: true },
       ]);
     } finally {
       setLoadingTabPermissions(false);
@@ -458,40 +459,163 @@ export default function AdminPanel() {
         </div>
       )}
 
-      {/* Health Tab */}
+      {/* Health Tab — platform impact & growth */}
       {activeTab === 'health' && health && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Global Health Stats</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Organizations</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_organizations}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Users</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_users}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Clients</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_clients}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Funnels</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_funnels}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Events</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_events.toLocaleString()}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Payments</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_payments.toLocaleString()}</p>
-            </div>
-            <div className="glass-card p-4 neon-glow">
-              <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Subscriptions</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_subscriptions.toLocaleString()}</p>
-            </div>
+        <div className="space-y-8">
+          <div>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Platform health</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+              Revenue, scale, funnel traffic, and 30-day growth signals across all organizations.
+            </p>
           </div>
+
+          {/* Revenue & billing */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Revenue & billing
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Total revenue (Stripe, all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  ${health.total_revenue_stripe_succeeded_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Succeeded payment volume</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">MRR (active + trialing)</p>
+                <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                  ${health.total_mrr_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">ARR ≈ ${(health.total_mrr_usd * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Revenue last 30 days (Stripe)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  ${health.last_30_days_revenue_stripe_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Treasury posted (30d)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  ${health.treasury_posted_last_30_days_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Where Treasury is used</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Scale */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Platform scale
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Organizations</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_organizations}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Users</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_users}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Clients</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_clients}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Funnels</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_funnels}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Payment records</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_payments.toLocaleString()}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Subscriptions (all)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_subscriptions.toLocaleString()}</p>
+                <p className="text-xs text-gray-500 mt-1">Active + trialing: {health.active_subscriptions}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Funnels & engagement */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Funnels & engagement
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-indigo-50/80 dark:bg-indigo-950/30">
+                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">Funnel first-step views (all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.funnel_first_step_views_all_time.toLocaleString()}</p>
+                <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">Events matching each funnel&apos;s first step</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-indigo-50/80 dark:bg-indigo-950/30">
+                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">First-step views (30 days)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.funnel_first_step_views_last_30_days.toLocaleString()}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Unique visitors (all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.unique_visitors_all_time.toLocaleString()}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Unique visitors (30 days)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.unique_visitors_last_30_days.toLocaleString()}</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">All funnel events (all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_events.toLocaleString()}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Funnel events (30 days)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_events_last_30_days.toLocaleString()}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Growth (30 days) */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Growth (last 30 days)
+            </h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
+                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New organizations</p>
+                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.organizations_created_last_30_days}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
+                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New users</p>
+                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.users_created_last_30_days}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
+                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New clients</p>
+                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.clients_created_last_30_days}</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Pending invitations</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.pending_invitations}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Integrations */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Integrations
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 flex items-center justify-between">
+                <span className="text-gray-700 dark:text-gray-300">Orgs with Stripe connected</span>
+                <span className="text-xl font-bold text-gray-900 dark:text-gray-100">{health.orgs_with_stripe_connected}</span>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 flex items-center justify-between">
+                <span className="text-gray-700 dark:text-gray-300">Orgs with Brevo connected</span>
+                <span className="text-xl font-bold text-gray-900 dark:text-gray-100">{health.orgs_with_brevo_connected}</span>
+              </div>
+            </div>
+          </section>
         </div>
       )}
 

@@ -15,9 +15,9 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { apiClient } from '@/lib/api';
+import { apiClient, gradeFromHealthScore } from '@/lib/api';
 import { Client } from '@/types/client';
-import { TERMINAL_CLIENTS_UPDATED_EVENT } from '@/lib/cache';
+import { STRIPE_DATA_UPDATED_EVENT, TERMINAL_CLIENTS_UPDATED_EVENT, invalidateStripeAndTerminalAfterWebhook } from '@/lib/cache';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
 import ShinyButton from '../ui/ShinyButton';
@@ -61,6 +61,14 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [mergingCards, setMergingCards] = useState(false);
   const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
+  const [callInsightTags, setCallInsightTags] = useState<Record<string, { tags: string[]; headline: string }>>({});
+  const [healthRefreshToken, setHealthRefreshToken] = useState(0);
+
+  // Refs to avoid re-creating poll intervals with stale state
+  const clientsRef = useRef<Client[]>([]);
+  const healthScoresRef = useRef<Record<string, { score: number; grade: string }>>({});
+  const selectedClientIdRef = useRef<string | null>(null);
+  const isDrawerOpenRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -72,6 +80,71 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   // Load client list only on mount; no sync unless user clicks the refresh/sync button; skip pipeline notify on first load
   useEffect(() => {
     loadClients(false, true, false);
+  }, []);
+
+  // When Stripe sync/webhook updates land, refetch clients so new customers appear on the board.
+  useEffect(() => {
+    const onStripe = () => {
+      loadClients(true, true, true).catch(() => {});
+    };
+    window.addEventListener(STRIPE_DATA_UPDATED_EVENT, onStripe as EventListener);
+    return () => window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, onStripe as EventListener);
+  }, []);
+
+  // Keep refs in sync
+  clientsRef.current = clients;
+  healthScoresRef.current = healthScores;
+  selectedClientIdRef.current = selectedClient?.id ?? null;
+  isDrawerOpenRef.current = isDrawerOpen;
+
+  // Poll cached health scores (cache-only read — fast) + call-insight tags
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const tick = async () => {
+      if (cancelled || inFlight) return;
+      const ids = clientsRef.current.map((c) => c.id);
+      if (ids.length === 0) return;
+
+      inFlight = true;
+      try {
+        const updated = await apiClient.getClientsHealthScores(ids);
+        setHealthScores((prev) => ({ ...prev, ...updated }));
+
+        try {
+          const tagMap = await apiClient.getClientsCallInsightTags(ids);
+          setCallInsightTags((prev) => ({ ...prev, ...tagMap }));
+        } catch (tagErr) {
+          console.warn('[KanbanBoard] Failed to refresh call insight tags:', tagErr);
+        }
+
+        const selectedId = selectedClientIdRef.current;
+        if (selectedId && isDrawerOpenRef.current) {
+          const prevHealth = healthScoresRef.current[selectedId];
+          const nextHealth = updated[selectedId];
+          if (
+            nextHealth &&
+            (!prevHealth || prevHealth.score !== nextHealth.score || prevHealth.grade !== nextHealth.grade)
+          ) {
+            setHealthRefreshToken((t) => t + 1);
+          }
+        }
+      } catch (err) {
+        console.warn('[KanbanBoard] Failed to refresh health scores:', err);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 15000);
+    window.addEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, tick as EventListener);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, tick as EventListener);
+    };
   }, []);
 
   // Listen for Stripe connection events to refetch client list (no sync)
@@ -143,16 +216,35 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         );
       }
       
+      // Ref must see new ids before TERMINAL_CLIENTS_UPDATED_EVENT (poll handler reads clientsRef).
+      clientsRef.current = data;
       // Force state update by creating a new array reference
       setClients([...data]);
       if (notifyPipeline && typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
       }
-      // Batch fetch health scores for board tags (no Brevo in batch for performance)
+      // Batch fetch persisted health cache + call-insight tags (same sources as drawer / summary)
       if (data.length > 0) {
-        apiClient.getClientsHealthScores(data.map((c: Client) => c.id)).then(setHealthScores).catch(() => setHealthScores({}));
+        const ids = data.map((c: Client) => c.id);
+        try {
+          const batch = await apiClient.getClientsHealthScores(ids);
+          setHealthScores(batch);
+        } catch (e) {
+          console.warn('[KanbanBoard] Batch health scores failed; keeping previous board tags:', e);
+        }
+        try {
+          const tagMap = await apiClient.getClientsCallInsightTags(ids);
+          const nextTags: Record<string, { tags: string[]; headline: string }> = {};
+          for (const c of data) {
+            nextTags[c.id] = tagMap[c.id] ?? { tags: [], headline: '' };
+          }
+          setCallInsightTags(nextTags);
+        } catch (e) {
+          console.warn('[KanbanBoard] Batch call-insight tags failed; keeping previous chips:', e);
+        }
       } else {
         setHealthScores({});
+        setCallInsightTags({});
       }
       // Return the data for use in onUpdate callback
       return data;
@@ -455,7 +547,18 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     setSyncingRefreshing(true);
     try {
       await apiClient.syncCheckIns();
-      await apiClient.syncStripeData(false);
+      // Recent-sync ensures new customers/payments are pulled in quickly.
+      await apiClient.syncStripeData(false, true);
+      // Mark Stripe as updated so Terminal/widgets refetch immediately.
+      try {
+        const { last_updated_ms } = await apiClient.getStripeLastUpdated();
+        if (last_updated_ms != null) invalidateStripeAndTerminalAfterWebhook(last_updated_ms);
+      } catch {
+        /* keep */
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+      }
       await loadClients(true);
     } catch (err: any) {
       console.error('[KanbanBoard] Refresh sync failed:', err);
@@ -473,6 +576,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       const fullName = [client.first_name, client.last_name].filter(Boolean).join(' ').toLowerCase();
       if (fullName.includes(query)) return true;
       if (client.email && client.email.toLowerCase().includes(query)) return true;
+      if (client.emails?.some((e) => e && String(e).toLowerCase().includes(query))) return true;
       if (client.phone) {
         const normalizedPhone = client.phone.replace(/\D/g, '');
         const normalizedQuery = query.replace(/\D/g, '');
@@ -716,6 +820,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                 }}
                 onClientDelete={handleDeleteClient}
                 healthScores={healthScores}
+                callInsightTags={callInsightTags}
               />
             );
           })}
@@ -728,6 +833,17 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         onClose={() => {
           setIsDrawerOpen(false);
           setSelectedClient(null);
+        }}
+        healthRefreshToken={healthRefreshToken}
+        onHealthScoreLoaded={(cid, score, grade) => {
+          setHealthScores((prev) => ({ ...prev, [cid]: { score, grade } }));
+          apiClient
+            .getClientsCallInsightTags([cid])
+            .then((tagMap) => {
+              const row = tagMap[cid];
+              if (row) setCallInsightTags((prev) => ({ ...prev, [cid]: row }));
+            })
+            .catch(() => {});
         }}
         onUpdate={async () => {
           console.log('[KanbanBoard] onUpdate called, reloading clients...');
@@ -759,16 +875,19 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             }
           }
 
-          // Keep card health tag in sync with the drawer health score.
-          // The drawer uses the full endpoint (`/clients/{id}/health-score`, includes Brevo stats),
-          // while the batch endpoint used during board loading omits Brevo for performance.
+          // Keep card health tag in sync with the drawer (same GET + use_ai=true as ClientHealthScoreContent).
           if (previousSelectedId) {
             try {
-              const full = await apiClient.getClientHealthScore(previousSelectedId);
-              if (full?.score != null && full?.grade) {
+              const full = await apiClient.getClientHealthScore(previousSelectedId, { useAi: true });
+              const sc = full?.score != null ? Number(full.score) : NaN;
+              if (!Number.isNaN(sc)) {
+                const g =
+                  typeof full?.grade === 'string' && full.grade.trim() !== ''
+                    ? full.grade.trim()
+                    : gradeFromHealthScore(sc);
                 setHealthScores((prev) => ({
                   ...prev,
-                  [previousSelectedId]: { score: full.score, grade: full.grade },
+                  [previousSelectedId]: { score: sc, grade: g },
                 }));
               }
             } catch (err) {
@@ -946,9 +1065,10 @@ interface KanbanColumnProps {
   onClientClick: (client: Client) => void;
   onClientDelete?: (client: Client) => void;
   healthScores?: Record<string, { score: number; grade: string }>;
+  callInsightTags?: Record<string, { tags: string[]; headline: string }>;
 }
 
-function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete, healthScores = {} }: KanbanColumnProps) {
+function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete, healthScores = {}, callInsightTags = {} }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: id,
   });
@@ -979,6 +1099,7 @@ function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, 
                 showSlotLineAbove={dragOverId === SLOT_DROP_ID(client.id)}
                 healthGrade={healthScores[client.id]?.grade}
                 healthScore={healthScores[client.id]?.score}
+                insightTags={callInsightTags[client.id]?.tags}
               />
             ))}
           </div>

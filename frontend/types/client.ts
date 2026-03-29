@@ -62,5 +62,9 @@ export interface ClientHealthScoreResponse {
   grade: string;
   factors: ClientHealthFactor[];
   computed_at?: string | null;
+  /** logic | ai — when AI overlay was used */
+  source?: string | null;
+  explanation?: string | null;
+  source_reason?: string | null;
 }
 

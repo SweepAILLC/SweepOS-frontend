@@ -7,6 +7,7 @@ interface CashCollectedData {
   today: number;
   last7Days: number;
   last30Days: number;
+  lastMtd: number;  // Month to date
 }
 
 interface MRRData {
@@ -36,7 +37,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
     if (!s) return false;
     const cash = s.cash_collected;
     const mrr = s.mrr?.current_mrr ?? 0;
-    return (cash && ((cash.today ?? 0) > 0 || (cash.last_7_days ?? 0) > 0 || (cash.last_30_days ?? 0) > 0)) || mrr > 0;
+    return (cash && ((cash.today ?? 0) > 0 || (cash.last_7_days ?? 0) > 0 || (cash.last_30_days ?? 0) > 0 || (cash.last_mtd ?? 0) > 0)) || mrr > 0;
   };
 
   const normalizeEmail = (email: string | undefined | null): string | null => {
@@ -50,12 +51,13 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
       today: summary.cash_collected?.today ?? 0,
       last7Days: summary.cash_collected?.last_7_days ?? 0,
       last30Days: summary.cash_collected?.last_30_days ?? 0,
+      lastMtd: summary.cash_collected?.last_mtd ?? 0,
     };
     const mrr = {
       currentMRR: summary.mrr?.current_mrr ?? 0,
       arr: summary.mrr?.arr ?? 0,
     };
-    const hasData = cash.today > 0 || cash.last7Days > 0 || cash.last30Days > 0 || mrr.currentMRR > 0;
+    const hasData = cash.today > 0 || cash.last7Days > 0 || cash.last30Days > 0 || cash.lastMtd > 0 || mrr.currentMRR > 0;
     return hasData ? { cash, mrr } : null;
   };
 
@@ -67,10 +69,13 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     const thirtyDaysAgo = new Date(todayStart);
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const mtdStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    mtdStart.setHours(0, 0, 0, 0);
 
     let todayCash = 0;
     let last7DaysCash = 0;
     let last30DaysCash = 0;
+    let mtdCash = 0;
     const seenPaymentIds = new Set<string>();
 
     try {
@@ -102,6 +107,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
         if (paymentLocalDate >= todayStart) todayCash += amount;
         if (paymentLocalDate >= sevenDaysAgo) last7DaysCash += amount;
         if (paymentLocalDate >= thirtyDaysAgo) last30DaysCash += amount;
+        if (paymentLocalDate >= mtdStart) mtdCash += amount;
       });
     } catch (e) {
       console.warn('Fallback: failed to load Stripe payments', e);
@@ -124,6 +130,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
             if (paymentLocalDate >= todayStart) todayCash += amount;
             if (paymentLocalDate >= sevenDaysAgo) last7DaysCash += amount;
             if (paymentLocalDate >= thirtyDaysAgo) last30DaysCash += amount;
+            if (paymentLocalDate >= mtdStart) mtdCash += amount;
           });
         } catch {
           // skip client
@@ -169,7 +176,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
     }
 
     return {
-      cash: { today: todayCash, last7Days: last7DaysCash, last30Days: last30DaysCash },
+      cash: { today: todayCash, last7Days: last7DaysCash, last30Days: last30DaysCash, lastMtd: mtdCash },
       mrr: { currentMRR, arr },
     };
   };
@@ -208,6 +215,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
         today: cash?.today ?? 0,
         last7Days: cash?.last_7_days ?? 0,
         last30Days: cash?.last_30_days ?? 0,
+        lastMtd: cash?.last_mtd ?? 0,
       });
       setMrrData({
         currentMRR: mrr?.current_mrr ?? 0,
@@ -280,9 +288,9 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
                 </p>
               </div>
               <div className="text-center p-3 sm:p-4 glass-panel rounded-lg min-w-0">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">30 Days</p>
-                <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.last30Days ?? 0)}>
-                  {formatCurrency(cashCollected?.last30Days ?? 0)}
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">MTD</p>
+                <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.lastMtd ?? 0)}>
+                  {formatCurrency(cashCollected?.lastMtd ?? 0)}
                 </p>
               </div>
             </div>

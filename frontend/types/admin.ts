@@ -12,12 +12,28 @@ export interface Organization {
 
 export interface GlobalHealth {
   total_organizations: number;
+  organizations_created_last_30_days: number;
   total_users: number;
+  users_created_last_30_days: number;
   total_clients: number;
+  clients_created_last_30_days: number;
   total_funnels: number;
   total_events: number;
+  total_events_last_30_days: number;
   total_payments: number;
   total_subscriptions: number;
+  active_subscriptions: number;
+  total_mrr_usd: number;
+  total_revenue_stripe_succeeded_usd: number;
+  last_30_days_revenue_stripe_usd: number;
+  treasury_posted_last_30_days_usd: number;
+  funnel_first_step_views_all_time: number;
+  funnel_first_step_views_last_30_days: number;
+  unique_visitors_all_time: number;
+  unique_visitors_last_30_days: number;
+  orgs_with_stripe_connected: number;
+  orgs_with_brevo_connected: number;
+  pending_invitations: number;
 }
 
 export interface GlobalSettings {

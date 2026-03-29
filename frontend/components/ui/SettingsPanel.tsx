@@ -1,9 +1,13 @@
 import { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
+import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
+import { clearSessionCaches } from '@/lib/cache';
+import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 
-type SettingsSection = 'appearance' | 'accounts' | 'intelligence' | 'profile' | 'privacy';
+type SettingsSection = 'appearance' | 'accounts' | 'credentials' | 'profile' | 'privacy';
 
 interface OrgOption {
   id: string;
@@ -14,12 +18,13 @@ interface OrgOption {
 const SIDEBAR_ITEMS: { id: SettingsSection; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'accounts', label: 'Accounts' },
-  { id: 'intelligence', label: 'Intelligence' },
+  { id: 'credentials', label: 'Credentials' },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
 
 export default function SettingsPanel() {
+  const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
@@ -83,6 +88,12 @@ export default function SettingsPanel() {
   useEffect(() => {
     loadSettings();
   }, []);
+
+  const handleLogout = () => {
+    clearSessionCaches();
+    Cookies.remove('access_token');
+    router.push('/login');
+  };
 
   const handleSwitchOrg = async (orgId: string) => {
     if (orgId === currentOrgId) return;
@@ -176,6 +187,15 @@ export default function SettingsPanel() {
               {item.label}
             </button>
           ))}
+          <div className="border-t border-gray-200/50 dark:border-white/10 mt-1 pt-1">
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 hover:text-red-700 dark:hover:text-red-300"
+            >
+              Log out
+            </button>
+          </div>
         </nav>
       </aside>
 
@@ -257,11 +277,11 @@ export default function SettingsPanel() {
             </div>
           )}
 
-          {section === 'intelligence' && (
+          {section === 'credentials' && (
             <form onSubmit={handleSubmit} className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Intelligence</h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Credentials</h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                Connect Fathom to use call summaries and transcripts for client health insights.
+                API keys and integration credentials for AI-powered features.
               </p>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Fathom API Key</label>
@@ -285,6 +305,7 @@ export default function SettingsPanel() {
                   from Fathom → Settings → API.
                 </p>
               </div>
+              <FathomSyncSection variant="panel" />
               <button
                 type="submit"
                 disabled={saving}

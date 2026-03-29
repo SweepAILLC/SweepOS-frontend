@@ -9,7 +9,9 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
     clients: 'Clients',
     stripe: 'Stripe',
     funnels: 'Funnels',
-    users: 'Users'
+    performance: 'Performance',
+    content_studio: 'Content Studio',
+    users: 'Users',
   };
 
   const displayName = tabDisplayNames[tabName] || tabName;

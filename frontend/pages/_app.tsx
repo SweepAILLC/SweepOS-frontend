@@ -5,6 +5,7 @@ import '../styles/globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LoadingProvider } from '@/contexts/LoadingContext';
 import GlobalLoadingOverlay from '@/components/ui/GlobalLoadingOverlay';
+import { PerformanceDrawerProvider } from '@/components/ui/PerformanceDrawer';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
 import { clearSessionCaches } from '@/lib/cache';
@@ -116,8 +117,10 @@ export default function App({ Component, pageProps }: AppProps) {
     <ErrorBoundary>
       <ThemeProvider>
         <LoadingProvider>
-          <GlobalLoadingOverlay />
-          <Component {...pageProps} />
+          <PerformanceDrawerProvider>
+            <GlobalLoadingOverlay />
+            <Component {...pageProps} />
+          </PerformanceDrawerProvider>
         </LoadingProvider>
       </ThemeProvider>
     </ErrorBoundary>

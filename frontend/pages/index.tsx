@@ -1,16 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar from '@/components/ui/Navbar';
+import { APP_MAIN_PL_OFFSET, APP_MAIN_PL_WITH_PERF_OPEN } from '@/components/ui/layoutConstants';
 import TerminalDashboard from '@/components/TerminalDashboard';
 import BrevoConsolePanel from '@/components/BrevoConsolePanel';
 import StripeDashboardPanel from '@/components/stripe/StripeDashboardPanel';
 import CalendarConsolePanel from '@/components/calendar/CalendarConsolePanel';
 import FunnelListPanel from '@/components/FunnelListPanel';
+import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
 import AdminPanel from '@/components/AdminPanel';
 import UsersPanel from '@/components/UsersPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import SettingsPanel from '@/components/ui/SettingsPanel';
+import IntelligencePanel from '@/components/ui/IntelligencePanel';
+import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
+import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
 
@@ -19,27 +24,57 @@ export default function Dashboard() {
   const { setLoading: setGlobalLoading } = useLoading();
   
   // New session (after login) starts on terminal; refresh keeps current tab via localStorage
-  const getInitialTab = (): 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings' => {
+  type TabId =
+    | 'brevo'
+    | 'terminal'
+    | 'stripe'
+    | 'funnels'
+    | 'content_studio'
+    | 'users'
+    | 'owner'
+    | 'calcom'
+    | 'intelligence'
+    | 'settings';
+
+  const getInitialTab = (): TabId => {
     if (typeof window === 'undefined') return 'terminal';
     if (sessionStorage.getItem('newSession') === '1') {
       sessionStorage.removeItem('newSession');
       return 'terminal';
     }
     const savedTab = localStorage.getItem('activeTab');
-    const validTabs = ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom', 'settings'];
+    if (savedTab === 'performance') {
+      sessionStorage.setItem('openPerfDrawer', '1');
+      return 'terminal';
+    }
+    const validTabs: string[] = [
+      'brevo',
+      'terminal',
+      'stripe',
+      'funnels',
+      'content_studio',
+      'users',
+      'owner',
+      'calcom',
+      'intelligence',
+      'settings',
+    ];
     if (savedTab && validTabs.includes(savedTab)) {
-      return savedTab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings';
+      return savedTab as TabId;
     }
     return 'terminal';
   };
 
-  const [activeTab, setActiveTab] = useState<'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings'>(() => getInitialTab());
+  const [activeTab, setActiveTab] = useState<TabId>(() => getInitialTab());
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
   const [userRole, setUserRole] = useState<string>('member'); // Track user role for permission checks
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [organizationName, setOrganizationName] = useState<string | null>(null);
+  const perfDrawer = usePerformanceDrawer();
+  const prevActiveTabForPerfRef = useRef<TabId | null>(null);
 
   // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
   useEffect(() => {
@@ -49,13 +84,51 @@ export default function Dashboard() {
   }, [activeTab]);
 
   useEffect(() => {
+    if (typeof window === 'undefined' || !perfDrawer) return;
+    if (sessionStorage.getItem('openPerfDrawer') === '1') {
+      sessionStorage.removeItem('openPerfDrawer');
+      perfDrawer.open();
+    }
+  }, [perfDrawer]);
+
+  // Close Performance drawer only when the main *tab* changes — not when drawer open/close updates context.
+  useEffect(() => {
+    if (!perfDrawer) return;
+    if (prevActiveTabForPerfRef.current === null) {
+      prevActiveTabForPerfRef.current = activeTab;
+      return;
+    }
+    if (prevActiveTabForPerfRef.current === activeTab) {
+      return;
+    }
+    prevActiveTabForPerfRef.current = activeTab;
+    perfDrawer.close();
+  }, [activeTab, perfDrawer]);
+
+  useEffect(() => {
     let isMounted = true;
     
     // Check authentication, admin status, and tab permissions
     const checkAuth = async () => {
       try {
         const user = await apiClient.getCurrentUser();
-        
+        const u = user as { org_id?: string; org_name?: string | null; email?: string };
+        let resolvedOrgName: string | null = u.org_name ?? null;
+        if (!resolvedOrgName && u.email && u.org_id) {
+          try {
+            const orgs = await apiClient.getUserOrganizations(u.email);
+            const match = Array.isArray(orgs)
+              ? orgs.find((o: { id: string }) => String(o.id) === String(u.org_id))
+              : null;
+            resolvedOrgName = match?.name ?? null;
+          } catch {
+            resolvedOrgName = null;
+          }
+        }
+        if (isMounted) {
+          setOrganizationName(resolvedOrgName);
+        }
+
         if (!isMounted) return;
         
         // Check if user is owner (only 'owner' role)
@@ -91,6 +164,7 @@ export default function Dashboard() {
             brevo: true,
             terminal: true,
             stripe: true,
+            performance: true,
             funnels: true,
             users: true,
             calcom: true
@@ -194,14 +268,54 @@ export default function Dashboard() {
       return;
     }
     
-    // Handle standalone tab navigation (only if no OAuth params)
-    if (tab && typeof tab === 'string' && ['brevo', 'terminal', 'stripe', 'funnels', 'users', 'owner', 'calcom', 'settings'].includes(tab)) {
-      const tabValue = tab as 'brevo' | 'terminal' | 'stripe' | 'funnels' | 'users' | 'owner' | 'calcom' | 'settings';
-      setActiveTab(tabValue);
-      // Clear the query parameter after setting the tab
-      router.replace('/', undefined, { shallow: true });
+    // Deep-link: /?funnelId=… without tab → open Funnels tab + normalize URL
+    const rawFunnelId = router.query.funnelId;
+    if (!tab && rawFunnelId && typeof rawFunnelId === 'string') {
+      setActiveTab('funnels');
+      router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: rawFunnelId } }, undefined, { shallow: true });
+      return;
     }
-  }, [router.isReady, router.query]);
+
+    // Handle standalone tab navigation (only if no OAuth params)
+    if (tab && typeof tab === 'string') {
+      if (tab === 'performance') {
+        perfDrawer?.open();
+        router.replace('/', undefined, { shallow: true });
+        return;
+      }
+      if (
+        [
+          'brevo',
+          'terminal',
+          'stripe',
+          'funnels',
+          'content_studio',
+          'users',
+          'owner',
+          'calcom',
+          'intelligence',
+          'settings',
+        ].includes(tab)
+      ) {
+        const tabValue = tab as TabId;
+        setActiveTab(tabValue);
+        const rawFid = router.query.funnelId;
+        if (tabValue === 'funnels' && rawFid && typeof rawFid === 'string') {
+          router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: rawFid } }, undefined, { shallow: true });
+        } else {
+          router.replace('/', undefined, { shallow: true });
+        }
+      }
+    }
+  }, [router.isReady, router.query, perfDrawer]);
+
+  useEffect(() => {
+    if (!router.isReady) return;
+    if (activeTab === 'funnels') return;
+    if (router.query.funnelId) {
+      router.replace({ pathname: '/', query: { tab: activeTab } }, undefined, { shallow: true });
+    }
+  }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
   if (loading) {
     return (
@@ -239,20 +353,19 @@ export default function Dashboard() {
       <Navbar 
         activeTab={activeTab} 
         onTabChange={(tab) => {
-          // Only set loading if actually switching to a different tab
           if (tab !== activeTab) {
-            setGlobalLoading(true, 'Switching tabs...');
             setActiveTab(tab);
-            // Loading will be turned off by the individual panel components when they finish loading
+            setGlobalLoading(true, 'Switching tabs...');
           }
         }} 
         isOwner={isOwner}
         tabPermissions={tabPermissions}
         userRole={userRole || 'member'}
+        organizationName={organizationName}
       />
 
       {notification && (
-        <div className={`fixed top-4 right-4 z-50 p-4 rounded-lg shadow-lg ${
+        <div className={`fixed top-4 right-4 z-[60] p-4 rounded-lg shadow-lg max-w-sm ${
           notification.type === 'success' 
             ? 'bg-green-500 dark:bg-green-600 text-white' 
             : 'bg-red-500 dark:bg-red-600 text-white'
@@ -270,7 +383,13 @@ export default function Dashboard() {
         </div>
       )}
 
-      <main className="min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 pt-20 sm:pt-24 overflow-x-hidden">
+      {/* Full-width shell so left padding lines up with the fixed sidebar + Performance panel; inner main stays max-w-7xl centered in the remaining width. */}
+      <div
+        className={`min-w-0 w-full min-h-screen transition-[padding-left] duration-300 ease-out ${
+          perfDrawer?.isOpen ? APP_MAIN_PL_WITH_PERF_OPEN : APP_MAIN_PL_OFFSET
+        }`}
+      >
+        <main className="min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 overflow-x-hidden">
         {activeTab === 'terminal' && (
           hasTabAccess('terminal') ? (
             <TerminalDashboard />
@@ -303,10 +422,27 @@ export default function Dashboard() {
         {activeTab === 'funnels' && (
           hasTabAccess('funnels') ? (
             <div>
-              <FunnelListPanel />
+              {router.isReady && typeof router.query.funnelId === 'string' && router.query.funnelId ? (
+                <FunnelDetailPanel
+                  funnelId={router.query.funnelId}
+                  onBack={() => {
+                    router.replace({ pathname: '/', query: { tab: 'funnels' } }, undefined, { shallow: true });
+                  }}
+                />
+              ) : (
+                <FunnelListPanel />
+              )}
             </div>
           ) : (
             <RestrictedTabView tabName="funnels" />
+          )
+        )}
+
+        {activeTab === 'content_studio' && (
+          hasTabAccess('content_studio') ? (
+            <ContentStudioPanel />
+          ) : (
+            <RestrictedTabView tabName="content_studio" />
           )
         )}
 
@@ -337,13 +473,20 @@ export default function Dashboard() {
           )
         )}
 
+        {activeTab === 'intelligence' && (
+          <div className="w-full">
+            <IntelligencePanel />
+          </div>
+        )}
+
         {activeTab === 'settings' && (
           <div className="w-full">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
             <SettingsPanel />
           </div>
         )}
-      </main>
+        </main>
+      </div>
     </div>
   );
 }

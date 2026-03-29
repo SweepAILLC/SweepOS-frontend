@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
+import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import { useTheme } from '@/contexts/ThemeContext';
 
 interface OrgOption {
@@ -22,7 +23,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
   const [success, setSuccess] = useState<string | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useState(false);
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
@@ -279,23 +280,23 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
                   )}
                 </div>
 
-                {/* Intelligence dropdown */}
+                {/* Credentials dropdown */}
                 <div className="border-b border-gray-200 dark:border-gray-700 pb-4">
                   <button
                     type="button"
-                    onClick={() => setIntelligenceOpen((o) => !o)}
+                    onClick={() => setCredentialsOpen((o) => !o)}
                     className="flex items-center justify-between w-full text-left py-1 rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    aria-expanded={intelligenceOpen}
+                    aria-expanded={credentialsOpen}
                   >
-                    <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">Intelligence</h4>
-                    <svg className={`w-5 h-5 text-gray-500 transition-transform ${intelligenceOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">Credentials</h4>
+                    <svg className={`w-5 h-5 text-gray-500 transition-transform ${credentialsOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                     </svg>
                   </button>
-                  {intelligenceOpen && (
+                  {credentialsOpen && (
                     <div className="mt-3 space-y-3 pl-0">
                       <p className="text-xs text-gray-500 dark:text-gray-400">
-                        Connect Fathom to use call summaries and transcripts for client health insights.
+                        API keys and integration credentials for AI-powered features.
                       </p>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -321,6 +322,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
                           {' '}from Fathom → Settings → API.
                         </p>
                       </div>
+                      <FathomSyncSection variant="modal" />
                     </div>
                   )}
                 </div>

@@ -6,12 +6,16 @@ import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
 import ClientHealthScoreContent from './ClientHealthScoreContent';
+import IntelligenceSection from './IntelligenceSection';
 
 interface ClientDetailDrawerProps {
   client: Client | null;
   isOpen: boolean;
   onClose: () => void;
   onUpdate: () => void;
+  healthRefreshToken?: number;
+  /** Called when the in-drawer health score loads so the board card tag can update instantly. */
+  onHealthScoreLoaded?: (clientId: string, score: number, grade: string) => void;
 }
 
 export default function ClientDetailDrawer({
@@ -19,6 +23,8 @@ export default function ClientDetailDrawer({
   isOpen,
   onClose,
   onUpdate,
+  healthRefreshToken = 0,
+  onHealthScoreLoaded,
 }: ClientDetailDrawerProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -30,6 +36,11 @@ export default function ClientDetailDrawer({
   const [clientInBrevo, setClientInBrevo] = useState(false);
   const [checkingBrevoContact, setCheckingBrevoContact] = useState(false);
   const [showEmailComposer, setShowEmailComposer] = useState(false);
+  const [emailComposerDraft, setEmailComposerDraft] = useState<{
+    initialSubject?: string;
+    initialHtmlContent?: string;
+    initialTextContent?: string;
+  } | null>(null);
   const [showManualPaymentForm, setShowManualPaymentForm] = useState(false);
   const [manualPaymentForm, setManualPaymentForm] = useState({
     amount: '',
@@ -42,7 +53,7 @@ export default function ClientDetailDrawer({
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [showCheckInCalendar, setShowCheckInCalendar] = useState(false);
   const [nextCheckIn, setNextCheckIn] = useState<any>(null);
-  
+
   // Form state
   const [formData, setFormData] = useState({
     first_name: '',
@@ -155,6 +166,7 @@ export default function ClientDetailDrawer({
       alert('Client must have at least one email address to send email');
       return;
     }
+    setEmailComposerDraft(null);
     setShowEmailComposer(true);
   };
 
@@ -504,8 +516,26 @@ export default function ClientDetailDrawer({
                     {/* Content - scrollable: Health Score first, then rest */}
                     <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                       <div className="space-y-6">
-                        {/* Health Score - always visible when client card is opened */}
-                        <ClientHealthScoreContent client={client} />
+                        <ClientHealthScoreContent client={client} refreshToken={healthRefreshToken} onScoreLoaded={onHealthScoreLoaded} />
+
+                        <IntelligenceSection
+                          client={client}
+                          refreshToken={healthRefreshToken}
+                          onClientUpdated={onUpdate}
+                          onOpenEmailComposerWithDraft={(draft) => {
+                            const emails = getAllClientEmails(client);
+                            if (emails.length === 0) {
+                              alert('Add an email address to this client to compose a message.');
+                              return;
+                            }
+                            setEmailComposerDraft({
+                              initialSubject: draft.subject,
+                              initialHtmlContent: draft.bodyHtml,
+                              initialTextContent: draft.bodyText,
+                            });
+                            setShowEmailComposer(true);
+                          }}
+                        />
 
                         {/* Basic Info */}
                         <div>
@@ -1133,15 +1163,21 @@ export default function ClientDetailDrawer({
     {/* Email Composer Modal */}
     {showEmailComposer && client && getAllClientEmails(client).length > 0 && (
       <EmailComposer
+        key={`email-${client.id}-${emailComposerDraft?.initialSubject ?? 'blank'}-${(emailComposerDraft?.initialTextContent ?? '').length}`}
         recipients={getAllClientEmails(client).map((email) => ({
           email,
           name: client.first_name && client.last_name ? `${client.first_name} ${client.last_name}` : undefined,
         }))}
+        initialSubject={emailComposerDraft?.initialSubject}
+        initialHtmlContent={emailComposerDraft?.initialHtmlContent}
+        initialTextContent={emailComposerDraft?.initialTextContent}
         onClose={() => {
           setShowEmailComposer(false);
+          setEmailComposerDraft(null);
         }}
         onSuccess={() => {
           setShowEmailComposer(false);
+          setEmailComposerDraft(null);
         }}
       />
     )}
