@@ -87,21 +87,42 @@ export default function FunnelListPanel() {
           {funnels.map((funnel) => (
             <div
               key={funnel.id}
-              onClick={() => handleFunnelClick(funnel.id)}
-              className="glass-card neon-glow p-4 hover:shadow-lg cursor-pointer transition-shadow"
+              className="glass-card neon-glow p-4 hover:shadow-lg cursor-pointer transition-shadow flex flex-col justify-between"
             >
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{funnel.name}</h3>
-              {funnel.domain && (
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Domain: {funnel.domain}</p>
-              )}
-              {funnel.steps && funnel.steps.length > 0 && (
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
-                  {funnel.steps.length} step{funnel.steps.length !== 1 ? 's' : ''}
+              <div onClick={() => handleFunnelClick(funnel.id)}>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{funnel.name}</h3>
+                {funnel.domain && (
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Domain: {funnel.domain}</p>
+                )}
+                {funnel.steps && funnel.steps.length > 0 && (
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                    {funnel.steps.length} step{funnel.steps.length !== 1 ? 's' : ''}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
+                  Created: {new Date(funnel.created_at).toLocaleDateString()}
                 </p>
-              )}
-              <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
-                Created: {new Date(funnel.created_at).toLocaleDateString()}
-              </p>
+              </div>
+              <div className="mt-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={async (e) => {
+                    e.stopPropagation();
+                    const confirmed = window.confirm(`Delete funnel “${funnel.name}”? This cannot be undone.`);
+                    if (!confirmed) return;
+                    try {
+                      await apiClient.deleteFunnel(funnel.id);
+                      await loadFunnels();
+                    } catch (err: any) {
+                      // Surface error via alert; list will still reload on next open
+                      alert(err.response?.data?.detail || err.message || 'Failed to delete funnel');
+                    }
+                  }}
+                  className="text-xs px-3 py-1.5 rounded-md border border-red-300/70 text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
         </div>

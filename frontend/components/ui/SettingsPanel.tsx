@@ -35,6 +35,7 @@ export default function SettingsPanel() {
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
+  const [leavingOrgId, setLeavingOrgId] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     email: '',
@@ -43,6 +44,7 @@ export default function SettingsPanel() {
     confirm_password: '',
     data_sharing_enabled: true,
     analytics_enabled: true,
+    org_name: '',
   });
   const [fathomApiKey, setFathomApiKey] = useState('');
 
@@ -61,6 +63,7 @@ export default function SettingsPanel() {
         confirm_password: '',
         data_sharing_enabled: settings.data_sharing_enabled ?? true,
         analytics_enabled: settings.analytics_enabled ?? true,
+        org_name: '',
       });
       setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
       const orgId = user?.org_id != null ? String(user.org_id) : null;
@@ -76,6 +79,15 @@ export default function SettingsPanel() {
               }))
             : []
         );
+        if (orgId) {
+          const currentOrg = (orgs || []).find((o: any) => String(o.id) === String(orgId));
+          if (currentOrg) {
+            setFormData((prev) => ({
+              ...prev,
+              org_name: currentOrg.name || '',
+            }));
+          }
+        }
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to load settings');
@@ -106,6 +118,33 @@ export default function SettingsPanel() {
       setError(err.response?.data?.detail || err.message || 'Failed to switch organization');
     } finally {
       setSwitchingOrgId(null);
+    }
+  };
+
+  const handleLeaveOrg = async (orgId: string) => {
+    if (!organizations.length) return;
+    const org = organizations.find((o) => o.id === orgId);
+    if (!org) return;
+    if (org.is_primary) {
+      setError('You cannot leave your primary organization.');
+      return;
+    }
+    if (String(org.id) === String(currentOrgId)) {
+      setError('Switch to another organization before leaving this one.');
+      return;
+    }
+    const confirmed = window.confirm(`Leave organization “${org.name}”? You can rejoin later if re-invited.`);
+    if (!confirmed) return;
+    try {
+      setLeavingOrgId(orgId);
+      setError(null);
+      await apiClient.leaveOrganization(orgId);
+      await loadSettings();
+      setSuccess(`Left organization “${org.name}”.`);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || err.message || 'Failed to leave organization');
+    } finally {
+      setLeavingOrgId(null);
     }
   };
 
@@ -142,6 +181,16 @@ export default function SettingsPanel() {
         updateData.new_password = formData.new_password;
       }
       await apiClient.updateUserSettings(updateData);
+
+      // If org name changed in Profile section, update org as well (owner/admin only)
+      if (section === 'profile' && formData.org_name.trim() && currentOrgId) {
+        try {
+          await apiClient.updateMyOrganization({ name: formData.org_name.trim() });
+        } catch (orgErr: any) {
+          // Don't fail the whole save if org rename fails; surface best-effort message.
+          setError((orgErr.response?.data?.detail || orgErr.message || 'Failed to update organization name') as string);
+        }
+      }
       setSuccess('Settings updated successfully.');
       setFormData((prev) => ({
         ...prev,
@@ -246,29 +295,46 @@ export default function SettingsPanel() {
                   {organizations.map((org) => {
                     const isCurrent = currentOrgId != null && String(org.id) === String(currentOrgId);
                     const isSwitching = switchingOrgId === org.id;
+                    const isLeaving = leavingOrgId === org.id;
                     return (
                       <li key={org.id}>
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchOrg(org.id)}
-                          disabled={isCurrent || isSwitching}
-                          className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                            isCurrent
-                              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 cursor-default'
-                              : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'
-                          } disabled:opacity-70`}
-                        >
-                          <span className="flex items-center justify-between">
-                            <span>
-                              {org.name}
-                              {org.is_primary && <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">(primary)</span>}
-                              {isCurrent && <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">Current</span>}
+                        <div className="flex items-center justify-between gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleSwitchOrg(org.id)}
+                            disabled={isCurrent || isSwitching}
+                            className={`flex-1 text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
+                              isCurrent
+                                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 cursor-default'
+                                : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'
+                            } disabled:opacity-70`}
+                          >
+                            <span className="flex items-center justify-between">
+                              <span>
+                                {org.name}
+                                {org.is_primary && (
+                                  <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">(primary)</span>
+                                )}
+                                {isCurrent && (
+                                  <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">Current</span>
+                                )}
+                              </span>
+                              {isSwitching && (
+                                <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent" />
+                              )}
                             </span>
-                            {isSwitching && (
-                              <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-gray-400 border-t-transparent" />
-                            )}
-                          </span>
-                        </button>
+                          </button>
+                          {!org.is_primary && (
+                            <button
+                              type="button"
+                              onClick={() => handleLeaveOrg(org.id)}
+                              disabled={isCurrent || isLeaving}
+                              className="text-xs px-3 py-2 rounded-md border border-red-300/60 text-red-600 dark:text-red-300 hover:bg-red-50 dark:hover:bg-red-950/40 disabled:opacity-60"
+                            >
+                              {isLeaving ? 'Leaving…' : 'Leave'}
+                            </button>
+                          )}
+                        </div>
                       </li>
                     );
                   })}
@@ -319,6 +385,23 @@ export default function SettingsPanel() {
           {section === 'profile' && (
             <form onSubmit={handleSubmit} className="space-y-6">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Profile</h2>
+              {currentOrgId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Organization Name
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.org_name}
+                    onChange={(e) => setFormData({ ...formData, org_name: e.target.value })}
+                    className="w-full max-w-md px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="Your organization name"
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    Owners and admins can rename their organization for all members.
+                  </p>
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Email Address</label>
                 <input

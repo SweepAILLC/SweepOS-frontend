@@ -169,7 +169,7 @@ class ApiClient {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 10000, // 10 second timeout to prevent hanging
+      timeout: 20000, // 20 second timeout to prevent hanging on heavy dashboards
     });
 
     // Add request interceptor to attach JWT token
@@ -232,7 +232,11 @@ class ApiClient {
     if (orgId) {
       payload.org_id = orgId;
     }
-    const response = await this.client.post('/auth/login', payload);
+    // Login can fail under transient load (DB pressure, cold starts, etc.)
+    // Wrap in withRetry so ECONNABORTED / 5xx / 429 are retried once before surfacing to the user.
+    const response = await withRetry(() =>
+      this.client.post('/auth/login', payload)
+    );
     if (response.data.access_token) {
       // Set cookie with proper settings for cross-origin requests
       Cookies.set('access_token', response.data.access_token, { 
@@ -252,41 +256,51 @@ class ApiClient {
   }
 
   async getUserOrganizations(email: string) {
-    const response = await this.client.get('/auth/organizations', {
-      params: { email }
+    return withRetry(async () => {
+      const response = await this.client.get('/auth/organizations', {
+        params: { email }
+      });
+      return response.data;
     });
-    return response.data;
   }
 
   async switchOrganization(orgId: string) {
-    const response = await this.client.post('/auth/switch-organization', { org_id: orgId });
-    if (response.data.access_token) {
-      Cookies.set('access_token', response.data.access_token, { 
+    const data = await withRetry(async () => {
+      const response = await this.client.post('/auth/switch-organization', { org_id: orgId });
+      return response.data;
+    });
+    if (data.access_token) {
+      Cookies.set('access_token', data.access_token, { 
         expires: 1,
         sameSite: COOKIE_SAME_SITE,
         secure: window.location.protocol === 'https:',
         path: '/'
       });
     }
-    return response.data;
+    return data;
   }
 
   async getCurrentUser() {
-    const response = await this.client.get('/auth/me');
-    return response.data;
+    return withRetry(async () => {
+      const response = await this.client.get('/auth/me');
+      return response.data;
+    });
   }
 
   /** Refresh session (sliding window). Call when same tab is active to avoid re-login. */
   async refreshSession(): Promise<{ access_token?: string } | null> {
-    const response = await this.client.post<{ access_token: string; token_type: string }>('/auth/refresh');
-    if (response.data?.access_token) {
-      Cookies.set('access_token', response.data.access_token, {
+    const data = await withRetry(async () => {
+      const response = await this.client.post<{ access_token: string; token_type: string }>('/auth/refresh');
+      return response.data;
+    });
+    if (data?.access_token) {
+      Cookies.set('access_token', data.access_token, {
         expires: 1,
         sameSite: COOKIE_SAME_SITE,
         secure: typeof window !== 'undefined' && window.location.protocol === 'https:',
         path: '/',
       });
-      return { access_token: response.data.access_token };
+      return { access_token: data.access_token };
     }
     return null;
   }
@@ -328,7 +342,9 @@ class ApiClient {
       const cached = cache.get<unknown[]>(cacheKey);
       if (cached != null) return cached;
     }
-    const params = lifecycleState ? { lifecycle_state: lifecycleState } : {};
+    const params: any = lifecycleState ? { lifecycle_state: lifecycleState } : {};
+    // Cap client list size for performance; backend also enforces an upper bound
+    params.limit = 200;
     const response = await this.client.get('/clients', { params });
     const data = response.data;
     if (!lifecycleState) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
@@ -1184,6 +1200,16 @@ class ApiClient {
 
   async deleteFunnel(funnelId: string) {
     const response = await this.client.delete(`/funnels/${funnelId}`);
+    return response.data;
+  }
+
+  async updateMyOrganization(data: { name?: string }) {
+    const response = await this.client.patch('/users/me/organization', data);
+    return response.data;
+  }
+
+  async leaveOrganization(orgId: string) {
+    const response = await this.client.delete(`/auth/organizations/${orgId}`);
     return response.data;
   }
 

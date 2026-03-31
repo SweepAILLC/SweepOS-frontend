@@ -27,9 +27,12 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncInBackground, setSyncInBackground] = useState(false);
 
   const handleSync = async () => {
+    // Immediate UI feedback: mark as "running in background" and avoid blocking other tabs.
     setSyncing(true);
+    setSyncInBackground(true);
     setSyncMessage(null);
     setSyncError(null);
     try {
@@ -45,6 +48,7 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
         return;
       }
       setSyncMessage(formatSyncResult(r) || 'Sync finished.');
+      setSyncInBackground(false);
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } }; message?: string };
       setSyncError(err?.response?.data?.detail || err?.message || 'Fathom sync failed.');
@@ -83,7 +87,7 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
         {syncing ? (
           <>
             <span className="inline-block animate-spin rounded-full h-4 w-4 border-2 border-violet-500 border-t-transparent mr-2" />
-            Syncing with Fathom…
+            {syncInBackground ? 'Fathom sync running in background…' : 'Syncing with Fathom…'}
           </>
         ) : (
           'Sync Fathom now'
@@ -92,6 +96,11 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
       {syncMessage && (
         <p className="text-xs text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-md px-3 py-2">
           {syncMessage}
+        </p>
+      )}
+      {syncInBackground && !syncError && (
+        <p className="text-xs text-gray-600 dark:text-gray-300">
+          You can continue using other tabs while we finish importing and analyzing your Fathom calls.
         </p>
       )}
       {syncError && (

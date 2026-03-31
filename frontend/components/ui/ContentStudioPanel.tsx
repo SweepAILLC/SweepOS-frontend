@@ -86,6 +86,7 @@ export default function ContentStudioPanel() {
   const [contentBundle, setContentBundle] = useState<ContentStudioBundle | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
+  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
 
   const [transcript, setTranscript] = useState('');
   const [purpose, setPurpose] = useState<'TOF' | 'MOF' | 'BOF' | 'mixed'>('MOF');
@@ -182,15 +183,7 @@ export default function ContentStudioPanel() {
   const ideaByStage = (ideas: ContentStudioSectionIdea[], stage: 'TOF' | 'MOF' | 'BOF') =>
     ideas.find((i) => i.stage === stage);
 
-  if (loading) {
-    return (
-      <div className="max-w-5xl mx-auto space-y-4 animate-pulse px-1">
-        <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded-lg w-1/3" />
-        <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl" />
-        <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-xl" />
-      </div>
-    );
-  }
+  const bundleLoading = loading && !contentBundle;
 
   return (
     <div className="max-w-5xl mx-auto w-full px-1 pb-12 space-y-8">
@@ -239,65 +232,114 @@ export default function ContentStudioPanel() {
         ) : null}
       </section>
 
+      {bundleLoading && (
+        <div className="space-y-4 animate-pulse">
+          <div className="h-24 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+          <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+        </div>
+      )}
+
       {contentBundle?.sections?.length ? (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {contentBundle.sections.map((section) => {
             const theme = SECTION_THEME[section.id] ?? DEFAULT_SECTION_THEME;
+            const isOpen = openSections.has(section.id);
             return (
               <section
                 key={section.id}
-                className={`glass-card rounded-xl p-4 sm:p-5 border space-y-4 ${theme.bg} ${theme.border}`}
+                className={`glass-card rounded-xl border ${theme.bg} ${theme.border}`}
               >
-                <div className="flex items-start gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenSections((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(section.id)) next.delete(section.id);
+                      else next.add(section.id);
+                      return next;
+                    })
+                  }
+                  className="w-full flex items-start gap-3 p-4 sm:p-5 text-left"
+                >
                   <span className={`mt-0.5 shrink-0 ${theme.iconColor}`}>{theme.icon}</span>
                   <div className="min-w-0 flex-1">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">{section.title}</h3>
-                    <p className="text-sm text-gray-700 dark:text-gray-300 mt-2 leading-relaxed">{section.body}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {STAGES.map((stage) => {
-                    const idea = ideaByStage(section.ideas, stage);
-                    if (!idea) return null;
-                    return (
-                      <div
-                        key={`${section.id}-${stage}`}
-                        className={`rounded-xl p-3 border bg-white/40 dark:bg-gray-900/40 space-y-2 ${theme.border}`}
-                      >
-                        <div className="flex items-start gap-2">
-                          <input
-                            type="checkbox"
-                            checked={completed.has(idea.id)}
-                            onChange={() => toggleCompleted(idea.id)}
-                            className="mt-1 rounded border-gray-400"
-                            aria-label="Mark idea done"
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
+                          {section.title}
+                        </h3>
+                        <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">
+                          {section.body}
+                        </p>
+                      </div>
+                      <span className="shrink-0 text-gray-400">
+                        <svg
+                          className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <path
+                            d="M5 8L10 13L15 8"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
                           />
-                          <div className="min-w-0 flex-1 space-y-2">
-                            <p className={`text-[10px] font-semibold uppercase tracking-wide ${theme.iconColor}`}>
-                              {stage} — {STAGE_LABEL[stage]}
-                            </p>
-                            <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-gray-200/80 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
-                              {formatFormatLabel(idea.format)}
-                            </span>
-                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{idea.hook}</p>
-                            <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">{idea.concept}</p>
-                            <div className="text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200/50 dark:border-gray-600/50 pt-2 leading-relaxed">
-                              <span className="font-medium text-gray-500 dark:text-gray-500">Why it works: </span>
-                              {idea.why_it_works}
+                        </svg>
+                      </span>
+                    </div>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-gray-200/70 dark:border-gray-700/70">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3">
+                      {STAGES.map((stage) => {
+                        const idea = ideaByStage(section.ideas, stage);
+                        if (!idea) return null;
+                        return (
+                          <div
+                            key={`${section.id}-${stage}`}
+                            className={`rounded-xl p-3 border bg-white/40 dark:bg-gray-900/40 space-y-2 ${theme.border}`}
+                          >
+                            <div className="flex items-start gap-2">
+                              <input
+                                type="checkbox"
+                                checked={completed.has(idea.id)}
+                                onChange={() => toggleCompleted(idea.id)}
+                                className="mt-1 rounded border-gray-400"
+                                aria-label="Mark idea done"
+                              />
+                              <div className="min-w-0 flex-1 space-y-2">
+                                <p className={`text-[10px] font-semibold uppercase tracking-wide ${theme.iconColor}`}>
+                                  {stage} — {STAGE_LABEL[stage]}
+                                </p>
+                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-gray-200/80 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
+                                  {formatFormatLabel(idea.format)}
+                                </span>
+                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{idea.hook}</p>
+                                <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                                  {idea.concept}
+                                </p>
+                                <div className="text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200/50 dark:border-gray-600/50 pt-2 leading-relaxed">
+                                  <span className="font-medium text-gray-500 dark:text-gray-500">Why it works: </span>
+                                  {idea.why_it_works}
+                                </div>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </section>
             );
           })}
         </div>
-      ) : (
+      ) : !bundleLoading ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">No content bundle loaded.</p>
-      )}
+      ) : null}
 
       {contentBundle?.voice_marketing ? (
         <section className="glass-card rounded-xl p-4 sm:p-5 border border-emerald-500/25 space-y-3 bg-emerald-500/5">

@@ -546,8 +546,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const handleRefreshSync = async () => {
     setSyncingRefreshing(true);
     try {
+      // Kick off calendar + Stripe sync; UX stays responsive while these complete.
       await apiClient.syncCheckIns();
-      // Recent-sync ensures new customers/payments are pulled in quickly.
       await apiClient.syncStripeData(false, true);
       // Mark Stripe as updated so Terminal/widgets refetch immediately.
       try {
