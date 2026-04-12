@@ -144,13 +144,7 @@ export default function CallLibraryPanel() {
 
       // New Fathom rows ingested — background report generation; optionally LLM retries too.
       const afterIds = new Set((data?.items ?? []).map((i) => i.id));
-      let newAppeared = false;
-      for (const id of afterIds) {
-        if (!beforeIds.has(id)) {
-          newAppeared = true;
-          break;
-        }
-      }
+      const newAppeared = Array.from(afterIds).some((id) => !beforeIds.has(id));
       let note = '';
       if (newAppeared) {
         note = `Found ${ingested} new call${ingested === 1 ? '' : 's'}.`;
