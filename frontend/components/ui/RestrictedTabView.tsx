@@ -11,6 +11,8 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
     funnels: 'Funnels',
     performance: 'Performance',
     content_studio: 'Content Studio',
+    call_library: 'Call Library',
+    integrations: 'Integrations',
     users: 'Users',
   };
 

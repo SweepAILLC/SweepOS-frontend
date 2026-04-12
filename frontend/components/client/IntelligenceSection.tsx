@@ -29,17 +29,17 @@ function tagClass(tag: string): string {
 function callInsightFailureHint(reason: string | null | undefined): string {
   switch (reason) {
     case 'thin_transcript':
-      return 'Not enough transcript text yet. Run Fathom sync in Settings → Credentials.';
+      return 'Not enough transcript text yet. Run Fathom sync in the Integrations tab.';
     case 'no_health':
       return 'Health snapshot was not ready. Open the health tab once to seed it.';
     case 'org_throttle':
       return 'Hourly AI limit reached — will retry automatically on the next cycle.';
     case 'llm_unavailable_or_failed':
-      return 'AI failed — check LLM keys and budget in Settings → Credentials.';
+      return 'AI failed — check LLM keys and budget (Integrations / environment).';
     default:
       return reason
         ? `Last run: ${reason.replace(/_/g, ' ')}.`
-        : 'Run Fathom sync in Settings → Credentials to seed call data.';
+        : 'Run Fathom sync (Integrations tab) to seed call data.';
   }
 }
 
@@ -219,7 +219,7 @@ export default function IntelligenceSection({
 
       {!insightLoading && insightData && !anyCompleteInsight && !latestNonComplete && (
         <p className="text-xs text-gray-500 dark:text-gray-400">
-          No Fathom call context yet. Match invitee email to this client and run Fathom sync (Settings → Credentials) — AI
+          No Fathom call context yet. Match invitee email to this client and run Fathom sync (Integrations tab) — AI
           analysis runs automatically.
         </p>
       )}

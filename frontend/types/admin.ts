@@ -10,6 +10,18 @@ export interface Organization {
   admin_password?: string;  // Only present when creating a new org
 }
 
+export interface HealthTrendPeriod {
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  show_up_rate_pct: number | null;
+  close_rate_pct: number | null;
+  stripe_revenue_usd: number;
+  calls_booked_count: number;
+  cumulative_total_clients: number;
+  active_clients_cohort: number;
+}
+
 export interface GlobalHealth {
   total_organizations: number;
   organizations_created_last_30_days: number;
@@ -34,6 +46,16 @@ export interface GlobalHealth {
   orgs_with_stripe_connected: number;
   orgs_with_brevo_connected: number;
   pending_invitations: number;
+  revenue_from_existing_clients_last_30d_usd: number;
+  invitation_emails_sent_last_30d: number;
+  invitation_emails_sent_previous_30d: number;
+  calls_booked_last_30d: number;
+  calls_booked_previous_30d: number;
+  lifecycle_active_clients_current: number;
+  lifecycle_active_clients_previous_30d_cohort: number;
+  show_up_rate_last_30d_pct: number | null;
+  close_rate_last_30d_pct: number | null;
+  health_trend_periods: HealthTrendPeriod[];
 }
 
 export interface GlobalSettings {

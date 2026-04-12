@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
-import { apiClient } from '@/lib/api';
+import { apiClient, type CalendarSyncedBookingRow } from '@/lib/api';
 import { 
-  CalComStatus, CalComBooking, CalComEventType,
+  CalComStatus, CalComEventType,
   CalendlyStatus, CalendlyScheduledEvent, CalendlyEventType
 } from '@/types/integration';
 import type { Client } from '@/types/client';
@@ -39,10 +39,11 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const connectedProvider: CalendarProvider = calcomStatus?.connected ? 'calcom' : 
                                                calendlyStatus?.connected ? 'calendly' : null;
   
-  // Bookings state (works for both providers)
+  // Bookings: canonical rows from synced client_check_ins (after POST /clients/check-ins/sync)
   const [bookingsTab, setBookingsTab] = useState<BookingsTab>('upcoming');
-  const [calcomBookings, setCalcomBookings] = useState<CalComBooking[]>([]);
-  const [calendlyEvents, setCalendlyEvents] = useState<CalendlyScheduledEvent[]>([]);
+  const [syncedUpcoming, setSyncedUpcoming] = useState<CalendarSyncedBookingRow[]>([]);
+  const [syncedPast, setSyncedPast] = useState<CalendarSyncedBookingRow[]>([]);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
   
@@ -118,6 +119,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
 
   // Event details modal state (bookings table → full API modal)
   const [selectedEvent, setSelectedEvent] = useState<{
+    checkInId?: string;
     provider: 'calcom' | 'calendly' | 'manual';
     id: string | number;
     uri?: string;
@@ -150,6 +152,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       cancelled?: boolean;
       no_show?: boolean;
       eventStatus: 'cancelled' | 'no_show' | 'showed_up' | 'upcoming';
+      checkInId?: string;
     }>;
   } | null>(null);
 
@@ -157,22 +160,64 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     loadStatuses();
   }, []);
 
-  // Load data when a provider is connected
+  /** Re-fetch synced bookings from the DB without triggering a provider re-sync. */
+  const refetchSyncedBookings = async () => {
+    if (!connectedProvider) return;
+    try {
+      const data = await apiClient.getCalendarSyncedBookings({ upcoming_limit: 150, past_limit: 150 });
+      setSyncedUpcoming(data.upcoming || []);
+      setSyncedPast(data.past || []);
+      setLastSyncedAt(data.server_time || null);
+    } catch {
+      // silent — the full refresh will pick up any issues
+    }
+  };
+
+  const refreshSyncedCalendar = async (opts?: { silent?: boolean }) => {
+    if (!connectedProvider) return;
+    if (!opts?.silent) {
+      setBookingsLoading(true);
+      setBookingsError(null);
+    }
+    try {
+      await apiClient.syncCheckIns();
+      const data = await apiClient.getCalendarSyncedBookings({ upcoming_limit: 150, past_limit: 150 });
+      setSyncedUpcoming(data.upcoming || []);
+      setSyncedPast(data.past || []);
+      setLastSyncedAt(data.server_time || null);
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } }; message?: string };
+      console.error('Calendar sync failed:', error);
+      if (!opts?.silent) setBookingsError(err?.response?.data?.detail || err?.message || 'Failed to sync calendar');
+    } finally {
+      if (!opts?.silent) setBookingsLoading(false);
+    }
+  };
+
+  // Load data when a provider is connected: sync from provider APIs into DB, then show canonical rows
   useEffect(() => {
     if (connectedProvider === 'calcom') {
-      setTimeout(() => {
-        loadCalcomBookings();
-        loadCalcomEventTypes();
-      }, 100);
-    } else if (connectedProvider === 'calendly') {
-      setTimeout(() => {
-        loadCalendlyEvents();
-        loadCalendlyEventTypes();
-      }, 100);
-    } else if (!connectedProvider && !loading && !bookingsLoading && !eventTypesLoading) {
-      // No provider connected and all loading is done
+      const t = setTimeout(() => void refreshSyncedCalendar(), 100);
+      loadCalcomEventTypes();
+      return () => clearTimeout(t);
+    }
+    if (connectedProvider === 'calendly') {
+      const t = setTimeout(() => void refreshSyncedCalendar(), 100);
+      loadCalendlyEventTypes();
+      return () => clearTimeout(t);
+    }
+    setSyncedUpcoming([]);
+    setSyncedPast([]);
+    setLastSyncedAt(null);
+    if (!connectedProvider && !loading && !bookingsLoading && !eventTypesLoading) {
       setGlobalLoading(false);
     }
+  }, [connectedProvider]);
+
+  useEffect(() => {
+    if (!connectedProvider) return;
+    const id = setInterval(() => void refreshSyncedCalendar({ silent: true }), 45000);
+    return () => clearInterval(id);
   }, [connectedProvider]);
 
   // Load close rate when connected and refetch periodically so it updates after Stripe webhooks
@@ -302,44 +347,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     }
   };
 
-  const loadCalcomBookings = async (offset: number = 0) => {
-    if (!calcomStatus?.connected) return;
-    
-    setBookingsLoading(true);
-    setBookingsError(null);
-    try {
-      const data = await apiClient.getCalComBookings(50, offset);
-      setCalcomBookings(data.bookings || []);
-    } catch (error: any) {
-      console.error('Failed to load Cal.com bookings:', error);
-      setBookingsError(error?.response?.data?.detail || 'Failed to load bookings');
-      setCalcomBookings([]);
-    } finally {
-      setBookingsLoading(false);
-    }
-  };
-
-  const loadCalendlyEvents = async (pageToken?: string) => {
-    if (!calendlyStatus?.connected) return;
-    
-    setBookingsLoading(true);
-    setBookingsError(null);
-    try {
-      const data = await apiClient.getCalendlyScheduledEvents({
-        count: 50,
-        page_token: pageToken,
-        sort: 'start_time:asc'
-      });
-      setCalendlyEvents(data.collection || []);
-    } catch (error: any) {
-      console.error('Failed to load Calendly events:', error);
-      setBookingsError(error?.response?.data?.detail || 'Failed to load scheduled events');
-      setCalendlyEvents([]);
-    } finally {
-      setBookingsLoading(false);
-    }
-  };
-
   const loadCalcomEventTypes = async () => {
     if (!calcomStatus?.connected) return;
     
@@ -445,8 +452,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         await apiClient.disconnectCalendly();
       }
       await loadStatuses();
-      setCalcomBookings([]);
-      setCalendlyEvents([]);
+      setSyncedUpcoming([]);
+      setSyncedPast([]);
       setCalcomEventTypes([]);
       setCalendlyEventTypes([]);
     } catch (error) {
@@ -509,54 +516,10 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const PAST_BOOKINGS_LIMIT = 50;
 
   // Get filtered bookings/events based on selected tab. Past tab limited to last 50 (most recent first).
-  const getFilteredBookings = () => {
-    const now = new Date();
-    if (connectedProvider === 'calcom') {
-      if (bookingsTab === 'upcoming') {
-        return calcomBookings.filter(booking => {
-          try {
-            const startTime = new Date(booking.startTime);
-            return startTime >= now;
-          } catch {
-            return false;
-          }
-        });
-      } else {
-        const past = calcomBookings.filter(booking => {
-          try {
-            const startTime = new Date(booking.startTime);
-            return startTime < now;
-          } catch {
-            return false;
-          }
-        });
-        past.sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime());
-        return past.slice(0, PAST_BOOKINGS_LIMIT);
-      }
-    } else if (connectedProvider === 'calendly') {
-      if (bookingsTab === 'upcoming') {
-        return calendlyEvents.filter(event => {
-          try {
-            const startTime = new Date(event.start_time);
-            return startTime >= now;
-          } catch {
-            return false;
-          }
-        });
-      } else {
-        const past = calendlyEvents.filter(event => {
-          try {
-            const startTime = new Date(event.start_time);
-            return startTime < now;
-          } catch {
-            return false;
-          }
-        });
-        past.sort((a, b) => new Date(b.start_time).getTime() - new Date(a.start_time).getTime());
-        return past.slice(0, PAST_BOOKINGS_LIMIT);
-      }
-    }
-    return [];
+  const getFilteredBookings = (): CalendarSyncedBookingRow[] => {
+    if (!connectedProvider) return [];
+    if (bookingsTab === 'upcoming') return syncedUpcoming;
+    return syncedPast.slice(0, PAST_BOOKINGS_LIMIT);
   };
 
   const filteredBookings = getFilteredBookings();
@@ -565,16 +528,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
 
   // Count upcoming vs past from full list for "all calendar data" summary
   const now = new Date();
-  const upcomingCount = connectedProvider === 'calcom'
-    ? calcomBookings.filter(b => { try { return new Date(b.startTime) >= now; } catch { return false; } }).length
-    : connectedProvider === 'calendly'
-    ? calendlyEvents.filter(e => { try { return new Date(e.start_time) >= now; } catch { return false; } }).length
-    : 0;
-  const pastCount = connectedProvider === 'calcom'
-    ? calcomBookings.filter(b => { try { return new Date(b.startTime) < now; } catch { return false; } }).length
-    : connectedProvider === 'calendly'
-    ? calendlyEvents.filter(e => { try { return new Date(e.start_time) < now; } catch { return false; } }).length
-    : 0;
+  const upcomingCount = syncedUpcoming.length;
+  const pastCount = syncedPast.length;
 
   // Normalized list of all events for calendar (current + past) with status for color coding
   type EventDisplayStatus = 'cancelled' | 'no_show' | 'showed_up' | 'upcoming';
@@ -591,50 +546,35 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     cancelled?: boolean;
     no_show?: boolean;
     eventStatus: EventDisplayStatus;
+    /** Present for Cal.com / Calendly when using synced check-ins */
+    checkInId?: string;
   };
-  const providerEvents: CalendarEventItem[] = connectedProvider === 'calcom'
-    ? calcomBookings.map(b => {
-        const booking = b as CalComBooking & { uid?: string };
-        const start = new Date(booking.startTime);
-        const isPast = start < now;
-        const isCancelled = booking.status === 'cancelled' || booking.status === 'rejected';
-        const isNoShow = !isCancelled && (booking.absentHost === true || (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true)));
-        let eventStatus: EventDisplayStatus = 'upcoming';
-        if (isCancelled) eventStatus = 'cancelled';
-        else if (isNoShow && isPast) eventStatus = 'no_show';
-        else if (isPast && booking.status === 'accepted') eventStatus = 'showed_up';
-        else if (isPast) eventStatus = 'showed_up'; // default past to showed_up
-        return {
-          id: String(booking.uid ?? booking.id),
-          title: booking.title || booking.eventType?.title || 'Untitled',
-          start,
-          provider: 'calcom' as const,
-          is_sales_call: booking.is_sales_call,
-          sale_closed: booking.sale_closed,
-          eventStatus,
-        };
-      })
-    : connectedProvider === 'calendly'
-    ? calendlyEvents.map(e => {
-        const ev = e as CalendlyScheduledEvent;
-        const start = new Date(ev.start_time);
-        const isPast = start < now;
-        const isCancelled = ev.status === 'canceled' || ev.status === 'cancelled';
-        let eventStatus: EventDisplayStatus = 'upcoming';
-        if (isCancelled) eventStatus = 'cancelled';
-        else if (isPast) eventStatus = 'showed_up';
-        return {
-          id: ev.uri?.split('/').pop() || ev.uri || '',
-          title: ev.name || 'Untitled',
-          start,
-          provider: 'calendly',
-          uri: ev.uri,
-          is_sales_call: ev.is_sales_call,
-          sale_closed: ev.sale_closed,
-          eventStatus,
-        };
-      })
-    : [];
+  const providerEvents: CalendarEventItem[] =
+    connectedProvider === 'calcom' || connectedProvider === 'calendly'
+      ? [...syncedUpcoming, ...syncedPast].map((row) => {
+          const start = new Date(row.start_time || 0);
+          let eventStatus: EventDisplayStatus = 'upcoming';
+          if (row.cancelled) eventStatus = 'cancelled';
+          else if (row.no_show) eventStatus = 'no_show';
+          else if (start < now) eventStatus = 'showed_up';
+          else eventStatus = 'upcoming';
+          return {
+            id: `${row.provider}:${row.id}`,
+            title: row.title || row.client_name || 'Booking',
+            start,
+            end: row.end_time ? new Date(row.end_time) : null,
+            provider: row.provider,
+            uri: row.event_uri || undefined,
+            is_sales_call: row.is_sales_call,
+            sale_closed: row.sale_closed,
+            completed: row.completed,
+            cancelled: row.cancelled,
+            no_show: row.no_show,
+            eventStatus,
+            checkInId: row.id,
+          };
+        })
+      : [];
   const manualEventsAsItems: CalendarEventItem[] = manualCalendarEvents.map(ev => {
     const start = new Date(ev.start_time);
     let eventStatus: EventDisplayStatus = 'upcoming';
@@ -726,13 +666,9 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
             <div className="flex gap-3">
               <button
                 onClick={() => {
-                  if (connectedProvider === 'calcom') {
-                    loadCalcomBookings(0);
-                    loadCalcomEventTypes();
-                  } else {
-                    loadCalendlyEvents();
-                    loadCalendlyEventTypes();
-                  }
+                  void refreshSyncedCalendar();
+                  if (connectedProvider === 'calcom') loadCalcomEventTypes();
+                  else loadCalendlyEventTypes();
                   apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
                 }}
                 disabled={bookingsLoading || eventTypesLoading}
@@ -963,19 +899,20 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
             </h2>
             <button
               onClick={() => {
-                if (connectedProvider === 'calcom') {
-                  loadCalcomBookings(0);
-                } else {
-                  loadCalendlyEvents();
-                }
+                void refreshSyncedCalendar();
                 apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
               }}
               disabled={bookingsLoading}
               className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
             >
-              {bookingsLoading ? 'Loading...' : 'Refresh'}
+              {bookingsLoading ? 'Syncing…' : 'Refresh'}
             </button>
           </div>
+          {lastSyncedAt && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+              Last synced: {new Date(lastSyncedAt).toLocaleString()} · Data is pulled from {connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} into your workspace, then shown here.
+            </p>
+          )}
 
           {bookingsError && (
             <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-md">
@@ -1067,7 +1004,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                         End Time
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        {connectedProvider === 'calcom' ? 'Attendees' : 'Invitees'}
+                        Client / attendee
                       </th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Status
@@ -1081,72 +1018,61 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/10">
-                    {connectedProvider === 'calcom' ? (
-                      // Cal.com bookings
-                      (filteredBookings as CalComBooking[]).map((booking) => (
-                        <tr 
-                          key={booking.uid ?? booking.id} 
+                    {(filteredBookings as CalendarSyncedBookingRow[]).map((row) => {
+                      const loc = row.meeting_url || row.location || '';
+                      const statusClass =
+                        row.display_status === 'cancelled'
+                          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+                          : row.display_status === 'no_show'
+                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+                          : row.display_status === 'confirmed'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
+                          : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200';
+                      const statusText =
+                        row.display_status === 'cancelled'
+                          ? 'Cancelled'
+                          : row.display_status === 'no_show'
+                          ? 'No-show'
+                          : row.display_status === 'confirmed'
+                          ? 'Confirmed'
+                          : 'Completed';
+                      return (
+                        <tr
+                          key={row.id}
                           className="hover:bg-white/5 cursor-pointer"
-                          onClick={() => setSelectedEvent({ provider: 'calcom', id: booking.uid ?? booking.id })}
+                          onClick={() =>
+                            setSelectedEvent({
+                              checkInId: row.id,
+                              provider: row.provider,
+                              id: row.event_id,
+                              uri: row.event_uri || undefined,
+                            })
+                          }
                         >
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {booking.title || booking.eventType?.title || 'Untitled'}
+                            {row.title || 'Untitled'}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {formatDateTime(booking.startTime)}
+                            {row.start_time ? formatDateTime(row.start_time) : '—'}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {formatDateTime(booking.endTime)}
+                            {row.end_time ? formatDateTime(row.end_time) : '—'}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {booking.attendees && booking.attendees.length > 0 ? (
-                              <div className="space-y-1">
-                                {booking.attendees.map((attendee, idx) => (
-                                  <div key={idx}>
-                                    {attendee.name || attendee.email}
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              'No attendees'
-                            )}
+                            <div className="font-medium">{row.client_name || '—'}</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">{row.attendee_email}</div>
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            {(() => {
-                              const isNoShow = booking.status === 'accepted' && (
-                                booking.absentHost === true ||
-                                (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true))
-                              );
-                              const statusLabel = isNoShow ? 'No-show' : (booking.status === 'accepted' ? 'Confirmed' : booking.status || 'unknown');
-                              const title = booking.status === 'cancelled' && booking.cancellationReason
-                                ? `Cancelled: ${booking.cancellationReason}${booking.cancelledByEmail ? ` (by ${booking.cancelledByEmail})` : ''}`
-                                : isNoShow ? 'Marked as no-show' : undefined;
-                              return (
-                                <span
-                                  title={title}
-                                  className={`px-2 py-1 rounded text-xs ${
-                                    booking.status === 'accepted' && !isNoShow
-                                      ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                      : booking.status === 'cancelled' || booking.status === 'rejected'
-                                      ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                                      : isNoShow
-                                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
-                                      : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
-                                  }`}
-                                >
-                                  {statusLabel}
-                                </span>
-                              );
-                            })()}
+                            <span className={`px-2 py-1 rounded text-xs ${statusClass}`}>{statusText}</span>
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            {booking.is_sales_call ? (
+                            {row.is_sales_call ? (
                               <span className="text-xs">
                                 <span className="px-2 py-1 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">Sales</span>
-                                {booking.sale_closed === true && (
+                                {row.sale_closed === true && (
                                   <span className="ml-1 px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">Closed</span>
                                 )}
-                                {booking.sale_closed === false && (
+                                {row.sale_closed === false && (
                                   <span className="ml-1 px-2 py-1 rounded bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">Open</span>
                                 )}
                               </span>
@@ -1155,108 +1081,31 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                             )}
                           </td>
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {booking.location ? (
-                              isUrl(booking.location) ? (
+                            {loc ? (
+                              isUrl(loc) ? (
                                 <button
-                                  onClick={() => copyToClipboard(booking.location!, `location-${booking.id}`, 'location link')}
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    void copyToClipboard(loc, `loc-${row.id}`, 'location link');
+                                  }}
                                   className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors ${
-                                    copiedId === `location-${booking.id}` ? 'text-green-500 dark:text-green-400' : ''
+                                    copiedId === `loc-${row.id}` ? 'text-green-500 dark:text-green-400' : ''
                                   }`}
-                                  title="Click to copy location link"
+                                  title="Click to copy link"
                                 >
-                                  {copiedId === `location-${booking.id}` ? '✓ Copied!' : booking.location}
+                                  {copiedId === `loc-${row.id}` ? '✓ Copied!' : 'Link'}
                                 </button>
                               ) : (
-                                booking.location
+                                loc
                               )
                             ) : (
-                              'N/A'
+                              '—'
                             )}
                           </td>
                         </tr>
-                      ))
-                    ) : (
-                      // Calendly scheduled events
-                      (filteredBookings as CalendlyScheduledEvent[]).map((event) => (
-                        <tr 
-                          key={event.uri} 
-                          className="hover:bg-white/5 cursor-pointer"
-                          onClick={() => setSelectedEvent({ 
-                            provider: 'calendly', 
-                            id: event.uri.split('/').pop() || event.uri,
-                            uri: event.uri 
-                          })}
-                        >
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {event.name || 'Untitled Event'}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {formatDateTime(event.start_time)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {formatDateTime(event.end_time)}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {event.invitees_counter ? (
-                              <div>
-                                {event.invitees_counter.active || 0} / {event.invitees_counter.total || 0} invitees
-                              </div>
-                            ) : (
-                              'N/A'
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              event.status === 'active'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                                : event.status === 'canceled' || event.status === 'cancelled'
-                                ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200'
-                            }`}>
-                              {event.status === 'canceled' || event.status === 'cancelled' ? 'Canceled' : (event.status || 'unknown')}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm">
-                            {event.is_sales_call ? (
-                              <span className="text-xs">
-                                <span className="px-2 py-1 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">Sales</span>
-                                {event.sale_closed === true && (
-                                  <span className="ml-1 px-2 py-1 rounded bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">Closed</span>
-                                )}
-                                {event.sale_closed === false && (
-                                  <span className="ml-1 px-2 py-1 rounded bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">Open</span>
-                                )}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-gray-500 dark:text-gray-400">Check-in</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
-                            {event.location ? (
-                              typeof event.location === 'string' ? (
-                                isUrl(event.location) ? (
-                                  <button
-                                    onClick={() => copyToClipboard(String(event.location), `location-${event.uri}`, 'location link')}
-                                    className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors ${
-                                      copiedId === `location-${event.uri}` ? 'text-green-500 dark:text-green-400' : ''
-                                    }`}
-                                    title="Click to copy location link"
-                                  >
-                                    {copiedId === `location-${event.uri}` ? '✓ Copied!' : event.location}
-                                  </button>
-                                ) : (
-                                  event.location
-                                )
-                              ) : (
-                                event.location?.location || 'N/A'
-                              )
-                            ) : (
-                              'N/A'
-                            )}
-                          </td>
-                        </tr>
-                      ))
-                    )}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -1376,10 +1225,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                               setSelectedCalendarEvent(null);
                               if (ev.provider === 'manual') {
                                 setSelectedEvent({ provider: 'manual', id: ev.id });
-                              } else if (ev.provider === 'calcom') {
-                                setSelectedEvent({ provider: 'calcom', id: ev.id });
-                              } else if (ev.provider === 'calendly') {
-                                setSelectedEvent({ provider: 'calendly', id: ev.id, uri: ev.uri });
+                              } else if (ev.checkInId) {
+                                setSelectedEvent({
+                                  checkInId: ev.checkInId,
+                                  provider: ev.provider,
+                                  id: ev.id,
+                                  uri: ev.uri,
+                                });
+                              } else {
+                                setSelectedEvent({ provider: ev.provider, id: ev.id, uri: ev.uri });
                               }
                             }}
                             className={getEventButtonClasses(ev) + (ev.provider === 'manual' ? ' cursor-grab' : '')}
@@ -1651,7 +1505,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                                   await apiClient.addSalesCallEventType('calcom', etId);
                                 }
                                 await loadSalesCallEventTypes();
-                                loadCalcomBookings();
+                                void refreshSyncedCalendar({ silent: true });
                               } catch (e: any) {
                                 console.error(e);
                                 const msg = e?.response?.data?.detail || e?.message || 'Request failed';
@@ -1706,7 +1560,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                                   await apiClient.addSalesCallEventType('calendly', etId);
                                 }
                                 await loadSalesCallEventTypes();
-                                loadCalendlyEvents();
+                                void refreshSyncedCalendar({ silent: true });
                               } catch (e: any) {
                                 console.error(e);
                                 const msg = e?.response?.data?.detail || e?.message || 'Request failed';
@@ -1772,10 +1626,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                       setSelectedCalendarEvent(null);
                       if (ev.provider === 'manual') {
                         setSelectedEvent({ provider: 'manual', id: ev.id });
-                      } else if (ev.provider === 'calcom') {
-                        setSelectedEvent({ provider: 'calcom', id: ev.id });
-                      } else if (ev.provider === 'calendly') {
-                        setSelectedEvent({ provider: 'calendly', id: ev.id, uri: ev.uri });
+                      } else if (ev.checkInId) {
+                        setSelectedEvent({
+                          checkInId: ev.checkInId,
+                          provider: ev.provider,
+                          id: ev.id,
+                          uri: ev.uri,
+                        });
+                      } else {
+                        setSelectedEvent({ provider: ev.provider, id: ev.id, uri: ev.uri });
                       }
                     }}
                     className={getEventButtonClasses(ev)}
@@ -2070,11 +1929,13 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           provider={selectedEvent.provider}
           eventId={selectedEvent.id}
           eventUri={selectedEvent.uri}
+          checkInId={selectedEvent.checkInId}
           onSalesUpdated={() => {
-            if (connectedProvider === 'calcom') loadCalcomBookings();
-            else loadCalendlyEvents();
+            // Re-fetch DB rows without a provider re-sync so manual edits
+            // made in the modal are reflected immediately.
+            void refetchSyncedBookings();
+            void refreshManualCalendarEventsForCurrentMonth();
 
-            // Ensure dashboard metrics update immediately after sales flags change.
             apiClient
               .getCalendarSalesCloseRate()
               .then(setCloseRateData)
@@ -2092,8 +1953,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               .catch(() => setShowUpRateSummary(null))
               .finally(() => setShowUpRateLoading(false));
 
-            // Let the NotificationsCard refresh immediately too.
             window.dispatchEvent(new CustomEvent('calendarSalesFlagsUpdated'));
+            window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
           }}
         />
       )}

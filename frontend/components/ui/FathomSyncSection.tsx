@@ -39,7 +39,7 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
       const r: FathomSyncResponse = await apiClient.syncFathomMeetings();
       if (r.skipped && r.reason === 'no_fathom_key') {
         setSyncError(
-          'No Fathom API key found. Add your key above and click Save, or set FATHOM_API_KEY in the server environment.'
+          'No Fathom API key for this organization. Add it under Integrations (admins/owners) and save, or set FATHOM_API_KEY on the server.'
         );
         return;
       }

@@ -4,6 +4,34 @@ import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clea
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
+/** JWT org_id for cache scoping — prevents stale client rows after org switch (fixes DELETE 404). */
+function orgIdFromAccessToken(): string {
+  if (typeof window === 'undefined') return 'anon';
+  const token = Cookies.get('access_token');
+  if (!token) return 'anon';
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return 'anon';
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const json = JSON.parse(atob(padded)) as { org_id?: string };
+    return json.org_id != null ? String(json.org_id) : 'anon';
+  } catch {
+    return 'anon';
+  }
+}
+
+/** Cache key for GET /clients — scoped by org so board/list never mixes tenants. */
+function clientsListCacheKey(lifecycleState?: string): string {
+  const org = orgIdFromAccessToken();
+  return lifecycleState ? `${CACHE_KEYS.CLIENTS}_${lifecycleState}_${org}` : `${CACHE_KEYS.CLIENTS}_${org}`;
+}
+
+function invalidateClientsListCache(): void {
+  cache.deleteByPrefix('clients');
+}
+
 function isRetryable(err: unknown): boolean {
   if (!axios.isAxiosError(err)) return false;
   const s = (err as AxiosError).response?.status;
@@ -146,6 +174,58 @@ export interface ContentStudioBootstrap {
   content_bundle: ContentStudioBundle | null;
   completed_idea_ids: string[];
   batch_id: string | null;
+}
+
+/** GET /call-library — Fathom call coaching reports */
+export interface CallLibraryAttendee {
+  email?: string;
+  name?: string | null;
+  source?: string;
+  is_team_member?: boolean;
+}
+
+export interface CallLibraryItem {
+  id: string;
+  fathom_recording_id: number | null;
+  call_title: string;
+  meeting_at: string | null;
+  status: string;
+  failure_reason?: string | null;
+  client_name: string | null;
+  call_score: number | null;
+  recording_url: string | null;
+  attendees: CallLibraryAttendee[] | null;
+  report: Record<string, unknown> | null;
+  computed_at: string | null;
+}
+
+export interface CallLibraryListResponse {
+  items: CallLibraryItem[];
+  total: number;
+}
+
+/** Row from GET /integrations/calendar/synced-bookings (DB-backed check-ins). */
+export interface CalendarSyncedBookingRow {
+  id: string;
+  provider: 'calcom' | 'calendly';
+  event_id: string;
+  event_uri: string | null;
+  client_id: string;
+  client_name: string | null;
+  title: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  location: string | null;
+  meeting_url: string | null;
+  attendee_email: string;
+  attendee_name: string | null;
+  completed: boolean;
+  cancelled: boolean;
+  no_show: boolean;
+  is_sales_call: boolean;
+  sale_closed: boolean | null;
+  display_status: string;
+  calcom_uid: string | null;
 }
 
 /** Matches backend `client_health_score._grade_from_score` for batch responses missing `grade`. */
@@ -337,7 +417,7 @@ class ApiClient {
 
   // Clients (cached for terminal dashboard to avoid 4x duplicate requests)
   async getClients(lifecycleState?: string, forceRefresh?: boolean) {
-    const cacheKey = lifecycleState ? `${CACHE_KEYS.CLIENTS}_${lifecycleState}` : CACHE_KEYS.CLIENTS;
+    const cacheKey = clientsListCacheKey(lifecycleState);
     if (!forceRefresh && !lifecycleState) {
       const cached = cache.get<unknown[]>(cacheKey);
       if (cached != null) return cached;
@@ -370,26 +450,26 @@ class ApiClient {
 
   async createClient(data: any) {
     const response = await this.client.post('/clients', data);
-    cache.delete(CACHE_KEYS.CLIENTS);
+    invalidateClientsListCache();
     return response.data;
   }
 
   async updateClient(id: string, data: any) {
     const response = await this.client.patch(`/clients/${id}`, data);
-    cache.delete(CACHE_KEYS.CLIENTS);
+    invalidateClientsListCache();
     return response.data;
   }
 
   async mergeClients(clientIds: string[]) {
     const response = await this.client.post('/clients/merge', { client_ids: clientIds });
-    cache.delete(CACHE_KEYS.CLIENTS);
+    invalidateClientsListCache();
     return response.data;
   }
 
   async deleteClient(id: string, deleteMerged: boolean = false) {
     const params = deleteMerged ? { delete_merged: 'true' } : {};
     await this.client.delete(`/clients/${id}`, { params });
-    cache.delete(CACHE_KEYS.CLIENTS);
+    invalidateClientsListCache();
   }
 
   async getClientPayments(clientId: string, mergedClientIds?: string[]) {
@@ -528,7 +608,7 @@ class ApiClient {
 
   /**
    * Pull recent meetings from Fathom (matches clients by invitee email → ingests summaries/transcripts).
-   * Uses the Fathom API key from Settings or FATHOM_API_KEY env.
+   * Uses the organization Fathom API key (Integrations tab) or FATHOM_API_KEY env.
    */
   async syncFathomMeetings(): Promise<FathomSyncResponse> {
     const response = await this.client.post('/integrations/fathom/sync', null, {
@@ -793,6 +873,19 @@ class ApiClient {
       params: { start, end },
     });
     return response.data;
+  }
+
+  /** Canonical Cal.com / Calendly rows from synced `client_check_ins` (after `syncCheckIns`). */
+  async getCalendarSyncedBookings(params?: { upcoming_limit?: number; past_limit?: number }) {
+    const response = await this.client.get('/integrations/calendar/synced-bookings', {
+      params: params || {},
+      timeout: 60000,
+    });
+    return response.data as {
+      server_time: string;
+      upcoming: CalendarSyncedBookingRow[];
+      past: CalendarSyncedBookingRow[];
+    };
   }
 
   async getCalendlyEventTypes(params?: {
@@ -1316,9 +1409,13 @@ class ApiClient {
     return data;
   }
 
-  async getGlobalHealth() {
-    const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_HEALTH);
-    if (cached != null) return cached;
+  async getGlobalHealth(options?: { refresh?: boolean }) {
+    if (!options?.refresh) {
+      const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_HEALTH);
+      if (cached != null) return cached;
+    } else {
+      cache.delete(CACHE_KEYS.ADMIN_HEALTH);
+    }
     const response = await this.client.get('/admin/health');
     const data = response.data;
     cache.set(CACHE_KEYS.ADMIN_HEALTH, data, TERMINAL_CACHE_TTL_MS);
@@ -1511,6 +1608,27 @@ class ApiClient {
     return response.data as {
       items: { id: string; purpose: string; mixed_note?: string; created_at?: string; summary?: string }[];
     };
+  }
+
+  async getCallLibrary(params?: { limit?: number; offset?: number }): Promise<CallLibraryListResponse> {
+    const response = await this.client.get('/call-library', {
+      params,
+      timeout: 25000,
+    });
+    return response.data as CallLibraryListResponse;
+  }
+
+  async patchCallLibraryReport(reportId: string, callTitle: string): Promise<{ ok: boolean; id: string }> {
+    const response = await this.client.patch(`/call-library/${reportId}`, { call_title: callTitle });
+    return response.data as { ok: boolean; id: string };
+  }
+
+  /** Re-run LLM report for rows with failure_reason llm_failed (Refresh button also calls this). */
+  async retryCallLibraryLlmFailed(): Promise<{ requeued: number }> {
+    const response = await this.client.post('/call-library/retry-llm-failed', null, {
+      timeout: 120000,
+    });
+    return response.data as { requeued: number };
   }
 
   // Tab Permissions

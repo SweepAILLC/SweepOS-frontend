@@ -11,6 +11,20 @@ interface StripeDashboardPanelProps {
   userRole?: string; // 'owner' | 'admin' | 'member'
 }
 
+/** Prefer saved client name; otherwise transaction email; avoid showing "Unknown" when email exists. */
+function stripeCustomerPrimaryLine(p: { client_name?: string; client_email?: string | null }) {
+  const name = p.client_name?.trim();
+  const em = p.client_email?.trim();
+  return name || em || 'Unknown';
+}
+
+function stripeCustomerSecondaryEmail(p: { client_name?: string; client_email?: string | null }) {
+  const primary = stripeCustomerPrimaryLine(p);
+  const em = p.client_email?.trim();
+  if (!em || primary === em) return null;
+  return em;
+}
+
 export default function StripeDashboardPanel({ userRole = 'member' }: StripeDashboardPanelProps) {
   const { setLoading: setGlobalLoading } = useLoading();
   const [summary, setSummary] = useState<StripeSummary | null>(null);
@@ -1084,9 +1098,9 @@ Your Team
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div>
-                        <p className="text-gray-900 dark:text-gray-100 font-medium">{payment.client_name || 'Unknown'}</p>
-                        {payment.client_email && (
-                          <p className="text-gray-500 dark:text-gray-100 text-xs">{payment.client_email}</p>
+                        <p className="text-gray-900 dark:text-gray-100 font-medium">{stripeCustomerPrimaryLine(payment)}</p>
+                        {stripeCustomerSecondaryEmail(payment) && (
+                          <p className="text-gray-500 dark:text-gray-100 text-xs">{stripeCustomerSecondaryEmail(payment)}</p>
                         )}
                       </div>
                     </td>
@@ -1111,7 +1125,7 @@ Your Team
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div className="flex gap-2">
-                        {(!payment.client_name || payment.client_name === 'Unknown') && (
+                        {!payment.client_id && (
                           <button
                             onClick={() => handleOpenAssignModal(payment.id)}
                             className="px-2 py-1 text-xs font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800 hover:border-blue-300 dark:hover:border-blue-700 transition-colors"
@@ -1175,9 +1189,9 @@ Your Team
                     </td>
                     <td className="px-4 py-3 text-sm">
                       <div>
-                        <p className="text-gray-900 dark:text-gray-100 font-medium">{payment.client_name || 'Unknown'}</p>
-                        {payment.client_email && (
-                          <p className="text-gray-500 dark:text-gray-400 text-xs">{payment.client_email}</p>
+                        <p className="text-gray-900 dark:text-gray-100 font-medium">{stripeCustomerPrimaryLine(payment)}</p>
+                        {stripeCustomerSecondaryEmail(payment) && (
+                          <p className="text-gray-500 dark:text-gray-400 text-xs">{stripeCustomerSecondaryEmail(payment)}</p>
                         )}
                         {payment.subscription_id && (
                           <p className="text-gray-400 dark:text-gray-500 text-xs mt-1 break-all">Sub: {payment.subscription_id}</p>

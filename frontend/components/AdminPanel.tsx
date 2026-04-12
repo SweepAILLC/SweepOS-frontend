@@ -1,8 +1,25 @@
 import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api';
-import { Organization, GlobalHealth, GlobalSettings, OrganizationDashboardSummary, Invitation } from '@/types/admin';
+import {
+  Organization,
+  GlobalHealth,
+  GlobalSettings,
+  OrganizationDashboardSummary,
+  Invitation,
+} from '@/types/admin';
 import ShinyButton from './ui/ShinyButton';
 import { useLoading } from '@/contexts/LoadingContext';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Line,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+} from 'recharts';
 
 export default function AdminPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
@@ -39,12 +56,15 @@ export default function AdminPanel() {
     loadData();
   }, [activeTab]);
 
-  const loadData = async () => {
-    setGlobalLoading(true, 'Loading admin panel...');
+  const loadData = async (opts?: { refreshHealth?: boolean }) => {
+    setGlobalLoading(
+      true,
+      opts?.refreshHealth ? 'Refreshing platform health…' : 'Loading admin panel...'
+    );
     try {
       setLoading(true);
       setError(null);
-      
+
       if (activeTab === 'organizations') {
         const [orgsData, invsData] = await Promise.all([
           apiClient.getOrganizations(),
@@ -53,7 +73,9 @@ export default function AdminPanel() {
         setOrganizations(orgsData);
         setPendingInvitations(Array.isArray(invsData) ? invsData : []);
       } else if (activeTab === 'health') {
-        const data = await apiClient.getGlobalHealth();
+        const data = (await apiClient.getGlobalHealth({
+          refresh: opts?.refreshHealth,
+        })) as GlobalHealth;
         setHealth(data);
       } else if (activeTab === 'settings') {
         const data = await apiClient.getGlobalSettings();
@@ -171,6 +193,8 @@ export default function AdminPanel() {
         { tab_name: 'stripe', enabled: true },
         { tab_name: 'funnels', enabled: true },
         { tab_name: 'content_studio', enabled: true },
+        { tab_name: 'call_library', enabled: true },
+        { tab_name: 'integrations', enabled: true },
         { tab_name: 'users', enabled: true },
       ]);
     } finally {
@@ -462,12 +486,234 @@ export default function AdminPanel() {
       {/* Health Tab — platform impact & growth */}
       {activeTab === 'health' && health && (
         <div className="space-y-8">
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Platform health</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Revenue, scale, funnel traffic, and 30-day growth signals across all organizations.
-            </p>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Platform health</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                Revenue, scale, funnel traffic, and 30-day growth signals across all organizations.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => loadData({ refreshHealth: true })}
+              disabled={loading}
+              className="shrink-0 inline-flex items-center justify-center rounded-lg border border-gray-300 dark:border-white/15 bg-white dark:bg-white/5 px-3 py-2 text-sm font-medium text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/10 disabled:opacity-50"
+            >
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </button>
           </div>
+
+          {/* Owner-focused product & coaching signals */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              Product & coaching (30 days)
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">
+                  Revenue from existing clients (Stripe)
+                </p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  $
+                  {(health.revenue_from_existing_clients_last_30d_usd ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Succeeded charges in the last 30d where the client record predates that window
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Show-up rate (last 30d)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {health.show_up_rate_last_30d_pct == null ? '—' : `${health.show_up_rate_last_30d_pct}%`}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Past Cal.com / Calendly check-ins</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Sales close rate (last 30d)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {health.close_rate_last_30d_pct == null ? '—' : `${health.close_rate_last_30d_pct}%`}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Sales calls with a succeeded Stripe payment on the client
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Invitation emails (app)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {(health.invitation_emails_sent_last_30d ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Prior 30d: {(health.invitation_emails_sent_previous_30d ?? 0).toLocaleString()} invitations created
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Calls booked (calendar sync)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {(health.calls_booked_last_30d ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Prior 30d: {(health.calls_booked_previous_30d ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Active clients (lifecycle)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  {(health.lifecycle_active_clients_current ?? 0).toLocaleString()}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                  Tenured active (record older than 30d):{' '}
+                  {(health.lifecycle_active_clients_previous_30d_cohort ?? 0).toLocaleString()}
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Rolling 30-day trends */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 digitized-text">
+              Trends (six 30-day buckets, oldest to newest)
+            </h3>
+            <p className="text-xs text-gray-500 dark:text-gray-500 mb-4">
+              Show-up and close rates use synced calendar check-ins. Client series compare cumulative client records to
+              clients that are active today and were created before each period end (cohort-style).
+            </p>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Show-up vs close rate</p>
+                <div className="h-72 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={health.health_trend_periods ?? []}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <YAxis
+                        domain={[0, 100]}
+                        tick={{ fontSize: 11 }}
+                        className="fill-gray-600 dark:fill-gray-400"
+                        label={{ value: '%', angle: 0, position: 'insideTopLeft', fill: 'currentColor' }}
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: '#e5e7eb' }}
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="show_up_rate_pct"
+                        name="Show-up %"
+                        stroke="#6366f1"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        connectNulls
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="close_rate_pct"
+                        name="Close %"
+                        stroke="#10b981"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                        connectNulls
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Volume & roster</p>
+                <div className="h-72 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={health.health_trend_periods ?? []}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <YAxis
+                        yAxisId="left"
+                        tick={{ fontSize: 11 }}
+                        className="fill-gray-600 dark:fill-gray-400"
+                      />
+                      <YAxis
+                        yAxisId="right"
+                        orientation="right"
+                        tick={{ fontSize: 11 }}
+                        className="fill-gray-600 dark:fill-gray-400"
+                      />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: '#e5e7eb' }}
+                      />
+                      <Legend />
+                      <Bar
+                        yAxisId="left"
+                        dataKey="stripe_revenue_usd"
+                        name="Stripe revenue ($)"
+                        fill="#f59e0b"
+                        radius={[4, 4, 0, 0]}
+                      />
+                      <Line
+                        yAxisId="right"
+                        type="monotone"
+                        dataKey="calls_booked_count"
+                        name="Calls booked"
+                        stroke="#0ea5e9"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Client roster (cumulative vs active cohort)</p>
+                <div className="h-72 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={health.health_trend_periods ?? []}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: '#e5e7eb' }}
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="cumulative_total_clients"
+                        name="Total client records (≤ period end)"
+                        stroke="#94a3b8"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="active_clients_cohort"
+                        name="Active today, created before period end"
+                        stroke="#a855f7"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          </section>
 
           {/* Revenue & billing */}
           <section>

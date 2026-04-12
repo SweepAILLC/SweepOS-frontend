@@ -144,6 +144,8 @@ export function setSeenStripeDataMs(ms: number): void {
 export function clearSessionCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
   cache.deleteByPrefix('stripe_');
+  // Client list must not bleed across orgs or sessions (key was previously global `clients`)
+  cache.deleteByPrefix('clients');
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem(TERMINAL_STRIPE_UPDATED_KEY);
     sessionStorage.removeItem(TERMINAL_STRIPE_MS_KEY);

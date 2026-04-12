@@ -546,10 +546,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const handleRefreshSync = async () => {
     setSyncingRefreshing(true);
     try {
-      // Kick off calendar + Stripe sync; UX stays responsive while these complete.
-      await apiClient.syncCheckIns();
+      // 1) Stripe customers / payments → reconcile onto the board (new customers if not already present)
       await apiClient.syncStripeData(false, true);
-      // Mark Stripe as updated so Terminal/widgets refetch immediately.
       try {
         const { last_updated_ms } = await apiClient.getStripeLastUpdated();
         if (last_updated_ms != null) invalidateStripeAndTerminalAfterWebhook(last_updated_ms);
@@ -559,7 +557,48 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
       }
-      await loadClients(true);
+
+      // 2) Calendar (Cal.com / Calendly) attendees → check-ins → warm leads on the board
+      await apiClient.syncCheckIns();
+
+      // 3) Fathom: pull meetings that match clients by email, queue ingest + call insights for the library / drawer
+      //    (runs after Stripe + calendar so newly synced clients exist before matching.)
+      try {
+        await apiClient.syncFathomMeetings();
+      } catch (fathomErr: unknown) {
+        console.warn('[KanbanBoard] Fathom sync skipped or failed:', fathomErr);
+      }
+
+      // Reload list once; skip embedded check-in sync (already ran above).
+      await loadClients(true, true);
+
+      // Drawer IntelligenceSection uses this to refetch AI insights / health.
+      setHealthRefreshToken((t) => t + 1);
+      // Fathom queues call-insight LLM work in the background; refresh chips + drawer again once jobs typically finish.
+      window.setTimeout(() => {
+        setHealthRefreshToken((t) => t + 1);
+        const ids = clientsRef.current.map((c) => c.id);
+        if (ids.length === 0) return;
+        void (async () => {
+          try {
+            const batch = await apiClient.getClientsHealthScores(ids);
+            setHealthScores(batch);
+          } catch {
+            /* keep previous */
+          }
+          try {
+            const tagMap = await apiClient.getClientsCallInsightTags(ids);
+            const rows = clientsRef.current;
+            const nextTags: Record<string, { tags: string[]; headline: string }> = {};
+            for (const c of rows) {
+              nextTags[c.id] = tagMap[c.id] ?? { tags: [], headline: '' };
+            }
+            setCallInsightTags(nextTags);
+          } catch {
+            /* keep previous */
+          }
+        })();
+      }, 8000);
     } catch (err: any) {
       console.error('[KanbanBoard] Refresh sync failed:', err);
       alert(err?.response?.data?.detail || 'Sync failed. Please try again.');
@@ -740,7 +779,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
               onClick={handleRefreshSync}
               disabled={syncingRefreshing}
               className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50 flex items-center gap-2 min-h-[44px]"
-              title="Sync calendar and Stripe so client details and columns are up to date"
+              title="Sync Stripe customers, then calendar attendees, then Fathom calls and AI insights"
             >
               <svg className={`w-4 h-4 flex-shrink-0 ${syncingRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />

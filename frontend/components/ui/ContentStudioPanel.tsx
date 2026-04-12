@@ -8,6 +8,7 @@ import {
   ContentStudioBundle,
   ContentStudioSectionIdea,
 } from '@/lib/api';
+import { useLoading } from '@/contexts/LoadingContext';
 
 const STAGES: ('TOF' | 'MOF' | 'BOF')[] = ['TOF', 'MOF', 'BOF'];
 const STAGE_LABEL: Record<string, string> = {
@@ -80,21 +81,13 @@ const DEFAULT_SECTION_THEME = {
 export default function ContentStudioPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [analyzing, setAnalyzing] = useState(false);
+  const { setLoading: setGlobalLoading } = useLoading();
 
   const [salesPlaybookSource, setSalesPlaybookSource] = useState<'fathom' | 'default'>('default');
   const [contentBundle, setContentBundle] = useState<ContentStudioBundle | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
-
-  const [transcript, setTranscript] = useState('');
-  const [purpose, setPurpose] = useState<'TOF' | 'MOF' | 'BOF' | 'mixed'>('MOF');
-  const [mixedNote, setMixedNote] = useState('');
-  const [analysisResult, setAnalysisResult] = useState<Record<string, unknown> | null>(null);
-  const [history, setHistory] = useState<
-    { id: string; purpose: string; summary?: string; created_at?: string }[]
-  >([]);
 
   const loadBootstrap = useCallback(async () => {
     setError(null);
@@ -112,25 +105,13 @@ export default function ContentStudioPanel() {
       setError(String(msg));
     } finally {
       setLoading(false);
+      setGlobalLoading(false);
     }
-  }, []);
+  }, [setGlobalLoading]);
 
   useEffect(() => {
     void loadBootstrap();
   }, [loadBootstrap]);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const { items } = await apiClient.getContentStudioTranscripts(15);
-      setHistory(items || []);
-    } catch {
-      /* optional */
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadHistory();
-  }, [loadHistory]);
 
   const flushCompleted = useCallback(
     async (next: Set<string>) => {
@@ -156,30 +137,6 @@ export default function ContentStudioPanel() {
     void flushCompleted(next);
   };
 
-  const runAnalyze = async () => {
-    setAnalyzing(true);
-    setError(null);
-    setAnalysisResult(null);
-    try {
-      const res = await apiClient.postContentStudioTranscriptAnalyze({
-        transcript: transcript.trim(),
-        purpose,
-        mixed_note: purpose === 'mixed' ? mixedNote.trim() || undefined : undefined,
-      });
-      setAnalysisResult(res.analysis || {});
-      void loadHistory();
-      void loadBootstrap();
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e as Error)?.message ||
-        'Analysis failed';
-      setError(String(msg));
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
   const ideaByStage = (ideas: ContentStudioSectionIdea[], stage: 'TOF' | 'MOF' | 'BOF') =>
     ideas.find((i) => i.stage === stage);
 
@@ -194,7 +151,12 @@ export default function ContentStudioPanel() {
           <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
             Intelligence
           </Link>{' '}
-          profile. Ideas refresh when call data meaningfully changes.
+          profile. Ideas refresh when call data meaningfully changes. For full call coaching reports and recording
+          links, use the{' '}
+          <Link href="/?tab=call_library" className="text-violet-600 dark:text-violet-400 underline">
+            Call Library
+          </Link>{' '}
+          tab.
         </p>
       </div>
 
@@ -359,147 +321,9 @@ export default function ContentStudioPanel() {
         </section>
       ) : null}
 
-      <section className="glass-card rounded-xl p-4 sm:p-5 space-y-4 border border-gray-200/60 dark:border-white/10">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Call / transcript review</h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          Paste a transcript. Say which funnel stage it was meant for—we analyze conversion strengths and gaps.
-        </p>
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Transcript purpose</span>
-          <select
-            className="w-full max-w-xs rounded-lg border border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm"
-            value={purpose}
-            onChange={(e) => setPurpose(e.target.value as typeof purpose)}
-          >
-            <option value="TOF">TOF — awareness / cold</option>
-            <option value="MOF">MOF — nurture / consideration</option>
-            <option value="BOF">BOF — decision / close</option>
-            <option value="mixed">Mixed — explain below</option>
-          </select>
-        </label>
-        {purpose === 'mixed' && (
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Mixed context</span>
-            <input
-              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm"
-              value={mixedNote}
-              onChange={(e) => setMixedNote(e.target.value)}
-              placeholder="e.g. discovery that turned into a soft close"
-            />
-          </label>
-        )}
-        <label className="block space-y-1">
-          <span className="text-xs font-medium text-gray-600 dark:text-gray-300">Transcript</span>
-          <textarea
-            className="w-full min-h-[180px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white/80 dark:bg-gray-900/60 px-3 py-2 text-sm font-mono"
-            value={transcript}
-            onChange={(e) => setTranscript(e.target.value)}
-            placeholder="Paste call notes or transcript (min ~40 characters)…"
-          />
-        </label>
-        <button
-          type="button"
-          onClick={() => void runAnalyze()}
-          disabled={analyzing || transcript.trim().length < 40}
-          className="glass-button px-4 py-2 rounded-lg text-sm disabled:opacity-50"
-        >
-          {analyzing ? 'Analyzing…' : 'Analyze transcript'}
-        </button>
-
-        {analysisResult && (
-          <div className="mt-4 space-y-3 text-sm border-t border-gray-200/50 dark:border-gray-600/50 pt-4">
-            {typeof analysisResult.summary === 'string' && (
-              <p className="text-gray-800 dark:text-gray-200">{analysisResult.summary}</p>
-            )}
-            {typeof analysisResult.purpose_alignment === 'string' && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Purpose alignment</p>
-                <p className="text-gray-700 dark:text-gray-300">{analysisResult.purpose_alignment}</p>
-              </div>
-            )}
-            <AnalysisList title="Strengths" items={analysisResult.strengths_for_conversion} />
-            <AnalysisList title="Weaknesses" items={analysisResult.weaknesses_for_conversion} />
-            <ComponentsList items={analysisResult.components} />
-          </div>
-        )}
-      </section>
-
-      {history.length > 0 && (
-        <section>
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-2">Recent analyses</h3>
-          <ul className="space-y-2 text-xs text-gray-600 dark:text-gray-400">
-            {history.map((h) => (
-              <li key={h.id} className="glass-card rounded-lg px-3 py-2">
-                <span className="font-medium text-gray-800 dark:text-gray-200">{h.purpose}</span>
-                {h.created_at ? <span className="ml-2 opacity-70">{new Date(h.created_at).toLocaleString()}</span> : null}
-                {h.summary ? <p className="mt-1">{h.summary}</p> : null}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       <section className="glass-card rounded-xl p-4 text-center text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-600">
         Instagram publishing — coming soon.
       </section>
-    </div>
-  );
-}
-
-function AnalysisList({
-  title,
-  items,
-}: {
-  title: string;
-  items: unknown;
-}) {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{title}</p>
-      <ul className="list-disc list-inside space-y-2 text-gray-700 dark:text-gray-300">
-        {items.map((row, i) => {
-          if (row && typeof row === 'object' && 'point' in row) {
-            const r = row as { point?: string; evidence?: string };
-            return (
-              <li key={i}>
-                <span className="font-medium">{r.point}</span>
-                {r.evidence ? (
-                  <span className="block text-xs opacity-80 mt-0.5 pl-4">{`"${r.evidence}"`}</span>
-                ) : null}
-              </li>
-            );
-          }
-          return (
-            <li key={i}>
-              <span>{String(row)}</span>
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
-
-function ComponentsList({ items }: { items: unknown }) {
-  if (!Array.isArray(items) || items.length === 0) return null;
-  return (
-    <div>
-      <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Components</p>
-      <ul className="space-y-2">
-        {items.map((c, i) => {
-          if (c && typeof c === 'object' && ('label' in c || 'summary' in c)) {
-            const x = c as { label?: string; summary?: string };
-            return (
-              <li key={i} className="text-gray-700 dark:text-gray-300">
-                <span className="font-medium">{x.label}</span>
-                {x.summary ? <span className="block text-xs mt-0.5">{x.summary}</span> : null}
-              </li>
-            );
-          }
-          return null;
-        })}
-      </ul>
     </div>
   );
 }

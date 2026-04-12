@@ -8,12 +8,14 @@ interface EventDetailsModalProps {
   provider: 'calcom' | 'calendly' | 'manual';
   eventId: string | number;
   eventUri?: string; // For Calendly
+  /** When set, load/edit the canonical synced row via check-in API (recommended for Calendar tab). */
+  checkInId?: string | null;
   onSalesUpdated?: () => void;
 }
 
 type ManualCheckIn = {
   id: string;
-  provider: 'manual';
+  provider: 'manual' | 'calcom' | 'calendly';
   title?: string | null;
   start_time?: string | null;
   end_time?: string | null;
@@ -26,6 +28,9 @@ type ManualCheckIn = {
   meeting_url?: string | null;
   attendee_name?: string | null;
   attendee_email?: string | null;
+  event_id?: string;
+  event_uri?: string | null;
+  calcom_uid?: string | null;
 };
 
 export default function EventDetailsModal({
@@ -34,6 +39,7 @@ export default function EventDetailsModal({
   provider,
   eventId,
   eventUri,
+  checkInId,
   onSalesUpdated
 }: EventDetailsModalProps) {
   const [loading, setLoading] = useState(true);
@@ -49,7 +55,7 @@ export default function EventDetailsModal({
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (isOpen && eventId) {
+    if (isOpen && (checkInId || eventId)) {
       loadEventDetails();
     } else {
       // Reset state when modal closes
@@ -59,12 +65,50 @@ export default function EventDetailsModal({
       setError(null);
       setLoading(false);
     }
-  }, [isOpen, eventId, provider]);
+  }, [isOpen, eventId, provider, checkInId, eventUri]);
 
   const loadEventDetails = async () => {
     try {
       setLoading(true);
       setError(null);
+
+      if (checkInId) {
+        const data = await apiClient.getCheckIn(checkInId);
+        setManualCheckIn({ ...(data as ManualCheckIn), id: String((data as { id?: string }).id), provider: (data as { provider?: string }).provider as ManualCheckIn['provider'] });
+        setBooking(null);
+        setEvent(null);
+        setRescheduleDraft({
+          start: data?.start_time ? toDateTimeLocalInputValue(data.start_time) : undefined,
+          end: data?.end_time ? toDateTimeLocalInputValue(data.end_time) : undefined,
+        });
+        // Synced check-in row does not include Cal.com / Calendly form payloads — fetch live provider details for pre-call + form responses.
+        const prov = (data as { provider?: string }).provider;
+        if (prov === 'calcom') {
+          const calcomUid = (data as { calcom_uid?: string | null }).calcom_uid;
+          const eventIdStr = String((data as { event_id?: string }).event_id || '').trim();
+          const candidates = [calcomUid, eventIdStr].filter((x): x is string => !!x && String(x).length > 0);
+          for (const uidOrId of candidates) {
+            try {
+              const full = await apiClient.getCalComBookingDetails(uidOrId);
+              setBooking(full);
+              break;
+            } catch {
+              /* try next candidate (uid vs numeric id) */
+            }
+          }
+        } else if (prov === 'calendly') {
+          const uri = String((data as { event_uri?: string | null }).event_uri || eventUri || '').trim();
+          if (uri) {
+            try {
+              const full = await apiClient.getCalendlyEventDetails(uri);
+              setEvent(full);
+            } catch {
+              /* invitee / routing forms unavailable — modal still shows check-in flags */
+            }
+          }
+        }
+        return;
+      }
       
       if (provider === 'calcom') {
         const data = await apiClient.getCalComBookingDetails(String(eventId));
@@ -100,18 +144,22 @@ export default function EventDetailsModal({
     }
   };
 
-  const updateSalesFlags = async (updates: { sale_closed?: boolean | null }) => {
-    if (provider === 'manual') {
-      // Manual: sale_closed is stored directly on the check-in
-      const raw = String(eventId);
-      const checkInId = raw.replace(/^manual_/, '');
+  const updateSalesFlags = async (updates: { sale_closed?: boolean | null; is_sales_call?: boolean }) => {
+    if (checkInId || provider === 'manual') {
+      const cid = checkInId ? checkInId : String(eventId).replace(/^manual_/, '');
       setSalesUpdating(true);
       try {
-        const updated = await apiClient.updateCheckInDetails(checkInId, { sale_closed: updates.sale_closed ?? null });
-        setManualCheckIn({ ...(updated as any), provider: 'manual' });
+        const payload: Parameters<typeof apiClient.updateCheckInDetails>[1] = {};
+        if ('sale_closed' in updates) payload.sale_closed = updates.sale_closed ?? null;
+        if (updates.is_sales_call !== undefined) payload.is_sales_call = updates.is_sales_call;
+        const updated = await apiClient.updateCheckInDetails(cid, payload);
+        setManualCheckIn({
+          ...(updated as ManualCheckIn),
+          provider: ((updated as { provider?: string }).provider || provider) as ManualCheckIn['provider'],
+        });
         onSalesUpdated?.();
       } catch (err) {
-        console.error('Failed to update manual sales flags:', err);
+        console.error('Failed to update check-in flags:', err);
       } finally {
         setSalesUpdating(false);
       }
@@ -215,13 +263,25 @@ export default function EventDetailsModal({
     setActionUpdating('cancel');
     try {
       const reason = window.prompt('Cancellation reason (optional):') || undefined;
+      if (checkInId && manualCheckIn) {
+        if (manualCheckIn.provider === 'calcom') {
+          const uid = manualCheckIn.calcom_uid || String(manualCheckIn.event_id);
+          await apiClient.cancelCalComBooking(String(uid), reason);
+        } else if (manualCheckIn.provider === 'calendly') {
+          const uri = manualCheckIn.event_uri || eventUri || String(eventId);
+          await apiClient.cancelCalendlyEvent(String(uri), reason);
+        }
+        await loadEventDetails();
+        onSalesUpdated?.();
+        return;
+      }
       if (provider === 'calcom') {
         const uid = booking?.uid || (booking?.id != null ? String(booking.id) : String(eventId));
         await apiClient.cancelCalComBooking(String(uid), reason);
       } else if (provider === 'manual') {
         const raw = String(eventId);
-        const checkInId = raw.replace(/^manual_/, '');
-        await apiClient.updateCheckInDetails(checkInId, { cancelled: true, completed: false, no_show: false });
+        const mid = raw.replace(/^manual_/, '');
+        await apiClient.updateCheckInDetails(mid, { cancelled: true, completed: false, no_show: false });
       } else {
         const uri = (event as any)?.uri || eventUri || String(eventId);
         await apiClient.cancelCalendlyEvent(String(uri), reason);
@@ -458,12 +518,30 @@ export default function EventDetailsModal({
         </div>
       );
     }
-    
+
+    if (checkInId && provider === 'calcom' && !booking) {
+      return (
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          Could not load live Cal.com booking details (needed for pre-call routing and booking questions). Try syncing
+          the calendar again, or open the booking in Cal.com.
+        </div>
+      );
+    }
+    if (checkInId && provider === 'calendly' && !event) {
+      return (
+        <div className="text-sm text-gray-500 dark:text-gray-400">
+          Could not load live Calendly event details (needed for routing forms and invitee answers). Ensure the event
+          still exists and the integration is connected.
+        </div>
+      );
+    }
+
     return null;
   };
 
   const currentEvent = provider === 'calcom' ? booking : event;
-  const effectiveEvent = provider === 'manual' ? manualCheckIn : currentEvent;
+  const effectiveEvent =
+    checkInId && manualCheckIn ? manualCheckIn : provider === 'manual' ? manualCheckIn : currentEvent;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto" onClick={onClose}>
@@ -510,6 +588,7 @@ export default function EventDetailsModal({
               <div className="space-y-6 max-h-[70vh] overflow-y-auto">
                 {/* Actions */}
                 <div className="flex flex-wrap items-center gap-2">
+                  {!checkInId ? (
                   <button
                     onClick={openProviderPage}
                     className="px-3 py-1.5 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20"
@@ -517,6 +596,7 @@ export default function EventDetailsModal({
                   >
                     Open in {provider === 'calcom' ? 'Cal.com' : 'Calendly'}
                   </button>
+                  ) : null}
                   <button
                     onClick={cancelEvent}
                     disabled={actionUpdating === 'cancel'}
@@ -539,7 +619,9 @@ export default function EventDetailsModal({
                     <div className="flex justify-between">
                       <span className="text-gray-500 dark:text-gray-400">Title:</span>
                       <span className="text-gray-900 dark:text-gray-100 font-medium">
-                        {provider === 'calcom' 
+                        {checkInId && manualCheckIn
+                          ? (manualCheckIn.title || 'Booking')
+                          : provider === 'calcom' 
                           ? (booking?.title || booking?.eventType?.title || 'Untitled')
                           : provider === 'manual'
                           ? (manualCheckIn?.title || 'Manual check-in')
@@ -550,7 +632,9 @@ export default function EventDetailsModal({
                       <span className="text-gray-500 dark:text-gray-400">Start Time:</span>
                       <span className="text-gray-900 dark:text-gray-100">
                         {formatDateTime(
-                          provider === 'calcom'
+                          checkInId && manualCheckIn?.start_time
+                            ? String(manualCheckIn.start_time)
+                            : provider === 'calcom'
                             ? booking!.startTime
                             : provider === 'manual'
                             ? String(manualCheckIn?.start_time || '')
@@ -562,7 +646,9 @@ export default function EventDetailsModal({
                       <span className="text-gray-500 dark:text-gray-400">End Time:</span>
                       <span className="text-gray-900 dark:text-gray-100">
                         {formatDateTime(
-                          provider === 'calcom'
+                          checkInId && manualCheckIn?.end_time
+                            ? String(manualCheckIn.end_time)
+                            : provider === 'calcom'
                             ? booking!.endTime
                             : provider === 'manual'
                             ? String(manualCheckIn?.end_time || '')
@@ -574,7 +660,17 @@ export default function EventDetailsModal({
                     <div className="flex justify-between items-start gap-2">
                       <span className="text-gray-500 dark:text-gray-400">Status:</span>
                       <span className="text-gray-900 dark:text-gray-100">
-                        {provider === 'calcom' && booking ? (() => {
+                        {checkInId && manualCheckIn ? (
+                          manualCheckIn.cancelled ? (
+                            <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
+                          ) : manualCheckIn.no_show ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>
+                          ) : manualCheckIn.completed ? (
+                            <span className="text-green-600 dark:text-green-400 font-medium">Completed</span>
+                          ) : (
+                            <span className="text-green-600 dark:text-green-400">Confirmed</span>
+                          )
+                        ) : provider === 'calcom' && booking ? (() => {
                           const isNoShow = booking.status === 'accepted' && (
                             booking.absentHost === true ||
                             (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true))
@@ -632,6 +728,80 @@ export default function EventDetailsModal({
                   </div>
                 </div>
 
+                {/* Synced check-in: edit attendance + sales flags (same API as health / dashboards) */}
+                {checkInId && manualCheckIn && (
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
+                      Record flags (manual override)
+                    </h4>
+                    <div className="flex flex-wrap gap-4 text-sm">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!manualCheckIn.completed}
+                          disabled={salesUpdating}
+                          onChange={async (e) => {
+                            const cid = checkInId!;
+                            setSalesUpdating(true);
+                            try {
+                              const u = await apiClient.updateCheckInDetails(cid, { completed: e.target.checked });
+                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
+                              onSalesUpdated?.();
+                            } finally {
+                              setSalesUpdating(false);
+                            }
+                          }}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span>Completed</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!manualCheckIn.cancelled}
+                          disabled={salesUpdating}
+                          onChange={async (e) => {
+                            const cid = checkInId!;
+                            setSalesUpdating(true);
+                            try {
+                              const u = await apiClient.updateCheckInDetails(cid, { cancelled: e.target.checked });
+                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
+                              onSalesUpdated?.();
+                            } finally {
+                              setSalesUpdating(false);
+                            }
+                          }}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span>Cancelled</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!manualCheckIn.no_show}
+                          disabled={salesUpdating}
+                          onChange={async (e) => {
+                            const cid = checkInId!;
+                            setSalesUpdating(true);
+                            try {
+                              const u = await apiClient.updateCheckInDetails(cid, { no_show: e.target.checked });
+                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
+                              onSalesUpdated?.();
+                            } finally {
+                              setSalesUpdating(false);
+                            }
+                          }}
+                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                        />
+                        <span>No-show</span>
+                      </label>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      Provider webhooks/APIs update these automatically; adjust here when you need the board and metrics to match reality.
+                    </p>
+                  </div>
+                )}
+
                 {/* Sales call tracking */}
                 <div>
                   <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
@@ -641,7 +811,17 @@ export default function EventDetailsModal({
                     <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
-                        checked={!!(provider === 'calcom' ? booking?.sale_closed : provider === 'manual' ? manualCheckIn?.sale_closed : event?.sale_closed)}
+                        checked={!!(checkInId && manualCheckIn ? manualCheckIn.is_sales_call : provider === 'calcom' ? booking?.is_sales_call : provider === 'manual' ? manualCheckIn?.is_sales_call : event?.is_sales_call)}
+                        disabled={salesUpdating}
+                        onChange={(e) => updateSalesFlags({ is_sales_call: e.target.checked })}
+                        className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                      />
+                      <span className="text-sm text-gray-700 dark:text-gray-300">Sales call</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!(checkInId && manualCheckIn ? manualCheckIn.sale_closed : provider === 'calcom' ? booking?.sale_closed : provider === 'manual' ? manualCheckIn?.sale_closed : event?.sale_closed)}
                         disabled={salesUpdating}
                         onChange={(e) => updateSalesFlags({ sale_closed: e.target.checked })}
                         className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"

@@ -8,6 +8,8 @@ export type TabId =
   | 'stripe'
   | 'funnels'
   | 'content_studio'
+  | 'call_library'
+  | 'integrations'
   | 'users'
   | 'owner'
   | 'calcom'
@@ -139,6 +141,8 @@ export default function Navbar({
         {shouldShowTab('calcom') && tabBtn('calcom', 'Calendar')}
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Content Studio')}
+        {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
+        {shouldShowTab('integrations') && tabBtn('integrations', 'Integrations')}
         {shouldShowTab('users') && tabBtn('users', 'Users')}
         {shouldShowTab('owner') && tabBtn('owner', 'Owner')}
       </div>

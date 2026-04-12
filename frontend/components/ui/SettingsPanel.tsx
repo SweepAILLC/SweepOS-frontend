@@ -3,11 +3,10 @@ import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
 import { clearSessionCaches } from '@/lib/cache';
-import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 
-type SettingsSection = 'appearance' | 'accounts' | 'credentials' | 'profile' | 'privacy';
+type SettingsSection = 'appearance' | 'accounts' | 'profile' | 'privacy';
 
 interface OrgOption {
   id: string;
@@ -18,7 +17,6 @@ interface OrgOption {
 const SIDEBAR_ITEMS: { id: SettingsSection; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'accounts', label: 'Accounts' },
-  { id: 'credentials', label: 'Credentials' },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
@@ -46,8 +44,6 @@ export default function SettingsPanel() {
     analytics_enabled: true,
     org_name: '',
   });
-  const [fathomApiKey, setFathomApiKey] = useState('');
-
   const loadSettings = async () => {
     try {
       setLoading(true);
@@ -65,7 +61,6 @@ export default function SettingsPanel() {
         analytics_enabled: settings.analytics_enabled ?? true,
         org_name: '',
       });
-      setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
       const orgId = user?.org_id != null ? String(user.org_id) : null;
       setCurrentOrgId(orgId);
       if (settings.email) {
@@ -174,7 +169,6 @@ export default function SettingsPanel() {
         email: formData.email,
         data_sharing_enabled: formData.data_sharing_enabled,
         analytics_enabled: formData.analytics_enabled,
-        fathom_api_key: fathomApiKey || undefined,
       };
       if (formData.new_password) {
         updateData.current_password = formData.current_password;
@@ -341,45 +335,6 @@ export default function SettingsPanel() {
                 </ul>
               )}
             </div>
-          )}
-
-          {section === 'credentials' && (
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Credentials</h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                API keys and integration credentials for AI-powered features.
-              </p>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Fathom API Key</label>
-                <input
-                  type="password"
-                  value={fathomApiKey}
-                  onChange={(e) => setFathomApiKey(e.target.value)}
-                  placeholder="Enter your Fathom API key"
-                  className="w-full max-w-md px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm font-mono placeholder-gray-400 dark:placeholder-gray-500"
-                  autoComplete="off"
-                />
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  <a
-                    href="https://app.usefathom.com/settings/api"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    Get your API key
-                  </a>{' '}
-                  from Fathom → Settings → API.
-                </p>
-              </div>
-              <FathomSyncSection variant="panel" />
-              <button
-                type="submit"
-                disabled={saving}
-                className="glass-button neon-glow px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {saving ? 'Saving...' : 'Save Changes'}
-              </button>
-            </form>
           )}
 
           {section === 'profile' && (

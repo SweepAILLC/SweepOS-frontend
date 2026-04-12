@@ -2,7 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar from '@/components/ui/Navbar';
-import { APP_MAIN_PL_OFFSET, APP_MAIN_PL_WITH_PERF_OPEN } from '@/components/ui/layoutConstants';
+import {
+  APP_MAIN_PL_OFFSET,
+  APP_MAIN_PL_WITH_PERF_OPEN,
+  APP_MAIN_PL_WITH_CALL_LIBRARY,
+  APP_MAIN_PL_WITH_CALL_LIBRARY_AND_PERF_OPEN,
+} from '@/components/ui/layoutConstants';
 import TerminalDashboard from '@/components/TerminalDashboard';
 import BrevoConsolePanel from '@/components/BrevoConsolePanel';
 import StripeDashboardPanel from '@/components/stripe/StripeDashboardPanel';
@@ -13,8 +18,10 @@ import AdminPanel from '@/components/AdminPanel';
 import UsersPanel from '@/components/UsersPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import SettingsPanel from '@/components/ui/SettingsPanel';
+import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
+import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
 import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
@@ -30,6 +37,8 @@ export default function Dashboard() {
     | 'stripe'
     | 'funnels'
     | 'content_studio'
+    | 'call_library'
+    | 'integrations'
     | 'users'
     | 'owner'
     | 'calcom'
@@ -53,6 +62,8 @@ export default function Dashboard() {
       'stripe',
       'funnels',
       'content_studio',
+      'call_library',
+      'integrations',
       'users',
       'owner',
       'calcom',
@@ -82,6 +93,11 @@ export default function Dashboard() {
       localStorage.setItem('activeTab', activeTab);
     }
   }, [activeTab]);
+
+  // Navbar sets global loading on tab change ("Switching tabs..."); clear it once the new tab is active so the overlay cannot stick.
+  useEffect(() => {
+    setGlobalLoading(false);
+  }, [activeTab, setGlobalLoading]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !perfDrawer) return;
@@ -167,7 +183,8 @@ export default function Dashboard() {
             performance: true,
             funnels: true,
             users: true,
-            calcom: true
+            calcom: true,
+            integrations: true,
           };
           if (isMounted) {
             setTabPermissions(defaultPermissions);
@@ -290,6 +307,8 @@ export default function Dashboard() {
           'stripe',
           'funnels',
           'content_studio',
+          'call_library',
+          'integrations',
           'users',
           'owner',
           'calcom',
@@ -386,7 +405,13 @@ export default function Dashboard() {
       {/* Full-width shell so left padding lines up with the fixed sidebar + Performance panel; inner main stays max-w-7xl centered in the remaining width. */}
       <div
         className={`min-w-0 w-full min-h-screen transition-[padding-left] duration-300 ease-out ${
-          perfDrawer?.isOpen ? APP_MAIN_PL_WITH_PERF_OPEN : APP_MAIN_PL_OFFSET
+          activeTab === 'call_library'
+            ? perfDrawer?.isOpen
+              ? APP_MAIN_PL_WITH_CALL_LIBRARY_AND_PERF_OPEN
+              : APP_MAIN_PL_WITH_CALL_LIBRARY
+            : perfDrawer?.isOpen
+              ? APP_MAIN_PL_WITH_PERF_OPEN
+              : APP_MAIN_PL_OFFSET
         }`}
       >
         <main className="min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 overflow-x-hidden">
@@ -443,6 +468,22 @@ export default function Dashboard() {
             <ContentStudioPanel />
           ) : (
             <RestrictedTabView tabName="content_studio" />
+          )
+        )}
+
+        {activeTab === 'call_library' && (
+          hasTabAccess('call_library') ? (
+            <CallLibraryPanel />
+          ) : (
+            <RestrictedTabView tabName="call_library" />
+          )
+        )}
+
+        {activeTab === 'integrations' && (
+          hasTabAccess('integrations') ? (
+            <IntegrationsPanel />
+          ) : (
+            <RestrictedTabView tabName="integrations" />
           )
         )}
 

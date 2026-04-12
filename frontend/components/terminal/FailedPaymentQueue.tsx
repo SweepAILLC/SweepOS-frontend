@@ -43,7 +43,7 @@ export default function FailedPaymentQueue({ onLoadComplete }: FailedPaymentQueu
         const paymentsArray = Array.isArray(response) ? response : [];
         setFailedPayments(paymentsArray.map((payment: any) => ({
           id: payment.id || payment.stripe_id,
-          client_name: payment.client_name || 'Unknown',
+          client_name: payment.client_name || payment.client_email || 'Unknown',
           client_email: payment.client_email || '',
           amount: (payment.amount_cents || 0) / 100,
           failed_at: payment.latest_attempt_at
@@ -90,7 +90,7 @@ export default function FailedPaymentQueue({ onLoadComplete }: FailedPaymentQueu
         console.log('[FailedPaymentQueue] Processing payment:', payment);
         return {
           id: payment.id || payment.stripe_id,
-          client_name: payment.client_name || 'Unknown',
+          client_name: payment.client_name || payment.client_email || 'Unknown',
           client_email: payment.client_email || '',
           amount: (payment.amount_cents || 0) / 100,
           // Use latest_attempt_at if available, otherwise fall back to created_at
@@ -245,11 +245,16 @@ Your Team
             >
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
-                  {payment.client_name}
+                  {payment.client_name || payment.client_email || 'Unknown'}
                 </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                  {payment.client_email || 'No email'}
-                </p>
+                {payment.client_email &&
+                  payment.client_name &&
+                  payment.client_name !== payment.client_email && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{payment.client_email}</p>
+                  )}
+                {!payment.client_email && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">No email</p>
+                )}
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                   Failed: {formatDate(payment.failed_at)}
                 </p>
