@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { apiClient } from '@/lib/api';
 import {
   Organization,
@@ -12,6 +12,7 @@ import { useLoading } from '@/contexts/LoadingContext';
 import {
   ResponsiveContainer,
   ComposedChart,
+  LineChart,
   Line,
   Bar,
   XAxis,
@@ -20,6 +21,14 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
+import { ShowUpVsCloseRateChart, ClientLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
+import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
+
+/** Human-readable tab name for org tab permissions (internal keys stay snake_case). */
+function tabPermissionDisplayName(tab: string): string {
+  if (tab === 'content_studio') return 'Marketing Intel';
+  return tab.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 export default function AdminPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
@@ -51,6 +60,21 @@ export default function AdminPanel() {
   const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
   const [maxUserSeatsInput, setMaxUserSeatsInput] = useState('');
   const [savingSeats, setSavingSeats] = useState(false);
+  /** Rollup from GET /integrations/calendar/platform-sales-close-rate (matches each org Calendar tab). */
+  const [platformCalendarCloseRollup, setPlatformCalendarCloseRollup] = useState<{
+    all_time: { total_sales_calls: number; closed_count: number; close_rate_pct: number };
+    last_30d: { total_sales_calls: number; closed_count: number; close_rate_pct: number };
+  } | null>(null);
+
+  const healthFinancesTrendData = useMemo(
+    () => healthTrendPeriodsWithFinancesCash(health?.health_trend_periods ?? []),
+    [health?.health_trend_periods]
+  );
+
+  const orgFinancesTrendData = useMemo(
+    () => healthTrendPeriodsWithFinancesCash(dashboardData?.monthly_health_since_onboarding ?? []),
+    [dashboardData?.monthly_health_since_onboarding]
+  );
 
   useEffect(() => {
     loadData();
@@ -73,10 +97,15 @@ export default function AdminPanel() {
         setOrganizations(orgsData);
         setPendingInvitations(Array.isArray(invsData) ? invsData : []);
       } else if (activeTab === 'health') {
-        const data = (await apiClient.getGlobalHealth({
-          refresh: opts?.refreshHealth,
-        })) as GlobalHealth;
+        setPlatformCalendarCloseRollup(null);
+        const [data, rollup] = await Promise.all([
+          apiClient.getGlobalHealth({
+            refresh: opts?.refreshHealth,
+          }) as Promise<GlobalHealth>,
+          apiClient.getPlatformCalendarSalesCloseRate().catch(() => null),
+        ]);
         setHealth(data);
+        setPlatformCalendarCloseRollup(rollup);
       } else if (activeTab === 'settings') {
         const data = await apiClient.getGlobalSettings();
         setSettings(data);
@@ -188,7 +217,6 @@ export default function AdminPanel() {
       console.error('Failed to load tab permissions:', err);
       // Set defaults if loading fails
       setOrgTabPermissions([
-        { tab_name: 'brevo', enabled: true },
         { tab_name: 'clients', enabled: true },
         { tab_name: 'stripe', enabled: true },
         { tab_name: 'funnels', enabled: true },
@@ -511,17 +539,21 @@ export default function AdminPanel() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
                 <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">
-                  Revenue from existing clients (Stripe)
+                  Combined revenue (Finances, post-onboarding)
                 </p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
                   $
-                  {(health.revenue_from_existing_clients_last_30d_usd ?? 0).toLocaleString(undefined, {
+                  {(
+                    health.combined_revenue_post_onboarding_usd ?? health.stripe_revenue_post_onboarding_usd ??
+                    0
+                  ).toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                     maximumFractionDigits: 2,
                   })}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Succeeded charges in the last 30d where the client record predates that window
+                  Same basis as the Finances tab (Stripe + Whop when reported). Falls back to Stripe-only if combined
+                  totals are not available from the API.
                 </p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
@@ -532,12 +564,25 @@ export default function AdminPanel() {
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Past Cal.com / Calendly check-ins</p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Sales close rate (last 30d)</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">
+                  Sales close rate (last 30d, Calendar definition)
+                </p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                  {health.close_rate_last_30d_pct == null ? '—' : `${health.close_rate_last_30d_pct}%`}
+                  {platformCalendarCloseRollup?.last_30d
+                    ? platformCalendarCloseRollup.last_30d.total_sales_calls > 0
+                      ? `${platformCalendarCloseRollup.last_30d.close_rate_pct}%`
+                      : '—'
+                    : health.close_rate_last_30d_pct == null
+                      ? '—'
+                      : `${health.close_rate_last_30d_pct}%`}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-                  Sales calls with a succeeded Stripe payment on the client
+                  {platformCalendarCloseRollup?.last_30d &&
+                  platformCalendarCloseRollup.last_30d.total_sales_calls > 0
+                    ? `All orgs: ${platformCalendarCloseRollup.last_30d.closed_count} / ${platformCalendarCloseRollup.last_30d.total_sales_calls} past sales calls closed (marked closed or succeeded Stripe on client)`
+                    : platformCalendarCloseRollup
+                      ? 'No past Cal.com / Calendly sales calls in the last 30 days across workspaces'
+                      : 'Rollup unavailable; showing legacy health metric if present'}
                 </p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
@@ -571,66 +616,31 @@ export default function AdminPanel() {
             </div>
           </section>
 
-          {/* Rolling 30-day trends */}
+          {/* Monthly trends since first org onboarding */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2 digitized-text">
-              Trends (six 30-day buckets, oldest to newest)
+              Monthly trends (since first org onboarding)
             </h3>
             <p className="text-xs text-gray-500 dark:text-gray-500 mb-4">
-              Show-up and close rates use synced calendar check-ins. Client series compare cumulative client records to
-              clients that are active today and were created before each period end (cohort-style).
+              Calendar months from the earliest organization&apos;s creation (up to 36 months back). Cash series use
+              Finances combined revenue (Stripe + Whop) per month when the API provides it; otherwise Stripe-only for
+              that month, scoped post-onboarding like before. Show-up and close rates use synced calendar check-ins.
+              Client series compare cumulative client records to active clients created before each month end.
             </p>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Show-up vs close rate</p>
-                <div className="h-72 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={health.health_trend_periods ?? []}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
-                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                      <YAxis
-                        domain={[0, 100]}
-                        tick={{ fontSize: 11 }}
-                        className="fill-gray-600 dark:fill-gray-400"
-                        label={{ value: '%', angle: 0, position: 'insideTopLeft', fill: 'currentColor' }}
-                      />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                        labelStyle={{ color: '#e5e7eb' }}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="show_up_rate_pct"
-                        name="Show-up %"
-                        stroke="#6366f1"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                        connectNulls
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="close_rate_pct"
-                        name="Close %"
-                        stroke="#10b981"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                        connectNulls
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+                <ShowUpVsCloseRateChart
+                  data={health.health_trend_periods ?? []}
+                  description="Synced calendar check-ins vs sales close rate (same rules as each org Calendar tab)."
+                />
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Volume & roster</p>
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
+                  Combined cash by month (Finances, post-onboarding)
+                </p>
                 <div className="h-72 w-full min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={health.health_trend_periods ?? []}>
+                    <ComposedChart data={healthFinancesTrendData}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
                       <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
                       <YAxis
@@ -656,8 +666,8 @@ export default function AdminPanel() {
                       <Legend />
                       <Bar
                         yAxisId="left"
-                        dataKey="stripe_revenue_usd"
-                        name="Stripe revenue ($)"
+                        dataKey="finances_cash_usd"
+                        name="Combined ($)"
                         fill="#f59e0b"
                         radius={[4, 4, 0, 0]}
                       />
@@ -671,6 +681,41 @@ export default function AdminPanel() {
                         dot={{ r: 3 }}
                       />
                     </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
+                <ClientLtvTrendChart data={health.health_trend_periods ?? []} />
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
+                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
+                  Combined cash trend (Finances, post-onboarding)
+                </p>
+                <div className="h-56 w-full min-w-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={healthFinancesTrendData}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          borderRadius: 8,
+                          fontSize: 12,
+                        }}
+                        labelStyle={{ color: '#e5e7eb' }}
+                      />
+                      <Legend />
+                      <Line
+                        type="monotone"
+                        dataKey="finances_cash_usd"
+                        name="Combined ($)"
+                        stroke="#f59e0b"
+                        strokeWidth={2}
+                        dot={{ r: 3 }}
+                      />
+                    </LineChart>
                   </ResponsiveContainer>
                 </div>
               </div>
@@ -720,7 +765,37 @@ export default function AdminPanel() {
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
               Revenue & billing
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="glass-card p-4 rounded-lg border border-amber-200/80 dark:border-amber-500/25 bg-amber-50/90 dark:bg-amber-950/20 mb-4">
+              <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">
+                Total processor revenue (all time)
+              </p>
+              <p className="text-3xl font-bold text-amber-900 dark:text-amber-100 tabular-nums mt-1">
+                $
+                {(health.total_processor_revenue_all_time_usd ?? 0).toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </p>
+              <p className="text-xs text-gray-600 dark:text-gray-400 mt-2 space-y-0.5">
+                <span className="block">
+                  Stripe + Treasury (combined): $
+                  {(health.cash_collected_all_time_combined_usd ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}{' '}
+                  — Stripe succeeded ${(health.total_revenue_stripe_succeeded_usd ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} + Treasury posted $
+                  {(health.treasury_posted_all_time_usd ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+                <span className="block">
+                  Manual (entered in-app): $
+                  {(health.manual_cash_all_time_usd ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </span>
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
                 <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Total revenue (Stripe, all time)</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
@@ -736,10 +811,15 @@ export default function AdminPanel() {
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">ARR ≈ ${(health.total_mrr_usd * 12).toLocaleString(undefined, { maximumFractionDigits: 0 })}</p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Revenue last 30 days (Stripe)</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Revenue last 30 days (Finances combined)</p>
                 <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
-                  ${health.last_30_days_revenue_stripe_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  $
+                  {(health.last_30_days_combined_revenue_usd ?? health.last_30_days_revenue_stripe_usd).toLocaleString(
+                    undefined,
+                    { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+                  )}
                 </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Stripe + Whop when reported; else Stripe-only</p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
                 <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Treasury posted (30d)</p>
@@ -747,6 +827,25 @@ export default function AdminPanel() {
                   ${health.treasury_posted_last_30_days_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Where Treasury is used</p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Treasury posted (all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  ${(health.treasury_posted_all_time_usd ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+              </div>
+              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 bg-white/80 dark:bg-white/5">
+                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Manual cash (all time)</p>
+                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                  ${(health.manual_cash_all_time_usd ?? 0).toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  })}
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Not via Stripe</p>
               </div>
             </div>
           </section>
@@ -929,7 +1028,7 @@ export default function AdminPanel() {
             
             <div className="p-6 space-y-6">
               {/* Summary Cards */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                 <div className="bg-white dark:glass-card dark:neon-glow p-4 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
                   <p className="text-sm text-blue-600 dark:text-blue-300 digitized-text">Total Clients</p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{dashboardData.total_clients}</p>
@@ -940,15 +1039,139 @@ export default function AdminPanel() {
                   <p className="text-xs text-purple-600 dark:text-purple-300 mt-1">{dashboardData.active_funnels} active</p>
                 </div>
                 <div className="bg-white dark:glass-card dark:neon-glow p-4 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
-                  <p className="text-sm text-green-600 dark:text-green-300 digitized-text">MRR</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">${dashboardData.total_mrr.toFixed(2)}</p>
-                  <p className="text-xs text-green-600 dark:text-green-300 mt-1">ARR: ${dashboardData.total_arr.toFixed(2)}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Stripe / Treasury (all time)</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                    $
+                    {(dashboardData.cash_collected_all_time_usd ?? 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Primary payment rail for this org</p>
                 </div>
                 <div className="bg-white dark:glass-card dark:neon-glow p-4 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
-                  <p className="text-sm text-yellow-600 dark:text-yellow-300 digitized-text">30-Day Revenue</p>
-                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">${dashboardData.last_30_days_revenue.toFixed(2)}</p>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Manual cash (all time)</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+                    $
+                    {(dashboardData.manual_cash_all_time_usd ?? 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">Entered in-app</p>
+                </div>
+                <div className="bg-white dark:glass-card dark:neon-glow p-4 rounded-lg border border-amber-200/80 dark:border-amber-500/25 shadow-sm">
+                  <p className="text-sm text-amber-800 dark:text-amber-200 digitized-text">Total processor revenue</p>
+                  <p className="text-2xl font-bold text-amber-900 dark:text-amber-100 tabular-nums">
+                    $
+                    {(dashboardData.total_processor_revenue_all_time_usd ?? 0).toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </p>
+                  <p className="text-xs text-amber-800/90 dark:text-amber-200/90 mt-1">Stripe/Treasury + manual</p>
                 </div>
               </div>
+
+              {(dashboardData.monthly_health_since_onboarding?.length ?? 0) > 0 && (
+                <div className="bg-white dark:glass-card p-6 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm space-y-6">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                      Coaching & revenue trends
+                    </h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                      Monthly cash follows the Finances tab (Stripe + Whop when the API reports combined revenue; otherwise
+                      Stripe-only for that month). Show-up and close rates use synced calendar data; LTV proxy uses the
+                      same cumulative cash ÷ roster as platform health.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">Platform onboarding</p>
+                      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        {dashboardData.organization_onboarded_at
+                          ? new Date(dashboardData.organization_onboarded_at).toLocaleDateString(undefined, {
+                              dateStyle: 'medium',
+                            })
+                          : '—'}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 digitized-text">
+                        Combined cash since onboarding (Finances)
+                      </p>
+                      <p className="text-lg font-semibold text-emerald-700 dark:text-emerald-300 tabular-nums">
+                        $
+                        {(
+                          dashboardData.finances_combined_since_onboarding_usd ??
+                          dashboardData.cash_collected_since_onboarding_usd ??
+                          0
+                        ).toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                        Stripe + Whop when reported; otherwise matches legacy Stripe/Treasury onboarding total
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4">
+                      <ShowUpVsCloseRateChart
+                        data={dashboardData.monthly_health_since_onboarding ?? []}
+                        xAxisMode="tilted"
+                        description="Per-month show-up and close rate for this organization."
+                      />
+                    </div>
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4">
+                      <ClientLtvTrendChart
+                        data={dashboardData.monthly_health_since_onboarding ?? []}
+                        xAxisMode="tilted"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4 max-w-4xl">
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
+                      Combined cash by month (since onboarding)
+                    </p>
+                    <div className="h-64 w-full min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={orgFinancesTrendData}>
+                          <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+                          <XAxis
+                            dataKey="period_label"
+                            tick={{ fontSize: 10 }}
+                            angle={-35}
+                            textAnchor="end"
+                            height={52}
+                            className="fill-gray-600 dark:fill-gray-400"
+                          />
+                          <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'rgba(17, 24, 39, 0.95)',
+                              border: '1px solid rgba(255,255,255,0.1)',
+                              borderRadius: 8,
+                              fontSize: 12,
+                            }}
+                            labelStyle={{ color: '#e5e7eb' }}
+                          />
+                          <Legend />
+                          <Bar
+                            dataKey="finances_cash_usd"
+                            name="Combined ($)"
+                            fill="#f59e0b"
+                            radius={[4, 4, 0, 0]}
+                          />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* User seats (owner-only: limit org seats) */}
               <div className="bg-white dark:glass-card p-6 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
@@ -1220,11 +1443,13 @@ export default function AdminPanel() {
                     <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">Loading permissions...</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {orgTabPermissions.map((permission) => (
-                      <div key={permission.tab_name} className="flex items-center justify-between py-3 px-4 bg-white dark:glass-panel rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
+                      <div key={permission.tab_name} className="flex items-center justify-between gap-3 py-3 px-4 bg-white dark:glass-panel rounded-lg border border-gray-200 dark:border-white/10 shadow-sm">
                         <div className="flex-1">
-                          <p className="font-medium text-gray-900 dark:text-gray-100 capitalize">{permission.tab_name}</p>
+                          <p className="font-medium text-gray-900 dark:text-gray-100">
+                            {tabPermissionDisplayName(permission.tab_name)}
+                          </p>
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             {permission.enabled 
                               ? 'Users can access this tab' 

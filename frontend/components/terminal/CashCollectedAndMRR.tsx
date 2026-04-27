@@ -258,7 +258,7 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
   };
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
+    <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
       <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4 sm:mb-6">
         Cash & MRR
       </h3>
@@ -269,12 +269,12 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       ) : (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="space-y-4 sm:space-y-6 min-w-0">
           <div>
             <h4 className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-3 sm:mb-4 digitized-text uppercase tracking-wider">
               Cash Collected
             </h4>
-            <div className="grid grid-cols-3 gap-2 sm:gap-4">
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 min-w-0">
               <div className="text-center p-3 sm:p-4 glass-panel rounded-lg min-w-0">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-1 sm:mb-2 digitized-text">Today</p>
                 <p className="text-lg sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate" title={formatCurrency(cashCollected?.today ?? 0)}>
@@ -299,16 +299,22 @@ export default function CashCollectedAndMRR({ initialSummary, initialSummarySett
             <h4 className="text-xs sm:text-sm font-medium text-gray-600 dark:text-gray-400 mb-3 sm:mb-4 digitized-text uppercase tracking-wider">
               Current MRR
             </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 min-w-0">
+              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0 overflow-hidden">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Monthly Recurring Revenue</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <p
+                  className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate"
+                  title={formatCurrency(mrrData?.currentMRR ?? 0)}
+                >
                   {formatCurrency(mrrData?.currentMRR ?? 0)}
                 </p>
               </div>
-              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0">
+              <div className="p-3 sm:p-4 glass-panel rounded-lg min-w-0 overflow-hidden">
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 digitized-text">Annual Recurring Revenue</p>
-                <p className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100">
+                <p
+                  className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate"
+                  title={formatCurrency(mrrData?.arr ?? 0)}
+                >
                   {formatCurrency(mrrData?.arr ?? 0)}
                 </p>
               </div>

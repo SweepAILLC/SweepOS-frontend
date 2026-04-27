@@ -4,16 +4,17 @@ interface RestrictedTabViewProps {
 
 export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
   const tabDisplayNames: Record<string, string> = {
-    brevo: 'Brevo',
     terminal: 'Terminal',
     clients: 'Clients',
     stripe: 'Stripe',
+    finances: 'Finances',
     funnels: 'Funnels',
     performance: 'Performance',
-    content_studio: 'Content Studio',
+    content_studio: 'Marketing Intel',
     call_library: 'Call Library',
     integrations: 'Integrations',
     users: 'Users',
+    intelligence: 'Intelligence',
   };
 
   const displayName = tabDisplayNames[tabName] || tabName;

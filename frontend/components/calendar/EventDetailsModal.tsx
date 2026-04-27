@@ -47,7 +47,9 @@ export default function EventDetailsModal({
   const [booking, setBooking] = useState<CalComBooking | null>(null);
   const [event, setEvent] = useState<CalendlyScheduledEvent | null>(null);
   const [manualCheckIn, setManualCheckIn] = useState<ManualCheckIn | null>(null);
+  const [providerDetailsLoading, setProviderDetailsLoading] = useState(false);
   const [salesUpdating, setSalesUpdating] = useState(false);
+  const [attendanceUpdating, setAttendanceUpdating] = useState(false);
   const [actionUpdating, setActionUpdating] = useState<'cancel' | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rescheduleDraft, setRescheduleDraft] = useState<{ start?: string; end?: string }>({});
@@ -81,31 +83,43 @@ export default function EventDetailsModal({
           start: data?.start_time ? toDateTimeLocalInputValue(data.start_time) : undefined,
           end: data?.end_time ? toDateTimeLocalInputValue(data.end_time) : undefined,
         });
-        // Synced check-in row does not include Cal.com / Calendly form payloads — fetch live provider details for pre-call + form responses.
+        // Do NOT block the modal on live provider fetches (those can be slow and time out).
+        // Fetch provider details in the background for extra context (forms / invitees).
         const prov = (data as { provider?: string }).provider;
+        setProviderDetailsLoading(true);
         if (prov === 'calcom') {
           const calcomUid = (data as { calcom_uid?: string | null }).calcom_uid;
           const eventIdStr = String((data as { event_id?: string }).event_id || '').trim();
           const candidates = [calcomUid, eventIdStr].filter((x): x is string => !!x && String(x).length > 0);
-          for (const uidOrId of candidates) {
+          void (async () => {
             try {
-              const full = await apiClient.getCalComBookingDetails(uidOrId);
-              setBooking(full);
-              break;
-            } catch {
-              /* try next candidate (uid vs numeric id) */
+              for (const uidOrId of candidates) {
+                try {
+                  const full = await apiClient.getCalComBookingDetails(uidOrId);
+                  setBooking(full);
+                  break;
+                } catch {
+                  /* try next candidate (uid vs numeric id) */
+                }
+              }
+            } finally {
+              setProviderDetailsLoading(false);
             }
-          }
+          })();
         } else if (prov === 'calendly') {
           const uri = String((data as { event_uri?: string | null }).event_uri || eventUri || '').trim();
-          if (uri) {
+          void (async () => {
             try {
-              const full = await apiClient.getCalendlyEventDetails(uri);
-              setEvent(full);
-            } catch {
-              /* invitee / routing forms unavailable — modal still shows check-in flags */
+              if (uri) {
+                const full = await apiClient.getCalendlyEventDetails(uri);
+                setEvent(full);
+              }
+            } finally {
+              setProviderDetailsLoading(false);
             }
-          }
+          })();
+        } else {
+          setProviderDetailsLoading(false);
         }
         return;
       }
@@ -209,6 +223,51 @@ export default function EventDetailsModal({
       console.error('Failed to update sales flags:', err);
     } finally {
       setSalesUpdating(false);
+    }
+  };
+
+  type AttendanceStatus = 'confirmed' | 'completed' | 'cancelled' | 'no_show';
+
+  const attendanceValue = (ci: ManualCheckIn | null | undefined): AttendanceStatus => {
+    if (!ci) return 'confirmed';
+    if (ci.cancelled) return 'cancelled';
+    if (ci.no_show) return 'no_show';
+    if (ci.completed) return 'completed';
+    return 'confirmed';
+  };
+
+  const resolveCheckInIdForPatch = (): string | null => {
+    if (checkInId) return checkInId;
+    const raw = manualCheckIn?.id != null ? String(manualCheckIn.id) : '';
+    const stripped = raw.replace(/^manual_/, '');
+    return stripped.length > 0 ? stripped : null;
+  };
+
+  const setAttendanceStatus = async (next: AttendanceStatus) => {
+    const cid = resolveCheckInIdForPatch();
+    if (!cid) return;
+    const payload: Parameters<typeof apiClient.updateCheckInDetails>[1] =
+      next === 'confirmed'
+        ? { completed: false, cancelled: false, no_show: false }
+        : next === 'completed'
+          ? { completed: true, cancelled: false, no_show: false }
+          : next === 'cancelled'
+            ? { completed: false, cancelled: true, no_show: false }
+            : { completed: false, cancelled: false, no_show: true };
+    setAttendanceUpdating(true);
+    try {
+      const u = await apiClient.updateCheckInDetails(cid, payload);
+      setManualCheckIn({
+        ...(u as ManualCheckIn),
+        provider: (manualCheckIn?.provider ??
+          (u as { provider?: string }).provider ??
+          provider) as ManualCheckIn['provider'],
+      });
+      onSalesUpdated?.();
+    } catch (err) {
+      console.error('Failed to update event status:', err);
+    } finally {
+      setAttendanceUpdating(false);
     }
   };
 
@@ -728,76 +787,35 @@ export default function EventDetailsModal({
                   </div>
                 </div>
 
-                {/* Synced check-in: edit attendance + sales flags (same API as health / dashboards) */}
-                {checkInId && manualCheckIn && (
+                {/* Check-in row (synced Cal.com/Calendly + manual): event outcome */}
+                {manualCheckIn && resolveCheckInIdForPatch() && (
                   <div>
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                      Record flags (manual override)
+                      Event status
                     </h4>
-                    <div className="flex flex-wrap gap-4 text-sm">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!manualCheckIn.completed}
-                          disabled={salesUpdating}
-                          onChange={async (e) => {
-                            const cid = checkInId!;
-                            setSalesUpdating(true);
-                            try {
-                              const u = await apiClient.updateCheckInDetails(cid, { completed: e.target.checked });
-                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
-                              onSalesUpdated?.();
-                            } finally {
-                              setSalesUpdating(false);
-                            }
-                          }}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span>Completed</span>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="text-sm text-gray-700 dark:text-gray-300">
+                        <span className="sr-only">Outcome</span>
+                        <select
+                          value={attendanceValue(manualCheckIn)}
+                          disabled={attendanceUpdating || salesUpdating}
+                          onChange={(e) => void setAttendanceStatus(e.target.value as AttendanceStatus)}
+                          className="mt-1 block w-full max-w-xs px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-primary-500 focus:border-primary-500"
+                        >
+                          <option value="confirmed">Confirmed / upcoming</option>
+                          <option value="completed">Completed (showed up)</option>
+                          <option value="cancelled">Cancelled</option>
+                          <option value="no_show">No-show</option>
+                        </select>
                       </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!manualCheckIn.cancelled}
-                          disabled={salesUpdating}
-                          onChange={async (e) => {
-                            const cid = checkInId!;
-                            setSalesUpdating(true);
-                            try {
-                              const u = await apiClient.updateCheckInDetails(cid, { cancelled: e.target.checked });
-                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
-                              onSalesUpdated?.();
-                            } finally {
-                              setSalesUpdating(false);
-                            }
-                          }}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span>Cancelled</span>
-                      </label>
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!manualCheckIn.no_show}
-                          disabled={salesUpdating}
-                          onChange={async (e) => {
-                            const cid = checkInId!;
-                            setSalesUpdating(true);
-                            try {
-                              const u = await apiClient.updateCheckInDetails(cid, { no_show: e.target.checked });
-                              setManualCheckIn({ ...(u as ManualCheckIn), provider: manualCheckIn.provider });
-                              onSalesUpdated?.();
-                            } finally {
-                              setSalesUpdating(false);
-                            }
-                          }}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                        <span>No-show</span>
-                      </label>
+                      {attendanceUpdating && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">Saving…</span>
+                      )}
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                      Provider webhooks/APIs update these automatically; adjust here when you need the board and metrics to match reality.
+                      {manualCheckIn.provider === 'manual'
+                        ? 'Updates the sales calendar and metrics for this manual booking.'
+                        : 'Updates the sales calendar, close-rate, and show-up metrics. Provider sync may overwrite these unless you override again.'}
                     </p>
                   </div>
                 )}

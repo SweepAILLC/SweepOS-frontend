@@ -107,6 +107,8 @@ export const CACHE_KEYS = {
   CALCOM_STATUS: 'calcom_status',
   STRIPE_FAILED_PAYMENTS: 'stripe_failed_payments',
   STRIPE_STATUS: 'stripe_status',
+  FINANCES_SUMMARY: 'finances_summary',
+  WHOP_STATUS: 'whop_status',
   USERS: 'users',
   CALENDLY_STATUS: 'calendly_status',
   ADMIN_ORGANIZATIONS: 'admin_organizations',
@@ -140,6 +142,14 @@ export function setSeenStripeDataMs(ms: number): void {
   }
 }
 
+/** Invalidate Cal.com / Calendly connection status cache (e.g. after connect, disconnect, or switching provider/org). */
+export function clearCalendarIntegrationStatusCache(): void {
+  cache.delete(CACHE_KEYS.CALCOM_STATUS);
+  cache.delete(CACHE_KEYS.CALENDLY_STATUS);
+  cache.deleteByPrefix(`${CACHE_KEYS.CALCOM_STATUS}_`);
+  cache.deleteByPrefix(`${CACHE_KEYS.CALENDLY_STATUS}_`);
+}
+
 /** Clear caches that should not persist across logout. Call on logout. Terminal Stripe data refetches on next load. */
 export function clearSessionCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
@@ -161,6 +171,7 @@ export function invalidateStripeCache(): void {
 export function invalidateStripeAndTerminalAfterWebhook(seenMs: number): void {
   cache.deleteByPrefix('stripe_');
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
   setSeenStripeDataMs(seenMs);
 }
 

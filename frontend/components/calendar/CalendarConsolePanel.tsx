@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import Cookies from 'js-cookie';
 import { apiClient, type CalendarSyncedBookingRow } from '@/lib/api';
+import { clearCalendarIntegrationStatusCache } from '@/lib/cache';
 import { 
   CalComStatus, CalComEventType,
   CalendlyStatus, CalendlyScheduledEvent, CalendlyEventType
@@ -7,9 +9,27 @@ import {
 import type { Client } from '@/types/client';
 import EventDetailsModal from './EventDetailsModal';
 import { useLoading } from '@/contexts/LoadingContext';
+import { ShowUpVsCloseRateChart } from '@/components/owner/OwnerHealthTrendCharts';
 
 type BookingsTab = 'upcoming' | 'past';
 type CalendarProvider = 'calcom' | 'calendly' | null;
+
+function orgIdFromAccessToken(): string {
+  if (typeof window === 'undefined') return 'anon';
+  const token = Cookies.get('access_token');
+  if (!token) return 'anon';
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return 'anon';
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+    const json = JSON.parse(atob(padded)) as { org_id?: string };
+    return json.org_id != null ? String(json.org_id) : 'anon';
+  } catch {
+    return 'anon';
+  }
+}
 
 interface CalendarConsolePanelProps {
   userRole?: string; // 'owner' | 'admin' | 'member'
@@ -38,7 +58,11 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   // Determine which provider is connected
   const connectedProvider: CalendarProvider = calcomStatus?.connected ? 'calcom' : 
                                                calendlyStatus?.connected ? 'calendly' : null;
-  
+  const connectedProviderRef = useRef<CalendarProvider>(connectedProvider);
+  connectedProviderRef.current = connectedProvider;
+  /** Serialize sync+fetch so opening Calendar never stacks multiple POST /check-ins/sync (blocks API / exhausts browser connections). */
+  const calendarRefreshChainRef = useRef<Promise<void>>(Promise.resolve());
+
   // Bookings: canonical rows from synced client_check_ins (after POST /clients/check-ins/sync)
   const [bookingsTab, setBookingsTab] = useState<BookingsTab>('upcoming');
   const [syncedUpcoming, setSyncedUpcoming] = useState<CalendarSyncedBookingRow[]>([]);
@@ -65,23 +89,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const [showUpRateSummary, setShowUpRateSummary] = useState<{ show_up_rate: number | null; last_month_count?: number } | null>(null);
   const [showUpRateLoading, setShowUpRateLoading] = useState(false);
 
-  // Calendar view (month navigation)
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  // Manual check-ins for the visible month (shown on calendar grid)
-  const [manualCalendarEvents, setManualCalendarEvents] = useState<Array<{
-    id: string;
-    title: string;
-    start_time: string;
-    end_time?: string | null;
-    provider: 'manual';
-    is_sales_call?: boolean;
-    sale_closed?: boolean | null;
-    completed?: boolean;
-    cancelled?: boolean;
-    no_show?: boolean;
-    client_name?: string | null;
-  }>>([]);
-  const [manualCalendarEventsLoading, setManualCalendarEventsLoading] = useState(false);
+  type MonthlyCoachingRow = {
+    period_label: string;
+    period_start: string;
+    period_end: string;
+    show_up_rate_pct: number | null;
+    close_rate_pct: number | null;
+  };
+  const [monthlyCoachingPeriods, setMonthlyCoachingPeriods] = useState<MonthlyCoachingRow[]>([]);
+  const [monthlyCoachingLoading, setMonthlyCoachingLoading] = useState(false);
 
   // Manual booking modal (same as client detail drawer: create manual check-in)
   const [showManualBookingModal, setShowManualBookingModal] = useState(false);
@@ -97,10 +113,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     status: 'scheduled' as 'scheduled' | 'completed' | 'cancelled' | 'no_show',
   });
   const [submittingManualBooking, setSubmittingManualBooking] = useState(false);
-
-  // Prevent accidental modal open when the user drags a manual event.
-  const dragInProgressRef = useRef(false);
-  const [manualUpdating, setManualUpdating] = useState(false);
 
   useEffect(() => {
     if (showManualBookingModal) {
@@ -124,99 +136,211 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     id: string | number;
     uri?: string;
   } | null>(null);
-  // Calendar grid event (no API call – show inline details modal)
-  const [selectedCalendarEvent, setSelectedCalendarEvent] = useState<{
-    id?: string;
-    title: string;
-    start: Date;
-    provider: 'calcom' | 'calendly' | 'manual';
-    is_sales_call?: boolean;
-    sale_closed?: boolean | null;
-    completed?: boolean;
-    cancelled?: boolean;
-    no_show?: boolean;
-    eventStatus: 'cancelled' | 'no_show' | 'showed_up' | 'upcoming';
-  } | null>(null);
-
-  const [selectedDayMoreEvents, setSelectedDayMoreEvents] = useState<{
-    date: Date;
-    events: Array<{
-      id: string;
-      title: string;
-      start: Date;
-      provider: 'calcom' | 'calendly' | 'manual';
-      uri?: string;
-      is_sales_call?: boolean;
-      sale_closed?: boolean | null;
-      completed?: boolean;
-      cancelled?: boolean;
-      no_show?: boolean;
-      eventStatus: 'cancelled' | 'no_show' | 'showed_up' | 'upcoming';
-      checkInId?: string;
-    }>;
-  } | null>(null);
 
   useEffect(() => {
     loadStatuses();
   }, []);
 
+  useEffect(() => {
+    setMonthlyCoachingLoading(true);
+    apiClient
+      .getCalendarMonthlyCoachingMetrics()
+      .then((d) => setMonthlyCoachingPeriods(Array.isArray(d?.periods) ? d.periods : []))
+      .catch(() => setMonthlyCoachingPeriods([]))
+      .finally(() => setMonthlyCoachingLoading(false));
+  }, []);
+
   /** Re-fetch synced bookings from the DB without triggering a provider re-sync. */
-  const refetchSyncedBookings = async () => {
-    if (!connectedProvider) return;
+  const refetchSyncedBookings = async (): Promise<boolean> => {
+    const provider = connectedProviderRef.current;
+    if (!provider) return false;
     try {
-      const data = await apiClient.getCalendarSyncedBookings({ upcoming_limit: 150, past_limit: 150 });
+      const data = await apiClient.getCalendarSyncedBookings({
+        upcoming_limit: 150,
+        past_limit: 150,
+        provider,
+      });
       setSyncedUpcoming(data.upcoming || []);
       setSyncedPast(data.past || []);
       setLastSyncedAt(data.server_time || null);
+      // Persist for instant loads on tab open / refresh.
+      if (typeof sessionStorage !== 'undefined') {
+        const org = orgIdFromAccessToken();
+        sessionStorage.setItem(
+          `calendar_synced_bookings_${provider}_${org}`,
+          JSON.stringify({
+            server_time: data.server_time || null,
+            upcoming: data.upcoming || [],
+            past: data.past || [],
+            saved_at_ms: Date.now(),
+          })
+        );
+      }
+      return true;
     } catch {
-      // silent — the full refresh will pick up any issues
+      return false;
     }
   };
 
   const refreshSyncedCalendar = async (opts?: { silent?: boolean }) => {
-    if (!connectedProvider) return;
-    if (!opts?.silent) {
-      setBookingsLoading(true);
-      setBookingsError(null);
-    }
-    try {
-      await apiClient.syncCheckIns();
-      const data = await apiClient.getCalendarSyncedBookings({ upcoming_limit: 150, past_limit: 150 });
-      setSyncedUpcoming(data.upcoming || []);
-      setSyncedPast(data.past || []);
-      setLastSyncedAt(data.server_time || null);
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { detail?: string } }; message?: string };
-      console.error('Calendar sync failed:', error);
-      if (!opts?.silent) setBookingsError(err?.response?.data?.detail || err?.message || 'Failed to sync calendar');
-    } finally {
-      if (!opts?.silent) setBookingsLoading(false);
-    }
+    const provider = connectedProviderRef.current;
+    if (!provider) return;
+
+    const task = async () => {
+      if (!opts?.silent) {
+        setBookingsLoading(true);
+        setBookingsError(null);
+      }
+      const bookingParams = {
+        upcoming_limit: 150,
+        past_limit: 150,
+        provider,
+      } as const;
+      try {
+        // Mount effect calls refetchSyncedBookings() for immediate DB rows; avoid an extra GET here
+        // while POST /check-ins/sync runs (reduces DB pool pressure on the API).
+        await apiClient.syncCheckIns();
+        // Mark last successful provider sync (used to avoid doing this every tab open).
+        try {
+          if (typeof sessionStorage !== 'undefined') {
+            const org = orgIdFromAccessToken();
+            sessionStorage.setItem(`calendar_last_sync_ms_${provider}_${org}`, String(Date.now()));
+          }
+        } catch {
+          // ignore storage errors
+        }
+        let data: Awaited<ReturnType<typeof apiClient.getCalendarSyncedBookings>>;
+        try {
+          data = await apiClient.getCalendarSyncedBookings(bookingParams);
+        } catch {
+          await new Promise((r) => setTimeout(r, 1500));
+          data = await apiClient.getCalendarSyncedBookings(bookingParams);
+        }
+        setSyncedUpcoming(data.upcoming || []);
+        setSyncedPast(data.past || []);
+        setLastSyncedAt(data.server_time || null);
+        // Persist for instant loads on tab open / refresh.
+        try {
+          if (typeof sessionStorage !== 'undefined') {
+            const org = orgIdFromAccessToken();
+            sessionStorage.setItem(
+              `calendar_synced_bookings_${provider}_${org}`,
+              JSON.stringify({
+                server_time: data.server_time || null,
+                upcoming: data.upcoming || [],
+                past: data.past || [],
+                saved_at_ms: Date.now(),
+              })
+            );
+          }
+        } catch {
+          // ignore storage errors
+        }
+      } catch (error: unknown) {
+        const err = error as { response?: { data?: { detail?: string }; status?: number }; message?: string };
+        console.error('Calendar sync failed:', error);
+        if (!opts?.silent) {
+          const recovered = await refetchSyncedBookings();
+          if (recovered) {
+            setBookingsError(null);
+          } else {
+            setBookingsError(err?.response?.data?.detail || err?.message || 'Failed to sync calendar');
+          }
+        }
+      } finally {
+        if (!opts?.silent) setBookingsLoading(false);
+      }
+    };
+
+    const next = calendarRefreshChainRef.current.then(() => task());
+    calendarRefreshChainRef.current = next.catch(() => {});
+    await next;
   };
 
   // Load data when a provider is connected: sync from provider APIs into DB, then show canonical rows
   useEffect(() => {
+    setSyncedUpcoming([]);
+    setSyncedPast([]);
+    setLastSyncedAt(null);
+    setBookingsError(null);
+
     if (connectedProvider === 'calcom') {
-      const t = setTimeout(() => void refreshSyncedCalendar(), 100);
+      // 1) Instant paint from last known DB rows (session cache)
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          const org = orgIdFromAccessToken();
+          const raw = sessionStorage.getItem(`calendar_synced_bookings_calcom_${org}`);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { server_time?: string | null; upcoming?: CalendarSyncedBookingRow[]; past?: CalendarSyncedBookingRow[] };
+            if (Array.isArray(parsed?.upcoming)) setSyncedUpcoming(parsed.upcoming);
+            if (Array.isArray(parsed?.past)) setSyncedPast(parsed.past);
+            if (typeof parsed?.server_time === 'string') setLastSyncedAt(parsed.server_time);
+          }
+        }
+      } catch {
+        // ignore cache parse errors
+      }
+      // 2) Revalidate from DB quickly
+      void refetchSyncedBookings();
+      // 3) Heavy provider sync only when stale (or user hits Refresh)
+      const t = setTimeout(() => {
+        try {
+          if (typeof sessionStorage === 'undefined') return void refreshSyncedCalendar({ silent: true });
+          const org = orgIdFromAccessToken();
+          const lastMsStr = sessionStorage.getItem(`calendar_last_sync_ms_calcom_${org}`);
+          const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
+          const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > 10 * 60 * 1000;
+          if (stale) void refreshSyncedCalendar({ silent: true });
+        } catch {
+          void refreshSyncedCalendar({ silent: true });
+        }
+      }, 250);
       loadCalcomEventTypes();
       return () => clearTimeout(t);
     }
     if (connectedProvider === 'calendly') {
-      const t = setTimeout(() => void refreshSyncedCalendar(), 100);
+      // 1) Instant paint from last known DB rows (session cache)
+      try {
+        if (typeof sessionStorage !== 'undefined') {
+          const org = orgIdFromAccessToken();
+          const raw = sessionStorage.getItem(`calendar_synced_bookings_calendly_${org}`);
+          if (raw) {
+            const parsed = JSON.parse(raw) as { server_time?: string | null; upcoming?: CalendarSyncedBookingRow[]; past?: CalendarSyncedBookingRow[] };
+            if (Array.isArray(parsed?.upcoming)) setSyncedUpcoming(parsed.upcoming);
+            if (Array.isArray(parsed?.past)) setSyncedPast(parsed.past);
+            if (typeof parsed?.server_time === 'string') setLastSyncedAt(parsed.server_time);
+          }
+        }
+      } catch {
+        // ignore cache parse errors
+      }
+      // 2) Revalidate from DB quickly
+      void refetchSyncedBookings();
+      // 3) Heavy provider sync only when stale (or user hits Refresh)
+      const t = setTimeout(() => {
+        try {
+          if (typeof sessionStorage === 'undefined') return void refreshSyncedCalendar({ silent: true });
+          const org = orgIdFromAccessToken();
+          const lastMsStr = sessionStorage.getItem(`calendar_last_sync_ms_calendly_${org}`);
+          const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
+          const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > 10 * 60 * 1000;
+          if (stale) void refreshSyncedCalendar({ silent: true });
+        } catch {
+          void refreshSyncedCalendar({ silent: true });
+        }
+      }, 250);
       loadCalendlyEventTypes();
       return () => clearTimeout(t);
     }
-    setSyncedUpcoming([]);
-    setSyncedPast([]);
-    setLastSyncedAt(null);
     if (!connectedProvider && !loading && !bookingsLoading && !eventTypesLoading) {
       setGlobalLoading(false);
     }
   }, [connectedProvider]);
 
+  // Poll DB only (no provider re-sync) — full sync is heavy and was starving Terminal + other tabs.
   useEffect(() => {
     if (!connectedProvider) return;
-    const id = setInterval(() => void refreshSyncedCalendar({ silent: true }), 45000);
+    const id = setInterval(() => void refetchSyncedBookings(), 45000);
     return () => clearInterval(id);
   }, [connectedProvider]);
 
@@ -251,74 +375,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       .finally(() => setShowUpRateLoading(false));
   }, [connectedProvider]);
 
-  // Load manual check-ins for the visible calendar month so they appear on the grid
-  useEffect(() => {
-    if (!connectedProvider) {
-      setManualCalendarEvents([]);
-      return;
-    }
-    const y = calendarMonth.getFullYear();
-    const m = calendarMonth.getMonth();
-    const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    const lastDay = new Date(y, m + 1, 0);
-    const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
-    setManualCalendarEventsLoading(true);
-    apiClient.getCalendarManualEvents(start, end)
-      .then((data: any) => setManualCalendarEvents(Array.isArray(data) ? data : []))
-      .catch(() => setManualCalendarEvents([]))
-      .finally(() => setManualCalendarEventsLoading(false));
-  }, [connectedProvider, calendarMonth]);
-
-  const refreshManualCalendarEventsForCurrentMonth = async () => {
-    if (!connectedProvider) return;
-    const y = calendarMonth.getFullYear();
-    const m = calendarMonth.getMonth();
-    const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-    const lastDay = new Date(y, m + 1, 0);
-    const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
-    setManualCalendarEventsLoading(true);
-    try {
-      const data: any = await apiClient.getCalendarManualEvents(start, end);
-      setManualCalendarEvents(Array.isArray(data) ? data : []);
-    } catch {
-      setManualCalendarEvents([]);
-    } finally {
-      setManualCalendarEventsLoading(false);
-    }
-  };
-
-  const handleDropRescheduleManualEvent = async (draggedEventId: string, targetDate: Date | null) => {
-    if (!draggedEventId || !targetDate) return;
-    if (!draggedEventId.startsWith('manual_')) return;
-
-    const original = manualCalendarEvents.find(ev => ev.id === draggedEventId);
-    if (!original) return;
-
-    // draggedEventId = manual_{uuid}
-    const checkInId = draggedEventId.replace(/^manual_/, '');
-    const originalStart = new Date(original.start_time);
-    const durationMs = original.end_time
-      ? new Date(original.end_time).getTime() - originalStart.getTime()
-      : 60 * 60 * 1000;
-
-    const newStart = new Date(targetDate);
-    newStart.setHours(originalStart.getHours(), originalStart.getMinutes(), 0, 0);
-    const newEnd = new Date(newStart.getTime() + durationMs);
-
-    try {
-      await apiClient.rescheduleCheckIn(
-        checkInId,
-        newStart.toISOString(),
-        newEnd.toISOString()
-      );
-      await refreshManualCalendarEventsForCurrentMonth();
-      window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
-    } catch (err: any) {
-      console.error('Failed to reschedule manual check-in:', err);
-      alert(err?.response?.data?.detail || err?.message || 'Failed to reschedule appointment');
-    }
-  };
-
   // Turn off global loading when all data is loaded
   useEffect(() => {
     if (!loading && !bookingsLoading && !eventTypesLoading) {
@@ -330,6 +386,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   }, [loading, bookingsLoading, eventTypesLoading, setGlobalLoading]);
 
   const loadStatuses = async () => {
+    clearCalendarIntegrationStatusCache();
     setLoading(true);
     setGlobalLoading(true, 'Loading Calendar dashboard...');
     try {
@@ -422,13 +479,34 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     } catch (error: any) {
       console.error(`Failed to connect ${selectedProvider}:`, error);
       let errorMessage = `Failed to connect ${selectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'}. Please check your configuration.`;
-      
-      if (error?.response?.data?.detail) {
-        errorMessage = error.response.data.detail;
+
+      const detail = error?.response?.data?.detail;
+      if (detail != null && typeof detail !== 'string') {
+        try {
+          errorMessage = JSON.stringify(detail);
+        } catch {
+          errorMessage = String(detail);
+        }
+      } else if (typeof detail === 'string') {
+        errorMessage = detail;
       } else if (error?.message) {
         errorMessage = error.message;
       }
-      
+
+      // Ghost token row can make status look "not connected" while connect-* still blocks the other provider.
+      if (
+        typeof detail === 'string' &&
+        ((selectedProvider === 'calendly' && detail.includes('Cal.com is already connected')) ||
+          (selectedProvider === 'calcom' && detail.includes('Calendly is already connected')))
+      ) {
+        clearCalendarIntegrationStatusCache();
+        await loadStatuses();
+        errorMessage =
+          `${detail}\n\n` +
+          'Connection status was just refreshed. If a provider still appears connected above, disconnect it first, then try again. ' +
+          'If you now see Not connected, submit your API key again.';
+      }
+
       alert(`${selectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} Connection Error:\n\n${errorMessage}`);
     } finally {
       setConnecting(false);
@@ -527,126 +605,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const currentEventTypes = connectedProvider === 'calcom' ? calcomEventTypes : calendlyEventTypes;
 
   // Count upcoming vs past from full list for "all calendar data" summary
-  const now = new Date();
   const upcomingCount = syncedUpcoming.length;
   const pastCount = syncedPast.length;
-
-  // Normalized list of all events for calendar (current + past) with status for color coding
-  type EventDisplayStatus = 'cancelled' | 'no_show' | 'showed_up' | 'upcoming';
-  type CalendarEventItem = {
-    id: string;
-    title: string;
-    start: Date;
-    end?: Date | null;
-    provider: 'calcom' | 'calendly' | 'manual';
-    uri?: string;
-    is_sales_call?: boolean;
-    sale_closed?: boolean | null;
-    completed?: boolean;
-    cancelled?: boolean;
-    no_show?: boolean;
-    eventStatus: EventDisplayStatus;
-    /** Present for Cal.com / Calendly when using synced check-ins */
-    checkInId?: string;
-  };
-  const providerEvents: CalendarEventItem[] =
-    connectedProvider === 'calcom' || connectedProvider === 'calendly'
-      ? [...syncedUpcoming, ...syncedPast].map((row) => {
-          const start = new Date(row.start_time || 0);
-          let eventStatus: EventDisplayStatus = 'upcoming';
-          if (row.cancelled) eventStatus = 'cancelled';
-          else if (row.no_show) eventStatus = 'no_show';
-          else if (start < now) eventStatus = 'showed_up';
-          else eventStatus = 'upcoming';
-          return {
-            id: `${row.provider}:${row.id}`,
-            title: row.title || row.client_name || 'Booking',
-            start,
-            end: row.end_time ? new Date(row.end_time) : null,
-            provider: row.provider,
-            uri: row.event_uri || undefined,
-            is_sales_call: row.is_sales_call,
-            sale_closed: row.sale_closed,
-            completed: row.completed,
-            cancelled: row.cancelled,
-            no_show: row.no_show,
-            eventStatus,
-            checkInId: row.id,
-          };
-        })
-      : [];
-  const manualEventsAsItems: CalendarEventItem[] = manualCalendarEvents.map(ev => {
-    const start = new Date(ev.start_time);
-    let eventStatus: EventDisplayStatus = 'upcoming';
-    if (ev.cancelled) eventStatus = 'cancelled';
-    else if (ev.no_show) eventStatus = 'no_show';
-    else if (ev.completed) eventStatus = 'showed_up';
-    else eventStatus = 'upcoming';
-    return {
-      id: ev.id,
-      title: ev.client_name ? `${ev.title} (${ev.client_name})` : ev.title,
-      start,
-      end: ev.end_time ? new Date(ev.end_time) : null,
-      provider: 'manual' as const,
-      is_sales_call: ev.is_sales_call,
-      sale_closed: ev.sale_closed,
-      completed: ev.completed,
-      cancelled: ev.cancelled,
-      no_show: ev.no_show,
-      eventStatus,
-    };
-  });
-  const allCalendarEvents: CalendarEventItem[] = [...providerEvents, ...manualEventsAsItems].sort(
-    (a, b) => a.start.getTime() - b.start.getTime()
-  );
-
-  const getDaysInMonth = (date: Date) => {
-    const year = date.getFullYear();
-    const month = date.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
-    const days: (Date | null)[] = [];
-    for (let i = 0; i < startingDayOfWeek; i++) days.push(null);
-    for (let day = 1; day <= daysInMonth; day++) days.push(new Date(year, month, day));
-    return days;
-  };
-
-  const getEventsForDate = (date: Date | null): CalendarEventItem[] => {
-    if (!date) return [];
-    return allCalendarEvents.filter(ev => (
-      ev.start.getFullYear() === date.getFullYear() &&
-      ev.start.getMonth() === date.getMonth() &&
-      ev.start.getDate() === date.getDate()
-    ));
-  };
-
-  const getEventButtonClasses = (ev: CalendarEventItem): string => {
-    const base = 'block w-full text-left truncate px-1.5 py-0.5 rounded text-xs border-l-2 ';
-    const salesBorder = ev.is_sales_call ? 'border-l-indigo-500 ' : 'border-l-slate-400 dark:border-l-slate-500 ';
-    switch (ev.eventStatus) {
-      case 'cancelled':
-        return base + salesBorder + 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200 hover:bg-red-200 dark:hover:bg-red-900/60';
-      case 'no_show':
-        return base + salesBorder + 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200 hover:bg-amber-200 dark:hover:bg-amber-900/60';
-      case 'showed_up':
-        return base + salesBorder + 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200 hover:bg-green-200 dark:hover:bg-green-900/60';
-      case 'upcoming':
-      default:
-        return base + salesBorder + (ev.is_sales_call
-          ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200 hover:bg-indigo-200 dark:hover:bg-indigo-900/60'
-          : 'bg-slate-100 text-slate-700 dark:bg-slate-700/40 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700/60');
-    }
-  };
-
-  const isTodayDate = (date: Date | null) => {
-    if (!date) return false;
-    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
-  };
-
-  const calendarMonthName = calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-  const calendarDays = getDaysInMonth(calendarMonth);
 
   if (loading) {
     return (
@@ -847,6 +807,34 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         )}
       </div>
 
+      {/* Monthly coaching trends — visible to all roles on Calendar tab */}
+      <div className="glass-card p-6">
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">Calendar trends</h2>
+        <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 p-4">
+          <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
+            Show-up vs close rate by month
+          </p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+            Past Cal.com / Calendly check-ins in your workspace. Close rate uses the same definition as elsewhere (sales
+            calls where the client has a succeeded Stripe payment).
+          </p>
+          {monthlyCoachingLoading ? (
+            <p className="text-sm text-gray-500 py-8 text-center">Loading trends…</p>
+          ) : monthlyCoachingPeriods.length === 0 ? (
+            <p className="text-sm text-gray-500 py-6 text-center">
+              No monthly data yet — connect a calendar and sync check-ins to build history.
+            </p>
+          ) : (
+            <ShowUpVsCloseRateChart
+              data={monthlyCoachingPeriods}
+              xAxisMode="tilted"
+              title=""
+              description=""
+            />
+          )}
+        </div>
+      </div>
+
       {/* All calendar data summary */}
       {connectedProvider && (
         <div className="glass-card p-6">
@@ -893,20 +881,32 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       {/* Bookings/Events Section */}
       {connectedProvider && (
         <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {connectedProvider === 'calcom' ? 'Bookings' : 'Scheduled Events'}
             </h2>
-            <button
-              onClick={() => {
-                void refreshSyncedCalendar();
-                apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
-              }}
-              disabled={bookingsLoading}
-              className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
-            >
-              {bookingsLoading ? 'Syncing…' : 'Refresh'}
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setManualBookingPrefillDate(null);
+                  setShowManualBookingModal(true);
+                }}
+                className="px-3 py-1.5 text-sm font-medium rounded-md glass-button neon-glow"
+              >
+                Add manual booking
+              </button>
+              <button
+                onClick={() => {
+                  void refreshSyncedCalendar();
+                  apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
+                }}
+                disabled={bookingsLoading}
+                className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
+              >
+                {bookingsLoading ? 'Syncing…' : 'Refresh'}
+              </button>
+            </div>
           </div>
           {lastSyncedAt && (
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
@@ -1083,19 +1083,16 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
                             {loc ? (
                               isUrl(loc) ? (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    void copyToClipboard(loc, `loc-${row.id}`, 'location link');
-                                  }}
-                                  className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors ${
-                                    copiedId === `loc-${row.id}` ? 'text-green-500 dark:text-green-400' : ''
-                                  }`}
-                                  title="Click to copy link"
+                                <a
+                                  href={loc}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors"
+                                  title="Open meeting link in a new tab"
                                 >
-                                  {copiedId === `loc-${row.id}` ? '✓ Copied!' : 'Link'}
-                                </button>
+                                  Link
+                                </a>
                               ) : (
                                 loc
                               )
@@ -1125,144 +1122,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               )}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Full calendar: all current and past events */}
-      {connectedProvider && (
-        <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Calendar</h2>
-            <button
-              type="button"
-              onClick={() => { setManualBookingPrefillDate(null); setShowManualBookingModal(true); }}
-              className="px-3 py-1.5 text-sm font-medium rounded-md glass-button neon-glow"
-            >
-              Add manual booking
-            </button>
-          </div>
-          <div className="flex items-center justify-between mb-4">
-            <button
-              type="button"
-              onClick={() => setCalendarMonth(d => new Date(d.getFullYear(), d.getMonth() - 1))}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-            </button>
-            <span className="text-lg font-medium text-gray-900 dark:text-gray-100">{calendarMonthName}</span>
-            <button
-              type="button"
-              onClick={() => setCalendarMonth(d => new Date(d.getFullYear(), d.getMonth() + 1))}
-              className="p-2 hover:bg-white/10 rounded-lg transition-colors text-gray-600 dark:text-gray-400"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-            </button>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs text-gray-600 dark:text-gray-400">
-            <span className="font-medium text-gray-700 dark:text-gray-300">Type:</span>
-            <span className="border-l-2 border-l-indigo-500 pl-1.5">Sales call</span>
-            <span className="border-l-2 border-l-slate-400 dark:border-l-slate-500 pl-1.5">Check-in</span>
-            <span className="font-medium text-gray-700 dark:text-gray-300 ml-2">Outcome:</span>
-            <span className="bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-200 px-1.5 py-0.5 rounded">Cancelled</span>
-            <span className="bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 px-1.5 py-0.5 rounded">No-show</span>
-            <span className="bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-200 px-1.5 py-0.5 rounded">Showed up</span>
-            <span className="bg-slate-100 dark:bg-slate-700/40 text-slate-700 dark:text-slate-200 px-1.5 py-0.5 rounded">Upcoming</span>
-          </div>
-          <div className="grid grid-cols-7 gap-1">
-            {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-              <div key={day} className="text-center text-xs font-medium text-gray-500 dark:text-gray-400 py-2">{day}</div>
-            ))}
-            {calendarDays.map((date, idx) => {
-              const dayEvents = getEventsForDate(date);
-              const isToday = isTodayDate(date);
-              const isEmpty = date && dayEvents.length === 0;
-              return (
-                <div
-                  key={idx}
-                  onClick={isEmpty ? () => { setManualBookingPrefillDate(date); setShowManualBookingModal(true); } : undefined}
-                  onDragOver={(e) => {
-                    // Allow dropping for manual reschedules.
-                    e.preventDefault();
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const draggedId = e.dataTransfer.getData('text/plain');
-                    handleDropRescheduleManualEvent(draggedId, date);
-                  }}
-                  className={`min-h-[80px] p-1.5 rounded-lg border text-sm ${
-                    date
-                      ? isToday
-                        ? 'bg-primary-500/20 border-primary-500/50 dark:bg-primary-400/20'
-                        : 'bg-gray-50/50 dark:bg-gray-800/30 border-gray-200 dark:border-gray-700'
-                      : 'border-transparent'
-                  } ${isEmpty ? 'cursor-pointer hover:ring-2 hover:ring-primary-400 dark:hover:ring-primary-500' : ''}`}
-                >
-                  {date && (
-                    <>
-                      <div className="text-gray-600 dark:text-gray-400 mb-1 flex items-center justify-between">
-                        <span>{date.getDate()}</span>
-                        {isEmpty && <span className="text-[10px] text-gray-400 dark:text-gray-500">+ add</span>}
-                      </div>
-                      <div className="space-y-1">
-                        {dayEvents.slice(0, 3).map(ev => (
-                          <button
-                            key={ev.id}
-                            type="button"
-                            draggable={ev.provider === 'manual'}
-                            onDragStart={(e) => {
-                              if (ev.provider !== 'manual') return;
-                              dragInProgressRef.current = true;
-                              e.dataTransfer.setData('text/plain', ev.id);
-                              e.dataTransfer.effectAllowed = 'move';
-                            }}
-                            onDragEnd={() => {
-                              dragInProgressRef.current = false;
-                            }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (dragInProgressRef.current) return;
-                              setSelectedCalendarEvent(null);
-                              if (ev.provider === 'manual') {
-                                setSelectedEvent({ provider: 'manual', id: ev.id });
-                              } else if (ev.checkInId) {
-                                setSelectedEvent({
-                                  checkInId: ev.checkInId,
-                                  provider: ev.provider,
-                                  id: ev.id,
-                                  uri: ev.uri,
-                                });
-                              } else {
-                                setSelectedEvent({ provider: ev.provider, id: ev.id, uri: ev.uri });
-                              }
-                            }}
-                            className={getEventButtonClasses(ev) + (ev.provider === 'manual' ? ' cursor-grab' : '')}
-                            title={`${ev.title} — ${ev.is_sales_call ? 'Sales call' : 'Check-in'} · ${ev.eventStatus === 'cancelled' ? 'Cancelled' : ev.eventStatus === 'no_show' ? 'No-show' : ev.eventStatus === 'showed_up' ? 'Showed up' : 'Upcoming'}`}
-                          >
-                            {ev.start.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })} {ev.title}
-                          </button>
-                        ))}
-                        {dayEvents.length > 3 && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!date) return;
-                              setSelectedDayMoreEvents({ date, events: dayEvents });
-                            }}
-                            className="text-xs text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-                            title="Click to view all events for this day"
-                          >
-                            +{dayEvents.length - 3} more
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              );
-            })}
-          </div>
         </div>
       )}
 
@@ -1315,12 +1174,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                   setShowManualBookingModal(false);
                   setManualBookingForm({ clientId: '', title: 'Manual Check-In', date: '', time: '12:00', duration: 60, status: 'scheduled' });
                   apiClient.getCalendarUpcomingSummary().then((data: any) => setShowUpRateSummary({ show_up_rate: data?.show_up_rate ?? null, last_month_count: data?.last_month_count })).catch(() => {});
-                  const y = calendarMonth.getFullYear();
-                  const m = calendarMonth.getMonth();
-                  const start = `${y}-${String(m + 1).padStart(2, '0')}-01`;
-                  const lastDay = new Date(y, m + 1, 0);
-                  const end = `${y}-${String(m + 1).padStart(2, '0')}-${String(lastDay.getDate()).padStart(2, '0')}`;
-                  apiClient.getCalendarManualEvents(start, end).then((data: any) => setManualCalendarEvents(Array.isArray(data) ? data : [])).catch(() => {});
+                  void refetchSyncedBookings();
+                  window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
                 } catch (err: any) {
                   console.error(err);
                   alert(err?.response?.data?.detail || err?.message || 'Failed to create manual booking.');
@@ -1582,345 +1437,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         </div>
       )}
 
-      {/* Day 'more' events modal (grid) */}
-      {selectedDayMoreEvents && (
-        <div className="fixed inset-0 z-[240] flex items-center justify-center p-4">
-          <div
-            className="absolute inset-0 bg-black/50"
-            onClick={() => setSelectedDayMoreEvents(null)}
-            aria-hidden
-          />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-lg w-full p-6 border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                Events on{" "}
-                {selectedDayMoreEvents.date.toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setSelectedDayMoreEvents(null)}
-                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              {selectedDayMoreEvents.events
-                .slice()
-                .sort((a, b) => a.start.getTime() - b.start.getTime())
-                .map((ev) => (
-                  <button
-                    key={ev.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedDayMoreEvents(null);
-                      setSelectedCalendarEvent(null);
-                      if (ev.provider === 'manual') {
-                        setSelectedEvent({ provider: 'manual', id: ev.id });
-                      } else if (ev.checkInId) {
-                        setSelectedEvent({
-                          checkInId: ev.checkInId,
-                          provider: ev.provider,
-                          id: ev.id,
-                          uri: ev.uri,
-                        });
-                      } else {
-                        setSelectedEvent({ provider: ev.provider, id: ev.id, uri: ev.uri });
-                      }
-                    }}
-                    className={getEventButtonClasses(ev)}
-                    title={ev.title}
-                  >
-                    {ev.start.toLocaleTimeString('en-US', {
-                      hour: 'numeric',
-                      minute: '2-digit',
-                      hour12: true,
-                    })}{" "}
-                    {ev.title}
-                  </button>
-                ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Calendar event details modal (from grid – no API, avoids session errors) */}
-      {selectedCalendarEvent && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setSelectedCalendarEvent(null)} aria-hidden />
-          <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Event details</h3>
-              <button
-                type="button"
-                onClick={() => setSelectedCalendarEvent(null)}
-                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
-                aria-label="Close"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <dl className="space-y-3 text-sm">
-              <div>
-                <dt className="text-gray-500 dark:text-gray-400">Title</dt>
-                <dd className="font-medium text-gray-900 dark:text-gray-100">{selectedCalendarEvent.title}</dd>
-              </div>
-              <div>
-                <dt className="text-gray-500 dark:text-gray-400">Date & time</dt>
-                <dd className="text-gray-900 dark:text-gray-100">
-                  {selectedCalendarEvent.start.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-gray-500 dark:text-gray-400">Call type</dt>
-                <dd className="text-gray-900 dark:text-gray-100">{selectedCalendarEvent.is_sales_call ? 'Sales call' : 'Check-in'}</dd>
-              </div>
-              {selectedCalendarEvent.is_sales_call && (
-                <div>
-                  <dt className="text-gray-500 dark:text-gray-400">Sale closed</dt>
-                  <dd className="text-gray-900 dark:text-gray-100">
-                    {selectedCalendarEvent.sale_closed === true ? 'Yes' : selectedCalendarEvent.sale_closed === false ? 'No' : '—'}
-                  </dd>
-                </div>
-              )}
-              <div>
-                <dt className="text-gray-500 dark:text-gray-400">Outcome</dt>
-                <dd className="text-gray-900 dark:text-gray-100">
-                  {selectedCalendarEvent.eventStatus === 'cancelled' ? 'Cancelled' : selectedCalendarEvent.eventStatus === 'no_show' ? 'No-show' : selectedCalendarEvent.eventStatus === 'showed_up' ? 'Showed up' : 'Upcoming'}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-gray-500 dark:text-gray-400">Provider</dt>
-                <dd className="text-gray-900 dark:text-gray-100 capitalize">{selectedCalendarEvent.provider}</dd>
-              </div>
-            </dl>
-
-            {/* Manual event editor */}
-            {selectedCalendarEvent.provider === 'manual' && (
-              <div className="mt-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Status</label>
-                  <select
-                    disabled={manualUpdating}
-                    value={
-                      selectedCalendarEvent.cancelled
-                        ? 'cancelled'
-                        : selectedCalendarEvent.no_show
-                        ? 'no_show'
-                        : selectedCalendarEvent.completed
-                        ? 'completed'
-                        : 'scheduled'
-                    }
-                    onChange={async (e) => {
-                      if (!selectedCalendarEvent.id) return;
-                      const checkInId = selectedCalendarEvent.id.replace(/^manual_/, '');
-                      const v = e.target.value as 'scheduled' | 'completed' | 'cancelled' | 'no_show';
-
-                      const updates: any = {
-                        completed: v === 'completed',
-                        cancelled: v === 'cancelled',
-                        no_show: v === 'no_show',
-                      };
-
-                      setManualUpdating(true);
-                      try {
-                        await apiClient.updateCheckInDetails(checkInId, updates);
-                        await refreshManualCalendarEventsForCurrentMonth();
-
-                        const eventStatus: typeof selectedCalendarEvent.eventStatus =
-                          v === 'cancelled'
-                            ? 'cancelled'
-                            : v === 'no_show'
-                            ? 'no_show'
-                            : v === 'completed'
-                            ? 'showed_up'
-                            : 'upcoming';
-
-                        setSelectedCalendarEvent((prev) =>
-                          prev
-                            ? {
-                                ...prev,
-                                completed: updates.completed,
-                                cancelled: updates.cancelled,
-                                no_show: updates.no_show,
-                                eventStatus,
-                              }
-                            : prev
-                        );
-
-                        apiClient
-                          .getCalendarSalesCloseRate()
-                          .then(setCloseRateData)
-                          .catch(() => setCloseRateData(null));
-
-                        setShowUpRateLoading(true);
-                        apiClient
-                          .getCalendarUpcomingSummary()
-                          .then((data: any) => {
-                            setShowUpRateSummary({
-                              show_up_rate: data?.show_up_rate ?? null,
-                              last_month_count: data?.last_month_count,
-                            });
-                          })
-                          .catch(() => setShowUpRateSummary(null))
-                          .finally(() => setShowUpRateLoading(false));
-
-                        window.dispatchEvent(new CustomEvent('calendarSalesFlagsUpdated'));
-                        window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
-                      } catch (err: any) {
-                        console.error('Failed to update manual check-in:', err);
-                        alert(err?.response?.data?.detail || err?.message || 'Failed to update appointment');
-                      } finally {
-                        setManualUpdating(false);
-                      }
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500"
-                  >
-                    <option value="scheduled">Scheduled</option>
-                    <option value="completed">Completed</option>
-                    <option value="cancelled">Cancelled</option>
-                    <option value="no_show">No-show</option>
-                  </select>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      disabled={manualUpdating}
-                      checked={!!selectedCalendarEvent.is_sales_call}
-                      onChange={async (e) => {
-                        if (!selectedCalendarEvent.id) return;
-                        const checkInId = selectedCalendarEvent.id.replace(/^manual_/, '');
-                        const isSalesCall = e.target.checked;
-                        const newSaleClosed = isSalesCall ? (selectedCalendarEvent.sale_closed ?? false) : null;
-
-                        setManualUpdating(true);
-                        try {
-                          await apiClient.updateCheckInDetails(checkInId, { is_sales_call: isSalesCall, sale_closed: newSaleClosed });
-                          await refreshManualCalendarEventsForCurrentMonth();
-
-                          setSelectedCalendarEvent((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  is_sales_call: isSalesCall,
-                                  sale_closed: newSaleClosed,
-                                }
-                              : prev
-                          );
-
-                          apiClient
-                            .getCalendarSalesCloseRate()
-                            .then(setCloseRateData)
-                            .catch(() => setCloseRateData(null));
-
-                          setShowUpRateLoading(true);
-                          apiClient
-                            .getCalendarUpcomingSummary()
-                            .then((data: any) => {
-                              setShowUpRateSummary({
-                                show_up_rate: data?.show_up_rate ?? null,
-                                last_month_count: data?.last_month_count,
-                              });
-                            })
-                            .catch(() => setShowUpRateSummary(null))
-                            .finally(() => setShowUpRateLoading(false));
-
-                          window.dispatchEvent(new CustomEvent('calendarSalesFlagsUpdated'));
-                          window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
-                        } catch (err: any) {
-                          console.error('Failed to update manual sales flags:', err);
-                          alert(err?.response?.data?.detail || err?.message || 'Failed to update sales flags');
-                        } finally {
-                          setManualUpdating(false);
-                        }
-                      }}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Mark as sales call</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      disabled={manualUpdating || !selectedCalendarEvent.is_sales_call}
-                      checked={selectedCalendarEvent.sale_closed === true}
-                      onChange={async (e) => {
-                        if (!selectedCalendarEvent.id) return;
-                        const checkInId = selectedCalendarEvent.id.replace(/^manual_/, '');
-                        const saleClosed = e.target.checked;
-
-                        setManualUpdating(true);
-                        try {
-                          await apiClient.updateCheckInDetails(checkInId, { sale_closed: saleClosed });
-                          await refreshManualCalendarEventsForCurrentMonth();
-
-                          setSelectedCalendarEvent((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  sale_closed: saleClosed,
-                                }
-                              : prev
-                          );
-
-                          apiClient
-                            .getCalendarSalesCloseRate()
-                            .then(setCloseRateData)
-                            .catch(() => setCloseRateData(null));
-
-                          setShowUpRateLoading(true);
-                          apiClient
-                            .getCalendarUpcomingSummary()
-                            .then((data: any) => {
-                              setShowUpRateSummary({
-                                show_up_rate: data?.show_up_rate ?? null,
-                                last_month_count: data?.last_month_count,
-                              });
-                            })
-                            .catch(() => setShowUpRateSummary(null))
-                            .finally(() => setShowUpRateLoading(false));
-
-                          window.dispatchEvent(new CustomEvent('calendarSalesFlagsUpdated'));
-                          window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
-                        } catch (err: any) {
-                          console.error('Failed to update manual sale closed flag:', err);
-                          alert(err?.response?.data?.detail || err?.message || 'Failed to update sale closed flag');
-                        } finally {
-                          setManualUpdating(false);
-                        }
-                      }}
-                      className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                    />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">Sale closed</span>
-                  </label>
-                </div>
-
-                {manualUpdating && (
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Updating…</div>
-                )}
-              </div>
-            )}
-
-            <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">
-              {selectedCalendarEvent.provider === 'manual'
-                ? 'Drag to reschedule manual appointments. Use the controls above to edit status and sales flags.'
-                : 'For full details and to mark as sales call, open the event from the bookings table above.'}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Event Details Modal (from bookings table only) */}
       {selectedEvent && (
         <EventDetailsModal
@@ -1934,7 +1450,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
             // Re-fetch DB rows without a provider re-sync so manual edits
             // made in the modal are reflected immediately.
             void refetchSyncedBookings();
-            void refreshManualCalendarEventsForCurrentMonth();
 
             apiClient
               .getCalendarSalesCloseRate()

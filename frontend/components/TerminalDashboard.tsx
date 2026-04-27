@@ -131,14 +131,16 @@ export default function TerminalDashboard() {
   const handleComponentLoaded = (_componentName: string) => {};
 
   return (
-    <div className="space-y-4 sm:space-y-6 min-w-0">
-      <div className="flex items-center justify-between">
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Terminal</h2>
+    <div className="space-y-4 sm:space-y-6 min-w-0 max-w-full overflow-x-hidden">
+      <div className="flex items-center justify-between gap-2 min-w-0">
+        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate min-w-0">
+          Terminal
+        </h2>
       </div>
 
       {/* Top Metrics Row */}
       <details open className="group">
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 py-1">
+        <summary className="cursor-pointer select-none list-none flex items-center gap-2 py-1 min-w-0">
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-blue-200 bg-blue-100 text-blue-700 shadow-sm hover:bg-blue-200 dark:border-blue-400/35 dark:bg-blue-500/20 dark:text-blue-200 dark:shadow-none dark:hover:bg-blue-500/30 transition-colors">
             <svg
               className="w-4 h-4 transition-transform group-open:rotate-180"
@@ -157,7 +159,7 @@ export default function TerminalDashboard() {
             Top Metrics
           </span>
         </summary>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6 min-w-0">
           {/* Calendar Notifications (includes sales close rate in the small stat row) */}
           <NotificationsCard onLoadComplete={() => handleComponentLoaded('notifications')} />
 
@@ -172,7 +174,7 @@ export default function TerminalDashboard() {
 
       {/* Failed payments + leads (one collapsible, side by side on large screens) */}
       <details open className="group">
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 py-1">
+        <summary className="cursor-pointer select-none list-none flex items-center gap-2 py-1 min-w-0">
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-blue-200 bg-blue-100 text-blue-700 shadow-sm hover:bg-blue-200 dark:border-blue-400/35 dark:bg-blue-500/20 dark:text-blue-200 dark:shadow-none dark:hover:bg-blue-500/30 transition-colors">
             <svg
               className="w-4 h-4 transition-transform group-open:rotate-180"

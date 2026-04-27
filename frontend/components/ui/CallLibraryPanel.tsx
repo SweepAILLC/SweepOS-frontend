@@ -17,6 +17,19 @@ const shimmerStyle = `
 }
 `;
 
+function isDirectVideoUrl(url: string): boolean {
+  const u = url.toLowerCase();
+  // Basic heuristic: only render <video> when we likely have a direct media file URL.
+  return (
+    u.endsWith('.mp4') ||
+    u.endsWith('.webm') ||
+    u.endsWith('.ogg') ||
+    u.includes('.mp4?') ||
+    u.includes('.webm?') ||
+    u.includes('.ogg?')
+  );
+}
+
 function formatCtx(ctx: Record<string, unknown> | undefined): string {
   if (!ctx || typeof ctx !== 'object') return '';
   const salesperson = String(ctx.salesperson || 'Salesperson');
@@ -481,7 +494,26 @@ export default function CallLibraryPanel() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {selectedItem.recording_url ? (
+                      {selectedItem.share_url ? (
+                        <a
+                          href={selectedItem.share_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                        >
+                          Open share link
+                        </a>
+                      ) : null}
+                      {selectedItem.video_url ? (
+                        <a
+                          href={selectedItem.video_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                        >
+                          Open video
+                        </a>
+                      ) : selectedItem.recording_url ? (
                         <a
                           href={selectedItem.recording_url}
                           target="_blank"
@@ -505,6 +537,49 @@ export default function CallLibraryPanel() {
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
+                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
+                        <section>
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
+                            <div className="flex items-center gap-2">
+                              {selectedItem.share_url ? (
+                                <a
+                                  href={selectedItem.share_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open share link
+                                </a>
+                              ) : null}
+                              {selectedItem.video_url ? (
+                                <a
+                                  href={selectedItem.video_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open video
+                                </a>
+                              ) : selectedItem.recording_url ? (
+                                <a
+                                  href={selectedItem.recording_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open recording
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                            Use these links to view the recording (some providers block embedding inside other apps).
+                          </p>
+                        </section>
+                      ) : null}
+
                       <section>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Call context</h4>
                         <p className="leading-relaxed">

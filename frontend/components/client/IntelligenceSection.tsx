@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import type { Client } from '@/types/client';
-import type { ClientCallInsightsResponse, CallInsightsRollup } from '@/types/callInsights';
+import type { ClientCallInsightsResponse, CallInsightsRollup, LeadPipelineSnapshot } from '@/types/callInsights';
 import { apiClient } from '@/lib/api';
 import {
   buildClipQueueView,
@@ -20,10 +21,49 @@ const TAG_STYLES: Record<string, string> = {
   referral: 'bg-sky-500/15 text-sky-800 dark:text-sky-200 border-sky-500/30',
   conversion: 'bg-amber-500/15 text-amber-800 dark:text-amber-200 border-amber-500/30',
   win_back: 'bg-rose-500/15 text-rose-800 dark:text-rose-200 border-rose-500/30',
+  revive: 'bg-rose-600/15 text-rose-900 dark:text-rose-100 border-rose-600/35',
+  deal_follow_up: 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-200 border-indigo-500/30',
 };
 
 function tagClass(tag: string): string {
   return TAG_STYLES[tag] || 'bg-gray-500/15 text-gray-700 dark:text-gray-300 border-gray-500/30';
+}
+
+/** Dispatched after manual re-analyze so Kanban chips can refresh without waiting for the 15s poll. */
+export const CALL_INSIGHTS_REANALYZED_EVENT = 'sweep:call-insights-reanalyzed';
+
+/** Dispatched after Kanban merge so the drawer reloads combined call insights + checklist (no new LLM on server). */
+export const CLIENT_MERGED_EVENT = 'sweep:client-merged';
+
+function refreshCallInsightNoticePayload(
+  status: string,
+  detail: Record<string, unknown> | undefined | null
+): { text: string; tone: 'ok' | 'warn' } {
+  const text = refreshCallInsightNoticeText(status, detail);
+  const tone = status === 'ok' ? 'ok' : 'warn';
+  return { text, tone };
+}
+
+function refreshCallInsightNoticeText(status: string, detail: Record<string, unknown> | undefined | null): string {
+  const reason = typeof detail?.reason === 'string' ? detail.reason : '';
+  switch (status) {
+    case 'ok':
+      return 'Latest call re-analyzed. ROI signals and checklist updated.';
+    case 'skipped':
+      if (reason === 'no_fathom_recording') {
+        return 'No Fathom recording for this client yet — match invitee email and sync under Integrations.';
+      }
+      if (reason === 'thin_transcript') return callInsightFailureHint('thin_transcript');
+      if (reason === 'no_health') return callInsightFailureHint('no_health');
+      if (reason === 'sentiment_not_complete') return 'Call sentiment not ready yet — try again shortly.';
+      if (reason === 'same_hash') return 'No change in call inputs since last run — nothing to update.';
+      return reason ? `Skipped: ${reason.replace(/_/g, ' ')}.` : 'Re-analyze skipped.';
+    case 'failed':
+      if (reason === 'llm') return callInsightFailureHint('llm_unavailable_or_failed');
+      return reason ? `Analysis failed (${reason.replace(/_/g, ' ')}).` : 'Analysis failed.';
+    default:
+      return `Done (${status}).`;
+  }
 }
 
 function callInsightFailureHint(reason: string | null | undefined): string {
@@ -46,6 +86,8 @@ function callInsightFailureHint(reason: string | null | undefined): string {
 interface IntelligenceSectionProps {
   client: Client | null;
   refreshToken?: number;
+  /** When false, checklist is omitted (e.g. rendered below engagement in the drawer). Default true. */
+  showChecklist?: boolean;
   /** After persisting clip dismissals (meta patch), refetch client in parent. */
   onClientUpdated?: () => void;
   onOpenEmailComposerWithDraft?: (draft: { subject: string; bodyHtml: string; bodyText: string }) => void;
@@ -59,6 +101,10 @@ function emptyRollup(): CallInsightsRollup {
     accumulated_clips: [],
     accumulated_wins: [],
     accumulated_testimonial_stories: [],
+    accumulated_roi_testimonials: [],
+    latest_upsell_signal: null,
+    latest_referral_signal: null,
+    latest_revive_playbook: null,
     prospect_voice_profile: {},
     org_validated_theme_keys: [],
   };
@@ -67,12 +113,15 @@ function emptyRollup(): CallInsightsRollup {
 export default function IntelligenceSection({
   client,
   refreshToken = 0,
+  showChecklist = true,
   onClientUpdated,
   onOpenEmailComposerWithDraft,
 }: IntelligenceSectionProps) {
   const [insightData, setInsightData] = useState<ClientCallInsightsResponse | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
+  const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
+  const [reanalyzeNotice, setReanalyzeNotice] = useState<{ text: string; tone: 'ok' | 'warn' } | null>(null);
   const [recRefresh, setRecRefresh] = useState(0);
   const [synthesisExpanded, setSynthesisExpanded] = useState(false);
   const [clipDismissing, setClipDismissing] = useState<Set<string>>(() => new Set());
@@ -93,8 +142,59 @@ export default function IntelligenceSection({
   useEffect(() => {
     setInsightData(null);
     setSynthesisExpanded(false);
+    setReanalyzeNotice(null);
     loadInsights();
   }, [client?.id, client?.updated_at, refreshToken, loadInsights]);
+
+  useEffect(() => {
+    if (!client?.id || typeof window === 'undefined') return;
+    const onMerged = (e: Event) => {
+      const kept = (e as CustomEvent<{ keptClientId?: string }>).detail?.keptClientId;
+      if (kept && kept === client.id) {
+        loadInsights();
+        setRecRefresh((n) => n + 1);
+      }
+    };
+    window.addEventListener(CLIENT_MERGED_EVENT, onMerged);
+    return () => window.removeEventListener(CLIENT_MERGED_EVENT, onMerged);
+  }, [client?.id, loadInsights]);
+
+  const handleReanalyzeRoi = useCallback(async () => {
+    if (!client?.id || reanalyzeBusy || insightLoading) return;
+    setReanalyzeBusy(true);
+    setReanalyzeNotice(null);
+    setInsightError(null);
+    try {
+      const res = (await apiClient.postClientCallInsightsRefresh(client.id)) as {
+        status?: string;
+        detail?: Record<string, unknown> | null;
+      };
+      const st = String(res.status ?? '');
+      setReanalyzeNotice(refreshCallInsightNoticePayload(st, res.detail ?? null));
+      await loadInsights();
+      setRecRefresh((n) => n + 1);
+      onClientUpdated?.();
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent(CALL_INSIGHTS_REANALYZED_EVENT, { detail: { clientId: client.id } })
+        );
+      }
+    } catch (err: unknown) {
+      const httpStatus = (err as { response?: { status?: number } })?.response?.status;
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      if (httpStatus === 429) {
+        setInsightError(
+          typeof detail === 'string'
+            ? detail
+            : 'Too many re-analyze requests — try again in up to an hour.'
+        );
+      } else {
+        setInsightError(typeof detail === 'string' ? detail : (err as Error)?.message || 'Re-analyze failed');
+      }
+    } finally {
+      setReanalyzeBusy(false);
+    }
+  }, [client?.id, reanalyzeBusy, insightLoading, loadInsights, onClientUpdated]);
 
   const bumpRecommendations = () => setRecRefresh((n) => n + 1);
 
@@ -166,26 +266,99 @@ export default function IntelligenceSection({
     }
   };
 
+  const roiTestimonials = (rollup.accumulated_roi_testimonials || []) as Record<string, unknown>[];
+  const latestUpsell = rollup.latest_upsell_signal as { rationale?: string; meeting_at?: string } | null | undefined;
+  const latestReferral = rollup.latest_referral_signal as {
+    rationale?: string;
+    meeting_at?: string;
+    variant?: string;
+  } | null | undefined;
+  const roiState = insightData?.roi_state;
+  const pipeline = (insightData?.pipeline ?? null) as LeadPipelineSnapshot | null;
+  const suggestedOffer = insightData?.offer_suggestion ?? null;
+  const latestRevive = rollup.latest_revive_playbook;
+  const frameworkReview = rollup.latest_framework_review || null;
+  const lc = client.lifecycle_state;
+  const isClientRoi = lc === 'active' || lc === 'offboarding';
+  const isLead = lc === 'cold_lead' || lc === 'warm_lead';
+  const isDead = lc === 'dead';
+  const summaryTags = insightData?.summary?.tags || [];
+
+  const showMaximizeRoiBox =
+    isClientRoi &&
+    (roiTestimonials.length > 0 ||
+      Boolean(latestUpsell?.rationale) ||
+      Boolean(latestReferral?.rationale) ||
+      roiState);
+  const showReviveBox = isDead && Boolean(latestRevive?.rationale);
+  const showLeadPlaybook = isLead && Boolean(insightData);
+  const leadPlaybookMode: 'conversion' | 'deal_follow' | null =
+    !isLead || !insightData
+      ? null
+      : summaryTags.includes('deal_follow_up') ||
+          (Boolean(pipeline?.has_past_sales_call) && Boolean(pipeline?.open_sales_deal))
+        ? 'deal_follow'
+        : summaryTags.includes('conversion') || pipeline == null || !pipeline.has_past_sales_call
+          ? 'conversion'
+          : null;
+
   const hasRollupContent =
     synthesis.length > 0 ||
     rollup.accumulated_priorities.length > 0 ||
     rollup.accumulated_clips.length > 0 ||
     rollup.accumulated_wins.length > 0 ||
     rollup.accumulated_testimonial_stories.length > 0 ||
+    roiTestimonials.length > 0 ||
+    Boolean(latestUpsell?.rationale) ||
+    Boolean(latestReferral?.rationale) ||
+    Boolean(latestRevive?.rationale) ||
+    Boolean(frameworkReview?.summary) ||
     phrases.length > 0 ||
     toneNotes.length > 0 ||
     avoid.length > 0 ||
     pvSummary;
 
   return (
-    <div className="border-t border-gray-200 dark:border-white/10 pt-6 space-y-4">
+    <div
+      className={`space-y-4 ${
+        showChecklist ? 'border-t border-gray-200 dark:border-white/10 pt-6' : 'pt-0'
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">AI intelligence</h3>
+        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Client profile & opportunity</h3>
+        <button
+          type="button"
+          onClick={() => void handleReanalyzeRoi()}
+          disabled={reanalyzeBusy || insightLoading || !client?.id}
+          title="Re-run AI on the latest Fathom call for this client (rate limited: 8 per hour per client)."
+          className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-gray-200 dark:border-white/15 bg-white/70 dark:bg-white/5 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg
+            className={`w-3.5 h-3.5 ${reanalyzeBusy ? 'animate-spin' : ''}`}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+            />
+          </svg>
+          {reanalyzeBusy ? 'Re-analyzing…' : 'Re-analyze'}
+        </button>
       </div>
 
       <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-        Fathom → tags, coaching summary, top transcript clips, tone hints. Checklist below includes call follow-ups +{' '}
-        <span className="font-medium text-gray-600 dark:text-gray-300">View draft</span>.
+        Fathom call context plus ROI signals (testimonials, upsell readiness, referrals)—your situation, momentum, and
+        revenue opportunities in one place.
+        {showChecklist
+          ? ' Checklist below includes call follow-ups + '
+          : ' Next steps & checklist live below Engagement. '}
+        <span className="font-medium text-gray-600 dark:text-gray-300">View draft</span>
+        {showChecklist ? '.' : ' opens Brevo from the checklist section.'}
       </p>
 
       {insightLoading && !insightData && (
@@ -197,6 +370,18 @@ export default function IntelligenceSection({
       {insightError && (
         <div className="py-2 px-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-xs">
           {insightError}
+        </div>
+      )}
+
+      {reanalyzeNotice && !insightError && (
+        <div
+          className={`py-2 px-3 rounded-lg text-[11px] leading-snug ${
+            reanalyzeNotice.tone === 'ok'
+              ? 'bg-emerald-50/90 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-100'
+              : 'bg-amber-50/90 dark:bg-amber-950/35 text-amber-950 dark:text-amber-100'
+          }`}
+        >
+          {reanalyzeNotice.text}
         </div>
       )}
 
@@ -215,6 +400,176 @@ export default function IntelligenceSection({
 
       {insightData?.summary?.headline && (
         <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{insightData.summary.headline}</p>
+      )}
+
+      {showLeadPlaybook && leadPlaybookMode && (
+        <div className="rounded-lg border border-slate-200 dark:border-slate-600/50 bg-slate-50/80 dark:bg-slate-900/30 px-3 py-2.5 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+            Lead playbook
+          </p>
+          {leadPlaybookMode === 'conversion' ? (
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-gray-800 dark:text-gray-200">Conversion &amp; nurture</p>
+              <ul className="text-[10px] text-gray-600 dark:text-gray-400 list-disc list-inside space-y-0.5">
+                <li>Short email sequence: problem → proof → single CTA to book a sales call.</li>
+                <li>Share 1–2 nurture assets (PDF, Loom, case snippet) that pre-handle price and time objections.</li>
+                <li>Content: one FAQ post or story that mirrors their stated hesitation from calls or forms.</li>
+              </ul>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <p className="text-[11px] font-medium text-gray-800 dark:text-gray-200">Open deal — follow up</p>
+              {pipeline?.has_upcoming_check_in ? (
+                <p className="text-[10px] text-gray-600 dark:text-gray-400">
+                  Next meeting scheduled
+                  {pipeline.next_start_time_iso
+                    ? ` (${new Date(pipeline.next_start_time_iso).toLocaleString()}${pipeline.next_is_sales_call ? ', sales call' : ''})`
+                    : ''}
+                  . Keep momentum with a tight recap email and one question before you meet.
+                </p>
+              ) : (
+                <ul className="text-[10px] text-gray-600 dark:text-gray-400 list-disc list-inside space-y-0.5">
+                  <li>Book a follow-up call from Calendar (sync check-ins) or send three-touch email nurture.</li>
+                  <li>Review the last call in Fathom; tighten one commitment for the next conversation.</li>
+                </ul>
+              )}
+              <p className="text-[10px] pt-1">
+                <Link
+                  href="/?tab=call_library"
+                  className="text-violet-600 dark:text-violet-400 font-medium hover:underline"
+                >
+                  Open Call Library
+                </Link>{' '}
+                for coaching patterns and close ideas from past calls.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {showReviveBox && latestRevive ? (
+        <div className="rounded-lg border border-rose-200/80 dark:border-rose-900/50 bg-rose-50/50 dark:bg-rose-950/25 px-3 py-2.5 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-rose-900 dark:text-rose-100">Revive</p>
+          <p className="text-[11px] text-gray-700 dark:text-gray-300">{latestRevive.rationale}</p>
+          {(latestRevive.offer_angles?.length || 0) > 0 ? (
+            <div>
+              <p className="text-[10px] font-medium text-gray-700 dark:text-gray-300 mb-0.5">Offer angles</p>
+              <ul className="text-[10px] text-gray-600 dark:text-gray-400 list-disc list-inside space-y-0.5">
+                {(latestRevive.offer_angles || []).slice(0, 6).map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(latestRevive.outreach_hooks?.length || 0) > 0 ? (
+            <div>
+              <p className="text-[10px] font-medium text-gray-700 dark:text-gray-300 mb-0.5">Outreach hooks</p>
+              <ul className="text-[10px] text-gray-600 dark:text-gray-400 list-disc list-inside space-y-0.5">
+                {(latestRevive.outreach_hooks || []).slice(0, 6).map((a, i) => (
+                  <li key={i}>{a}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {frameworkReview && frameworkReview.summary ? (
+        <div className="rounded-lg border border-indigo-200/80 dark:border-indigo-800/50 bg-indigo-50/50 dark:bg-indigo-950/25 px-3 py-2.5 space-y-1.5">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-800 dark:text-indigo-200">
+              Framework critique
+            </p>
+            {frameworkReview.meeting_at ? (
+              <span className="text-[10px] text-indigo-700/70 dark:text-indigo-300/70">
+                {new Date(frameworkReview.meeting_at).toLocaleDateString()}
+              </span>
+            ) : null}
+          </div>
+          <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">{frameworkReview.summary}</p>
+          <p className="text-[10px] text-indigo-700/80 dark:text-indigo-300/80">
+            Lensed through your Sales framework &amp; tactics in Intelligence.
+          </p>
+        </div>
+      ) : null}
+
+      {suggestedOffer && suggestedOffer.name ? (
+        <div className="rounded-lg border border-emerald-200/80 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/20 px-3 py-2.5 space-y-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+            Suggested next offer · {suggestedOffer.kind_label}
+          </p>
+          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{suggestedOffer.name}</p>
+          {suggestedOffer.promise ? (
+            <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">{suggestedOffer.promise}</p>
+          ) : null}
+          {suggestedOffer.rationale ? (
+            <p className="text-[11px] text-gray-600 dark:text-gray-400 italic">{suggestedOffer.rationale}</p>
+          ) : null}
+          {suggestedOffer.script_hint ? (
+            <p className="text-[11px] text-gray-700 dark:text-gray-300 leading-relaxed">
+              <span className="font-medium text-gray-800 dark:text-gray-200">Script hint: </span>
+              {suggestedOffer.script_hint}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {showMaximizeRoiBox && (
+        <div className="rounded-lg border border-violet-200/80 dark:border-violet-800/50 bg-violet-50/40 dark:bg-violet-950/25 px-3 py-2.5 space-y-2">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-800 dark:text-violet-200">
+            Maximize ROI
+          </p>
+          {roiState && typeof roiState.testimonial_trigger_at === 'string' ? (
+            <p className="text-[10px] text-gray-600 dark:text-gray-400">
+              Client has a validated win on record — prioritize testimonial capture and expansion asks when the
+              conversation supports it.
+            </p>
+          ) : null}
+          {roiTestimonials.length > 0 && (
+            <div>
+              <p className="text-[11px] font-medium text-gray-800 dark:text-gray-200 mb-1">Testimonial-ready moments</p>
+              <ul className="space-y-1.5">
+                {roiTestimonials.slice(0, 4).map((m, i) => {
+                  const quote = String(m.quote || '');
+                  const ts = String(m.start_timestamp || '');
+                  const mat = String(m.meeting_at || '');
+                  return (
+                    <li key={i} className="text-[11px] text-gray-700 dark:text-gray-300 border-l-2 border-emerald-500/50 pl-2">
+                      {quote ? <span className="italic text-gray-600 dark:text-gray-400">&ldquo;{quote}&rdquo;</span> : null}
+                      {(ts || mat) && (
+                        <span className="block text-[10px] text-gray-500 mt-0.5">
+                          {ts ? `${ts}` : ''}
+                          {ts && mat ? ' · ' : ''}
+                          {mat ? new Date(mat).toLocaleString() : ''}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          )}
+          {latestUpsell?.rationale ? (
+            <div>
+              <p className="text-[11px] font-medium text-gray-800 dark:text-gray-200 mb-0.5">Upsell signal</p>
+              <p className="text-[11px] text-gray-600 dark:text-gray-400">{latestUpsell.rationale}</p>
+              {latestUpsell.meeting_at ? (
+                <p className="text-[10px] text-gray-500 mt-0.5">{new Date(latestUpsell.meeting_at).toLocaleString()}</p>
+              ) : null}
+            </div>
+          ) : null}
+          {latestReferral?.rationale ? (
+            <div>
+              <p className="text-[11px] font-medium text-gray-800 dark:text-gray-200 mb-0.5">
+                Referral signal{latestReferral.variant ? ` (${String(latestReferral.variant).replace(/_/g, ' ')})` : ''}
+              </p>
+              <p className="text-[11px] text-gray-600 dark:text-gray-400">{latestReferral.rationale}</p>
+              {latestReferral.meeting_at ? (
+                <p className="text-[10px] text-gray-500 mt-0.5">{new Date(latestReferral.meeting_at).toLocaleString()}</p>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
       )}
 
       {!insightLoading && insightData && !anyCompleteInsight && !latestNonComplete && (
@@ -424,12 +779,14 @@ export default function IntelligenceSection({
         </div>
       )}
 
-      <AIRecommendationsSection
-        client={client}
-        refreshToken={recRefresh + refreshToken}
-        embedded
-        onOpenEmailComposerWithDraft={onOpenEmailComposerWithDraft}
-      />
+      {showChecklist ? (
+        <AIRecommendationsSection
+          client={client}
+          refreshToken={recRefresh + refreshToken}
+          embedded
+          onOpenEmailComposerWithDraft={onOpenEmailComposerWithDraft}
+        />
+      ) : null}
     </div>
   );
 }

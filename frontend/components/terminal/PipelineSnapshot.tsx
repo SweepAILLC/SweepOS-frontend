@@ -169,20 +169,20 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
 
   if (loading) {
     return (
-      <div className="glass-card p-4">
+      <div className="glass-card p-4 min-w-0 max-w-full overflow-hidden">
         <p className="text-sm text-gray-500 dark:text-gray-400">Loading pipeline snapshot...</p>
       </div>
     );
   }
 
   return (
-    <div className="glass-card p-3 sm:p-4 min-w-0">
+    <div className="glass-card p-3 sm:p-4 min-w-0 max-w-full overflow-hidden">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 digitized-text">
         Pipeline Snapshot
       </h3>
 
       {/* Top row: equal-width columns, labels + counts */}
-      <div className="flex gap-0 mb-1">
+      <div className="flex gap-0 mb-1 min-w-0">
         {COLUMNS.map((column) => {
           const count = counts[column.id] || 0;
           const isActive = activeFilter === column.id;
@@ -204,7 +204,7 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
               <span className="text-[10px] sm:text-xs font-medium text-gray-600 dark:text-gray-400 truncate w-full text-center">
                 {column.title}
               </span>
-              <span className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100">
+              <span className="text-base sm:text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate w-full min-w-0 text-center">
                 {count}
               </span>
             </button>
@@ -258,11 +258,11 @@ export default function PipelineSnapshot({ onFilterChange, onLoadComplete }: Pip
       </div>
 
       {biggestDrop && (
-        <div className="mt-3 flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400">
-          <svg className="w-4 h-4 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
+        <div className="mt-3 flex items-start gap-2 text-xs text-blue-600 dark:text-blue-400 min-w-0">
+          <svg className="w-4 h-4 flex-shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20" aria-hidden>
             <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
           </svg>
-          <span>
+          <span className="min-w-0 break-words">
             Biggest drop: <strong>{biggestDrop.fromTitle} → {biggestDrop.toTitle}</strong> ({biggestDrop.pct}%)
           </span>
         </div>

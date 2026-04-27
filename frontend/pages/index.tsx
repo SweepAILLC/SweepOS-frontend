@@ -9,8 +9,7 @@ import {
   APP_MAIN_PL_WITH_CALL_LIBRARY_AND_PERF_OPEN,
 } from '@/components/ui/layoutConstants';
 import TerminalDashboard from '@/components/TerminalDashboard';
-import BrevoConsolePanel from '@/components/BrevoConsolePanel';
-import StripeDashboardPanel from '@/components/stripe/StripeDashboardPanel';
+import FinancesDashboardPanel from '@/components/finances/FinancesDashboardPanel';
 import CalendarConsolePanel from '@/components/calendar/CalendarConsolePanel';
 import FunnelListPanel from '@/components/FunnelListPanel';
 import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
@@ -32,9 +31,8 @@ export default function Dashboard() {
   
   // New session (after login) starts on terminal; refresh keeps current tab via localStorage
   type TabId =
-    | 'brevo'
     | 'terminal'
-    | 'stripe'
+    | 'finances'
     | 'funnels'
     | 'content_studio'
     | 'call_library'
@@ -51,15 +49,22 @@ export default function Dashboard() {
       sessionStorage.removeItem('newSession');
       return 'terminal';
     }
-    const savedTab = localStorage.getItem('activeTab');
+    let savedTab = localStorage.getItem('activeTab');
+    if (savedTab === 'stripe') {
+      savedTab = 'finances';
+      localStorage.setItem('activeTab', 'finances');
+    }
     if (savedTab === 'performance') {
       sessionStorage.setItem('openPerfDrawer', '1');
       return 'terminal';
     }
+    if (savedTab === 'brevo') {
+      localStorage.setItem('activeTab', 'integrations');
+      return 'integrations';
+    }
     const validTabs: string[] = [
-      'brevo',
       'terminal',
-      'stripe',
+      'finances',
       'funnels',
       'content_studio',
       'call_library',
@@ -177,9 +182,9 @@ export default function Dashboard() {
           // If permissions endpoint fails (e.g., endpoint doesn't exist yet or migration not run), default to all enabled
           console.warn('Failed to load tab permissions, using defaults:', permError);
           const defaultPermissions = {
-            brevo: true,
             terminal: true,
             stripe: true,
+            finances: true,
             performance: true,
             funnels: true,
             users: true,
@@ -221,9 +226,9 @@ export default function Dashboard() {
           } else {
             // For other errors, still show the UI but with defaults
             const defaultPermissions = {
-              brevo: true,
               terminal: true,
               stripe: true,
+              finances: true,
               funnels: true,
               users: true,
               calcom: true
@@ -252,7 +257,7 @@ export default function Dashboard() {
     // Handle OAuth callback parameters first (they may also set the tab)
     if (stripe_connected === 'true') {
       setNotification({ type: 'success', message: 'Stripe connected successfully! Syncing customers...' });
-      setActiveTab('stripe');
+      setActiveTab('finances');
       // Clear query params
       router.replace('/', undefined, { shallow: true });
       // Dispatch event to refresh clients list
@@ -266,20 +271,20 @@ export default function Dashboard() {
     } else if (stripe_error) {
       const errorMsg = error_description || 'Failed to connect Stripe';
       setNotification({ type: 'error', message: `Stripe connection error: ${errorMsg}` });
-      setActiveTab('stripe');
+      setActiveTab('finances');
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
     } else if (brevo_connected === 'true') {
       setNotification({ type: 'success', message: 'Brevo connected successfully!' });
-      setActiveTab('brevo');
+      setActiveTab('integrations');
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
     } else if (brevo_error) {
       const errorMsg = error_description || 'Failed to connect Brevo';
       setNotification({ type: 'error', message: `Brevo connection error: ${errorMsg}` });
-      setActiveTab('brevo');
+      setActiveTab('integrations');
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
@@ -300,11 +305,11 @@ export default function Dashboard() {
         router.replace('/', undefined, { shallow: true });
         return;
       }
+      const normalizedTab = tab === 'stripe' ? 'finances' : tab === 'brevo' ? 'integrations' : tab;
       if (
         [
-          'brevo',
           'terminal',
-          'stripe',
+          'finances',
           'funnels',
           'content_studio',
           'call_library',
@@ -314,9 +319,9 @@ export default function Dashboard() {
           'calcom',
           'intelligence',
           'settings',
-        ].includes(tab)
+        ].includes(normalizedTab)
       ) {
-        const tabValue = tab as TabId;
+        const tabValue = normalizedTab as TabId;
         setActiveTab(tabValue);
         const rawFid = router.query.funnelId;
         if (tabValue === 'funnels' && rawFid && typeof rawFid === 'string') {
@@ -336,6 +341,17 @@ export default function Dashboard() {
     }
   }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
+  // Members must not stay on integrations/intelligence (URL/localStorage). Must run before any early return (Rules of Hooks).
+  useEffect(() => {
+    if (loading) return;
+    const roleLower = String(userRole || 'member').toLowerCase().trim();
+    if (roleLower !== 'member') return;
+    if (activeTab === 'integrations' || activeTab === 'intelligence') {
+      setActiveTab('terminal');
+      setGlobalLoading(false);
+    }
+  }, [loading, activeTab, userRole, setGlobalLoading]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
@@ -346,13 +362,17 @@ export default function Dashboard() {
 
   // Check if current tab is accessible
   const hasTabAccess = (tab: string): boolean => {
+    const roleLower = String(userRole || 'member').toLowerCase().trim();
     // Owner tab only for owners
     if (tab === 'owner') {
       return isOwner;
     }
+    // Member users cannot access Intelligence or Integrations
+    if (roleLower === 'member' && (tab === 'integrations' || tab === 'intelligence')) {
+      return false;
+    }
     // Users tab: not accessible to members (check role directly)
     if (tab === 'users') {
-      const roleLower = String(userRole || 'member').toLowerCase().trim();
       // Explicitly hide for members - check multiple possible formats
       if (roleLower === 'member' || roleLower === 'MEMBER' || roleLower === 'Member') {
         return false;
@@ -362,6 +382,11 @@ export default function Dashboard() {
         return false;
       }
       return tabPermissions[tab] !== false;
+    }
+    if (tab === 'finances') {
+      const v =
+        tabPermissions.finances !== undefined ? tabPermissions.finances : tabPermissions.stripe;
+      return v !== false;
     }
     // Check permissions for other tabs
     return tabPermissions[tab] !== false; // Default to true if not set
@@ -423,24 +448,14 @@ export default function Dashboard() {
           )
         )}
 
-        {activeTab === 'brevo' && (
-          hasTabAccess('brevo') ? (
-            <div className="w-full">
-              <BrevoConsolePanel userRole={userRole} />
-            </div>
-          ) : (
-            <RestrictedTabView tabName="brevo" />
-          )
-        )}
-
-        {activeTab === 'stripe' && (
-          hasTabAccess('stripe') ? (
+        {activeTab === 'finances' && (
+          hasTabAccess('finances') ? (
             <div className="max-w-4xl mx-auto w-full">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Stripe Financial Dashboard</h2>
-              <StripeDashboardPanel userRole={userRole} />
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Finances</h2>
+              <FinancesDashboardPanel userRole={userRole} />
             </div>
           ) : (
-            <RestrictedTabView tabName="stripe" />
+            <RestrictedTabView tabName="finances" />
           )
         )}
 
@@ -515,9 +530,13 @@ export default function Dashboard() {
         )}
 
         {activeTab === 'intelligence' && (
-          <div className="w-full">
-            <IntelligencePanel />
-          </div>
+          hasTabAccess('intelligence') ? (
+            <div className="w-full">
+              <IntelligencePanel />
+            </div>
+          ) : (
+            <RestrictedTabView tabName="intelligence" />
+          )
         )}
 
         {activeTab === 'settings' && (

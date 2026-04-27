@@ -241,7 +241,7 @@ export default function MRRChurnNew() {
   };
 
   return (
-    <div className="glass-card p-6">
+    <div className="glass-card p-6 min-w-0 max-w-full overflow-hidden">
       <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
         MRR Churn & New MRR
         <span className="text-sm font-normal text-gray-500 dark:text-gray-400 ml-2">(Last 30d)</span>
@@ -253,37 +253,46 @@ export default function MRRChurnNew() {
           <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
         </div>
       ) : mrrData ? (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-4 glass-panel rounded-lg">
-            <div>
+        <div className="space-y-4 min-w-0">
+          <div className="flex items-center justify-between p-4 glass-panel rounded-lg min-w-0 overflow-hidden">
+            <div className="min-w-0 flex-1">
               <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Churn MRR</p>
-              <p className="text-2xl font-bold text-red-500 dark:text-red-400 mt-1">
+              <p
+                className="text-2xl font-bold text-red-500 dark:text-red-400 mt-1 tabular-nums truncate"
+                title={formatCurrency(mrrData.churnMRR)}
+              >
                 {formatCurrency(mrrData.churnMRR)}
               </p>
             </div>
           </div>
           
-          <div className="flex items-center justify-between p-4 glass-panel rounded-lg">
-            <div>
+          <div className="flex items-center justify-between p-4 glass-panel rounded-lg min-w-0 overflow-hidden">
+            <div className="min-w-0 flex-1">
               <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">New MRR</p>
-              <p className="text-2xl font-bold text-green-500 dark:text-green-400 mt-1">
+              <p
+                className="text-2xl font-bold text-green-500 dark:text-green-400 mt-1 tabular-nums truncate"
+                title={formatCurrency(mrrData.newMRR)}
+              >
                 {formatCurrency(mrrData.newMRR)}
               </p>
             </div>
           </div>
           
-          <div className={`flex items-center justify-between p-4 rounded-lg ${
+          <div className={`flex items-center justify-between p-4 rounded-lg min-w-0 overflow-hidden ${
             mrrData.netMRR >= 0 
               ? 'bg-green-500/10 border border-green-500/20' 
               : 'bg-red-500/10 border border-red-500/20'
           }`}>
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Net MRR</p>
-              <p className={`text-2xl font-bold mt-1 ${
+              <p
+                className={`text-2xl font-bold mt-1 tabular-nums truncate ${
                 mrrData.netMRR >= 0 
                   ? 'text-green-500 dark:text-green-400' 
                   : 'text-red-500 dark:text-red-400'
-              }`}>
+              }`}
+                title={`${mrrData.netMRR >= 0 ? '+' : ''}${formatCurrency(mrrData.netMRR)}`}
+              >
                 {mrrData.netMRR >= 0 ? '+' : ''}{formatCurrency(mrrData.netMRR)}
               </p>
             </div>

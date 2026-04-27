@@ -16,11 +16,15 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { apiClient, gradeFromHealthScore } from '@/lib/api';
+import { recipientsFromClients } from '@/lib/clientEmails';
 import { Client } from '@/types/client';
+import type { BrevoStatus } from '@/types/integration';
 import { STRIPE_DATA_UPDATED_EVENT, TERMINAL_CLIENTS_UPDATED_EVENT, invalidateStripeAndTerminalAfterWebhook } from '@/lib/cache';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
+import { CALL_INSIGHTS_REANALYZED_EVENT, CLIENT_MERGED_EVENT } from './IntelligenceSection';
 import ShinyButton from '../ui/ShinyButton';
+import EmailComposer from '../brevo/EmailComposer';
 
 const COLUMNS = [
   { id: 'cold_lead', title: 'Cold Lead' },
@@ -63,6 +67,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
   const [callInsightTags, setCallInsightTags] = useState<Record<string, { tags: string[]; headline: string }>>({});
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
+  const [brevoStatus, setBrevoStatus] = useState<BrevoStatus | null>(null);
+  const [emailComposerOpen, setEmailComposerOpen] = useState(false);
+  const [emailRecipients, setEmailRecipients] = useState<Array<{ email: string; name?: string }>>([]);
+  const [emailComposerKey, setEmailComposerKey] = useState(0);
 
   // Refs to avoid re-creating poll intervals with stale state
   const clientsRef = useRef<Client[]>([]);
@@ -80,6 +88,21 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   // Load client list only on mount; no sync unless user clicks the refresh/sync button; skip pipeline notify on first load
   useEffect(() => {
     loadClients(false, true, false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await apiClient.getBrevoStatus();
+        if (!cancelled) setBrevoStatus(s);
+      } catch {
+        if (!cancelled) setBrevoStatus({ connected: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // When Stripe sync/webhook updates land, refetch clients so new customers appear on the board.
@@ -145,6 +168,23 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       clearInterval(interval);
       window.removeEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, tick as EventListener);
     };
+  }, []);
+
+  useEffect(() => {
+    const onCallInsightsReanalyzed = () => {
+      void (async () => {
+        const ids = clientsRef.current.map((c) => c.id);
+        if (ids.length === 0) return;
+        try {
+          const tagMap = await apiClient.getClientsCallInsightTags(ids);
+          setCallInsightTags((prev) => ({ ...prev, ...tagMap }));
+        } catch (e) {
+          console.warn('[KanbanBoard] Call insight tags refresh after re-analyze failed:', e);
+        }
+      })();
+    };
+    window.addEventListener(CALL_INSIGHTS_REANALYZED_EVENT, onCallInsightsReanalyzed);
+    return () => window.removeEventListener(CALL_INSIGHTS_REANALYZED_EVENT, onCallInsightsReanalyzed);
   }, []);
 
   // Listen for Stripe connection events to refetch client list (no sync)
@@ -316,6 +356,11 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
               setSelectedClient(keptClient || selectedClient);
             } else if (selectedClient?.id === keptId && keptClient) {
               setSelectedClient(keptClient);
+            }
+            if (keptId && typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(CLIENT_MERGED_EVENT, { detail: { keptClientId: keptId } })
+              );
             }
             await loadClients(true);
           } catch (err: any) {
@@ -528,12 +573,45 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
   }, [clients]);
 
   const [mergingDuplicates, setMergingDuplicates] = useState(false);
+  const requireBrevoForEmail = (): boolean => {
+    if (!brevoStatus?.connected) {
+      alert('Connect Brevo under Integrations → Brevo (email) to send messages.');
+      return false;
+    }
+    return true;
+  };
+
+  const openEmailComposer = (recipients: Array<{ email: string; name?: string }>) => {
+    if (recipients.length === 0) {
+      alert('No clients with email addresses in this selection.');
+      return;
+    }
+    if (!requireBrevoForEmail()) return;
+    setEmailRecipients(recipients);
+    setEmailComposerKey((k) => k + 1);
+    setEmailComposerOpen(true);
+  };
+
+  const handleEmailAllContacts = () => {
+    openEmailComposer(recipientsFromClients(clients));
+  };
+
+  const handleEmailColumn = (columnId: ColumnId) => {
+    const columnClients = clients.filter((c) => c.lifecycle_state === columnId);
+    openEmailComposer(recipientsFromClients(columnClients));
+  };
+
   const handleMergeDuplicates = async () => {
     if (duplicateGroups.length === 0) return;
     setMergingDuplicates(true);
     try {
       for (const group of duplicateGroups) {
-        await apiClient.mergeClients(group.map((c) => c.id));
+        const kept = await apiClient.mergeClients(group.map((c) => c.id));
+        if (kept?.id && typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent(CLIENT_MERGED_EVENT, { detail: { keptClientId: kept.id } })
+          );
+        }
       }
       await loadClients(true);
     } catch (err: any) {
@@ -558,47 +636,42 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
       }
 
+      // 1b) Whop customers / payments → reconcile onto the board (optional; only if connected)
+      try {
+        const whopStatus = await apiClient.getWhopStatus(false);
+        if (whopStatus?.connected) {
+          await apiClient.postWhopSync(false);
+        }
+      } catch {
+        /* keep */
+      }
+
       // 2) Calendar (Cal.com / Calendly) attendees → check-ins → warm leads on the board
       await apiClient.syncCheckIns();
-
-      // 3) Fathom: pull meetings that match clients by email, queue ingest + call insights for the library / drawer
-      //    (runs after Stripe + calendar so newly synced clients exist before matching.)
-      try {
-        await apiClient.syncFathomMeetings();
-      } catch (fathomErr: unknown) {
-        console.warn('[KanbanBoard] Fathom sync skipped or failed:', fathomErr);
-      }
 
       // Reload list once; skip embedded check-in sync (already ran above).
       await loadClients(true, true);
 
       // Drawer IntelligenceSection uses this to refetch AI insights / health.
       setHealthRefreshToken((t) => t + 1);
-      // Fathom queues call-insight LLM work in the background; refresh chips + drawer again once jobs typically finish.
-      window.setTimeout(() => {
-        setHealthRefreshToken((t) => t + 1);
-        const ids = clientsRef.current.map((c) => c.id);
-        if (ids.length === 0) return;
+
+      // Trigger a single call-insight AI re-analysis for the currently open drawer client (if any).
+      // This is the same action as the in-drawer "Re-analyze" button; do not block the refresh.
+      const selectedId = selectedClientIdRef.current;
+      if (selectedId) {
         void (async () => {
           try {
-            const batch = await apiClient.getClientsHealthScores(ids);
-            setHealthScores(batch);
-          } catch {
-            /* keep previous */
-          }
-          try {
-            const tagMap = await apiClient.getClientsCallInsightTags(ids);
-            const rows = clientsRef.current;
-            const nextTags: Record<string, { tags: string[]; headline: string }> = {};
-            for (const c of rows) {
-              nextTags[c.id] = tagMap[c.id] ?? { tags: [], headline: '' };
+            await apiClient.postClientCallInsightsRefresh(selectedId);
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(
+                new CustomEvent(CALL_INSIGHTS_REANALYZED_EVENT, { detail: { clientId: selectedId } })
+              );
             }
-            setCallInsightTags(nextTags);
           } catch {
-            /* keep previous */
+            /* keep */
           }
         })();
-      }, 8000);
+      }
     } catch (err: any) {
       console.error('[KanbanBoard] Refresh sync failed:', err);
       alert(err?.response?.data?.detail || 'Sync failed. Please try again.');
@@ -776,6 +849,27 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             )}
             <button
               type="button"
+              onClick={handleEmailAllContacts}
+              disabled={clients.length === 0}
+              className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50 flex items-center gap-2 min-h-[44px]"
+              title={
+                brevoStatus?.connected
+                  ? 'Compose an email to all clients on the board (emails deduplicated)'
+                  : 'Connect Brevo in Integrations first'
+              }
+            >
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+              Email all
+            </button>
+            <button
+              type="button"
               onClick={handleRefreshSync}
               disabled={syncingRefreshing}
               className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50 flex items-center gap-2 min-h-[44px]"
@@ -860,6 +954,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                 onClientDelete={handleDeleteClient}
                 healthScores={healthScores}
                 callInsightTags={callInsightTags}
+                onEmailColumn={handleEmailColumn}
               />
             );
           })}
@@ -872,6 +967,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         onClose={() => {
           setIsDrawerOpen(false);
           setSelectedClient(null);
+        }}
+        onClientSaved={(updated) => {
+          setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
+          setSelectedClient((sel) => (sel?.id === updated.id ? updated : sel));
         }}
         healthRefreshToken={healthRefreshToken}
         onHealthScoreLoaded={(cid, score, grade) => {
@@ -1090,6 +1189,21 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
         </div>
       )}
 
+      {emailComposerOpen && emailRecipients.length > 0 && (
+        <EmailComposer
+          key={emailComposerKey}
+          recipients={emailRecipients}
+          onClose={() => {
+            setEmailComposerOpen(false);
+            setEmailRecipients([]);
+          }}
+          onSuccess={() => {
+            setEmailComposerOpen(false);
+            setEmailRecipients([]);
+          }}
+        />
+      )}
+
     </>
   );
 }
@@ -1105,12 +1219,26 @@ interface KanbanColumnProps {
   onClientDelete?: (client: Client) => void;
   healthScores?: Record<string, { score: number; grade: string }>;
   callInsightTags?: Record<string, { tags: string[]; headline: string }>;
+  onEmailColumn?: (columnId: ColumnId) => void;
 }
 
-function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, onClientClick, onClientDelete, healthScores = {}, callInsightTags = {} }: KanbanColumnProps) {
+function KanbanColumn({
+  id,
+  title,
+  clients,
+  isActive,
+  dragOverId,
+  mergingCards,
+  onClientClick,
+  onClientDelete,
+  healthScores = {},
+  callInsightTags = {},
+  onEmailColumn,
+}: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: id,
   });
+  const isLeadColumn = id === 'cold_lead' || id === 'warm_lead';
 
   return (
     <div className="flex-shrink-0 w-[260px] min-w-[260px] sm:w-64 sm:min-w-64">
@@ -1120,9 +1248,30 @@ function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, 
           isActive ? 'neon-glow' : ''
         }`}
       >
-        <h3 className="font-semibold text-gray-700 dark:text-gray-300 mb-4 digitized-text">
-          {title} ({clients.length})
-        </h3>
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <h3 className="font-semibold text-gray-700 dark:text-gray-300 digitized-text flex-1 min-w-0 leading-snug">
+            {title} ({clients.length})
+          </h3>
+          {onEmailColumn ? (
+            <button
+              type="button"
+              onClick={() => onEmailColumn(id)}
+              disabled={clients.length === 0}
+              className="flex-shrink-0 p-1.5 rounded-md text-gray-500 hover:text-primary-600 hover:bg-white/10 dark:text-gray-400 dark:hover:text-primary-400 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Email everyone in this column"
+              aria-label={`Email ${title} column`}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+            </button>
+          ) : null}
+        </div>
         <SortableContext
           items={clients.map((c) => c.id)}
           strategy={verticalListSortingStrategy}
@@ -1139,6 +1288,7 @@ function KanbanColumn({ id, title, clients, isActive, dragOverId, mergingCards, 
                 healthGrade={healthScores[client.id]?.grade}
                 healthScore={healthScores[client.id]?.score}
                 insightTags={callInsightTags[client.id]?.tags}
+                isLeadColumn={isLeadColumn}
               />
             ))}
           </div>

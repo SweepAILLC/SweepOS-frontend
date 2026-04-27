@@ -8,6 +8,10 @@ import { apiClient } from '@/lib/api';
 interface ClientHealthScoreContentProps {
   client: Client | null;
   compact?: boolean;
+  /** Drawer layout: smaller ring, no per-factor rows. */
+  engagementStrip?: boolean;
+  /** When false, hide formula/AI factor breakdown cards (drawer engagement strip). */
+  showFactors?: boolean;
   refreshToken?: number;
   useAi?: boolean;
   /** Called after a successful score load so the parent can sync board tags. */
@@ -54,9 +58,19 @@ function ringStrokeClass(score: number): string {
   return 'stroke-red-500 dark:stroke-red-400';
 }
 
-function HealthScoreCircle({ score, grade, compact = false }: { score: number; grade: string; compact?: boolean }) {
+function HealthScoreCircle({
+  score,
+  grade,
+  compact = false,
+  engagementStrip = false,
+}: {
+  score: number;
+  grade: string;
+  compact?: boolean;
+  engagementStrip?: boolean;
+}) {
   const pct = Math.min(100, Math.max(0, score)) / 100;
-  const size = compact ? 96 : 128;
+  const size = engagementStrip ? 80 : compact ? 96 : 128;
   const stroke = 8;
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
@@ -99,8 +113,18 @@ function HealthScoreCircle({ score, grade, compact = false }: { score: number; g
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <span className={`${compact ? 'text-3xl' : 'text-4xl'} font-bold leading-none ${gradeColor(grade)}`}>{grade}</span>
-        <span className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-medium tabular-nums mt-0.5 ${scoreColor(score)}`}>
+        <span
+          className={`${
+            engagementStrip ? 'text-2xl' : compact ? 'text-3xl' : 'text-4xl'
+          } font-bold leading-none ${gradeColor(grade)}`}
+        >
+          {grade}
+        </span>
+        <span
+          className={`${
+            engagementStrip ? 'text-[9px]' : compact ? 'text-[10px]' : 'text-[11px]'
+          } font-medium tabular-nums mt-0.5 ${scoreColor(score)}`}
+        >
           {Math.round(score)}
         </span>
       </div>
@@ -111,6 +135,8 @@ function HealthScoreCircle({ score, grade, compact = false }: { score: number; g
 export default function ClientHealthScoreContent({
   client,
   compact = false,
+  engagementStrip = false,
+  showFactors = true,
   refreshToken = 0,
   useAi = true,
   onScoreLoaded,
@@ -143,9 +169,18 @@ export default function ClientHealthScoreContent({
   if (!client) return null;
 
   return (
-    <div className={compact ? 'space-y-3' : 'border-t border-gray-200 dark:border-white/10 pt-6 space-y-4'}>
-      {!compact && (
+    <div
+      className={
+        compact || engagementStrip
+          ? 'space-y-3'
+          : 'border-t border-gray-200 dark:border-white/10 pt-6 space-y-4'
+      }
+    >
+      {!compact && !engagementStrip && (
         <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Health Score</h3>
+      )}
+      {engagementStrip && (
+        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Engagement</h3>
       )}
       {loading && (
         <div className="flex items-center justify-center py-6">
@@ -160,7 +195,12 @@ export default function ClientHealthScoreContent({
       {!loading && !error && data && (
         <>
           <div className="flex flex-col sm:flex-row gap-4 sm:gap-6 sm:items-start">
-            <HealthScoreCircle score={data.score} grade={data.grade} compact={compact} />
+            <HealthScoreCircle
+              score={data.score}
+              grade={data.grade}
+              compact={compact}
+              engagementStrip={engagementStrip}
+            />
             <div className="min-w-0 flex-1 space-y-3">
               {data.explanation && (
                 <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed border-l-2 border-violet-400/60 pl-2">
@@ -173,8 +213,9 @@ export default function ClientHealthScoreContent({
                   {data.source_reason ? ` — ${sourceReasonLabel(data.source_reason)}` : ''}
                 </p>
               )}
-              <div className="space-y-2">
-                {data.factors.map((factor) => (
+              {showFactors && (
+                <div className="space-y-2">
+                  {data.factors.map((factor) => (
                     <div
                       key={factor.key}
                       className="flex items-start justify-between gap-3 py-1.5 px-2.5 rounded-md bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50"
@@ -205,7 +246,8 @@ export default function ClientHealthScoreContent({
                       )}
                     </div>
                   ))}
-              </div>
+                </div>
+              )}
             </div>
           </div>
         </>

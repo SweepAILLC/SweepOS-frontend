@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   apiClient,
@@ -88,6 +88,9 @@ export default function ContentStudioPanel() {
   const [batchId, setBatchId] = useState<string | null>(null);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
+  const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
+  const [reanalyzeMessage, setReanalyzeMessage] = useState<string | null>(null);
+  const bundlePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadBootstrap = useCallback(async () => {
     setError(null);
@@ -101,7 +104,7 @@ export default function ContentStudioPanel() {
       const msg =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
         (e as Error)?.message ||
-        'Failed to load Content Studio';
+        'Failed to load Marketing Intel';
       setError(String(msg));
     } finally {
       setLoading(false);
@@ -112,6 +115,63 @@ export default function ContentStudioPanel() {
   useEffect(() => {
     void loadBootstrap();
   }, [loadBootstrap]);
+
+  useEffect(() => {
+    return () => {
+      if (bundlePollRef.current) {
+        clearInterval(bundlePollRef.current);
+        bundlePollRef.current = null;
+      }
+    };
+  }, []);
+
+  const handleReanalyze = useCallback(async () => {
+    if (reanalyzeBusy) return;
+    setReanalyzeBusy(true);
+    setReanalyzeMessage(null);
+    setError(null);
+    try {
+      const res = await apiClient.postContentStudioReanalyze();
+      const fs = (res.fathom_sync || {}) as Record<string, unknown>;
+      const skipped = Boolean(fs.skipped);
+      if (skipped) {
+        setReanalyzeMessage(
+          `Fathom: ${String(fs.reason || 'skipped')}. Your content bundle is still regenerating from the latest call signals.`
+        );
+      } else {
+        const ing = Number(fs.ingested ?? 0);
+        setReanalyzeMessage(
+          `Fathom: ${ing} new meeting(s) ingested. Cleared health caches for ${res.health_clients_invalidated} clients. Regenerating all sections and marketing suggestions…`
+        );
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sweep:content-studio-reanalyzed'));
+      }
+      if (bundlePollRef.current) {
+        clearInterval(bundlePollRef.current);
+        bundlePollRef.current = null;
+      }
+      let ticks = 0;
+      bundlePollRef.current = setInterval(() => {
+        ticks += 1;
+        void loadBootstrap();
+        if (ticks >= 24) {
+          if (bundlePollRef.current) clearInterval(bundlePollRef.current);
+          bundlePollRef.current = null;
+        }
+      }, 5000);
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      if (status === 429) {
+        setError('Re-analyze is limited to 3 runs per hour. Try again later.');
+      } else {
+        setError(typeof detail === 'string' ? detail : (e as Error)?.message || 'Re-analyze failed');
+      }
+    } finally {
+      setReanalyzeBusy(false);
+    }
+  }, [reanalyzeBusy, loadBootstrap]);
 
   const flushCompleted = useCallback(
     async (next: Set<string>) => {
@@ -145,7 +205,7 @@ export default function ContentStudioPanel() {
   return (
     <div className="max-w-5xl mx-auto w-full px-1 pb-12 space-y-8">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Content Studio</h2>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Marketing Intel</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
           Reel hooks and concepts from your sales signals, aligned with your{' '}
           <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
@@ -167,18 +227,48 @@ export default function ContentStudioPanel() {
       )}
 
       <section className="glass-card neon-glow rounded-xl p-4 sm:p-5 space-y-2">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Sales data source</h3>
-          <span
-            className={`text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full ${
-              salesPlaybookSource === 'fathom'
-                ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
-                : 'bg-gray-500/15 text-gray-600 dark:text-gray-400'
-            }`}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-baseline gap-2 min-w-0">
+            <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Sales data source</h3>
+            <span
+              className={`text-[10px] font-medium uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                salesPlaybookSource === 'fathom'
+                  ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200'
+                  : 'bg-gray-500/15 text-gray-600 dark:text-gray-400'
+              }`}
+            >
+              {salesPlaybookSource === 'fathom' ? 'Fathom + call insights' : 'Expert baseline'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleReanalyze()}
+            disabled={reanalyzeBusy || loading}
+            className="shrink-0 inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg glass-button-secondary hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Pull latest Fathom meetings, refresh Intelligence-related caches, and regenerate all Marketing Intel sections (max 3 per hour)"
           >
-            {salesPlaybookSource === 'fathom' ? 'Fathom + call insights' : 'Expert baseline'}
-          </span>
+            <svg
+              className={`w-3.5 h-3.5 ${reanalyzeBusy ? 'animate-spin' : ''}`}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              aria-hidden
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+              />
+            </svg>
+            {reanalyzeBusy ? 'Re-analyzing…' : 'Re-analyze from calls'}
+          </button>
         </div>
+        {reanalyzeMessage ? (
+          <p className="text-xs text-violet-700 dark:text-violet-300 bg-violet-500/10 rounded-lg px-3 py-2 border border-violet-500/20">
+            {reanalyzeMessage}
+          </p>
+        ) : null}
         {salesPlaybookSource === 'default' && (
           <p className="text-xs text-amber-700/90 dark:text-amber-300/90 bg-amber-500/10 rounded-lg px-3 py-2 border border-amber-500/20">
             Connect Fathom and sync calls so objections, wins, and language mirror real conversations.

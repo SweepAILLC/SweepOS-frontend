@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
-import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clearSessionCaches } from './cache';
+import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clearSessionCaches, clearCalendarIntegrationStatusCache } from './cache';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
@@ -32,11 +32,28 @@ function invalidateClientsListCache(): void {
   cache.deleteByPrefix('clients');
 }
 
+/** In-memory cache key for calendar status — must match JWT org or switching orgs shows the wrong connected state. */
+function calComStatusCacheKey(): string {
+  return `${CACHE_KEYS.CALCOM_STATUS}_${orgIdFromAccessToken()}`;
+}
+
+function calendlyStatusCacheKey(): string {
+  return `${CACHE_KEYS.CALENDLY_STATUS}_${orgIdFromAccessToken()}`;
+}
+
 function isRetryable(err: unknown): boolean {
   if (!axios.isAxiosError(err)) return false;
-  const s = (err as AxiosError).response?.status;
-  if (s === 429 || s === 502 || s === 503) return true;
-  if (!s && (err as AxiosError).code === 'ECONNABORTED') return true;
+  const ax = err as AxiosError;
+  if (ax.code === 'ERR_CANCELED') return false;
+  const s = ax.response?.status;
+  if (s === 429 || s === 502 || s === 503 || s === 504) return true;
+  if (!s && ax.code === 'ECONNABORTED') return true;
+  // No HTTP response: browser "Network Error", connection reset, refused, etc. — often transient.
+  if (!s) {
+    const transient = new Set(['ERR_NETWORK', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT']);
+    if (ax.code && transient.has(ax.code)) return true;
+    if (ax.message === 'Network Error') return true;
+  }
   return false;
 }
 
@@ -130,9 +147,32 @@ export interface PerformanceSnapshot {
     insights?: string[];
   };
   tasks: PerformanceTask[];
+  /** Intelligence tab pipeline_priorities order — used server-side to rank ROI + org tasks. */
+  pipeline_priorities?: string[];
+  /** Persisted email drafts for Performance tasks (one per task id). */
+  drafts?: PerformanceTaskEmailDraft[];
 }
 
-/** Content Studio — matches backend content_studio schemas (v2 bundle). */
+/** Persisted send-ready email draft auto-generated for a Performance task. */
+export interface PerformanceTaskEmailDraft {
+  task_id: string;
+  subject: string;
+  body_plain: string;
+  body_html: string;
+  source: string;
+  generated_at: string;
+  client_id?: string | null;
+  client_email?: string | null;
+  skipped_reason?: string | null;
+}
+
+export interface PerformanceEmailDraftsResponse {
+  drafts: PerformanceTaskEmailDraft[];
+  skipped: string[];
+  source: string;
+}
+
+/** Marketing Intel tab (content_studio) — matches backend content_studio schemas (v2 bundle). */
 export interface ContentStudioSectionIdea {
   id: string;
   stage: 'TOF' | 'MOF' | 'BOF';
@@ -194,6 +234,8 @@ export interface CallLibraryItem {
   client_name: string | null;
   call_score: number | null;
   recording_url: string | null;
+  share_url?: string | null;
+  video_url?: string | null;
   attendees: CallLibraryAttendee[] | null;
   report: Record<string, unknown> | null;
   computed_at: string | null;
@@ -356,6 +398,7 @@ class ApiClient {
         secure: window.location.protocol === 'https:',
         path: '/'
       });
+      clearCalendarIntegrationStatusCache();
     }
     return data;
   }
@@ -425,8 +468,14 @@ class ApiClient {
     const params: any = lifecycleState ? { lifecycle_state: lifecycleState } : {};
     // Cap client list size for performance; backend also enforces an upper bound
     params.limit = 200;
-    const response = await this.client.get('/clients', { params });
-    const data = response.data;
+    const data = await withRetry(
+      async () => {
+        const response = await this.client.get('/clients', { params });
+        return response.data;
+      },
+      3,
+      1000
+    );
     if (!lifecycleState) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
@@ -514,7 +563,9 @@ class ApiClient {
 
   // Check-ins
   async syncCheckIns() {
-    const response = await this.client.post('/clients/check-ins/sync');
+    const response = await this.client.post('/clients/check-ins/sync', null, {
+      timeout: 180000,
+    });
     return response.data;
   }
 
@@ -531,16 +582,20 @@ class ApiClient {
     if (options?.useAi) {
       params.use_ai = true;
     }
-    const response = await this.client.get(`/clients/${clientId}/health-score`, {
-      params: Object.keys(params).length ? params : undefined,
+    return withRetry(async () => {
+      const response = await this.client.get(`/clients/${clientId}/health-score`, {
+        params: Object.keys(params).length ? params : undefined,
+      });
+      return response.data;
     });
-    return response.data;
   }
 
   /** Lifecycle (and later AI) recommendation checklist for a client. */
   async getClientAIRecommendations(clientId: string) {
-    const response = await this.client.get(`/clients/${clientId}/ai-recommendations`);
-    return response.data;
+    return withRetry(async () => {
+      const response = await this.client.get(`/clients/${clientId}/ai-recommendations`);
+      return response.data;
+    });
   }
 
   async patchClientAIRecommendationAction(clientId: string, actionId: string, completed: boolean) {
@@ -564,10 +619,16 @@ class ApiClient {
     clientIds: string[]
   ): Promise<Record<string, { score: number; grade: string; source?: string }>> {
     if (clientIds.length === 0) return {};
-    const response = await this.client.get('/clients/health-scores', {
-      params: { client_ids: clientIds.join(',') }
-    });
-    const raw = response.data || {};
+    const raw = await withRetry(
+      async () => {
+        const response = await this.client.get('/clients/health-scores', {
+          params: { client_ids: clientIds.join(',') }
+        });
+        return response.data || {};
+      },
+      3,
+      1000
+    );
     const out: Record<string, { score: number; grade: string; source?: string }> = {};
     for (const [id, v] of Object.entries(raw)) {
       if (!v || typeof v !== 'object') continue;
@@ -589,8 +650,10 @@ class ApiClient {
 
   /** Call insights (ROI, clips, opportunity tags) — from Fathom + LLM. */
   async getClientCallInsights(clientId: string) {
-    const response = await this.client.get(`/clients/${clientId}/call-insights`);
-    return response.data;
+    return withRetry(async () => {
+      const response = await this.client.get(`/clients/${clientId}/call-insights`);
+      return response.data;
+    });
   }
 
   async getOrgSalesContentThemes(): Promise<{ themes: OrgSalesContentTheme[] }> {
@@ -617,15 +680,30 @@ class ApiClient {
     return response.data;
   }
 
+  /**
+   * Create a Fathom webhook (API key required) that POSTs new meeting content to this backend.
+   * Backend uses BACKEND_PUBLIC_URL + per-org webhook secret to verify signatures.
+   */
+  async setupFathomWebhook(): Promise<{ success?: boolean; destination_url?: string; webhook_id?: string }> {
+    const response = await this.client.post('/integrations/fathom/webhook/setup', null, { timeout: 60000 });
+    return response.data;
+  }
+
   /** Batch opportunity tags for board chips. */
   async getClientsCallInsightTags(
     clientIds: string[]
   ): Promise<Record<string, { tags: string[]; headline: string }>> {
     if (clientIds.length === 0) return {};
-    const response = await this.client.get('/clients/call-insight-tags', {
-      params: { client_ids: clientIds.join(',') },
-    });
-    return response.data || {};
+    return withRetry(
+      async () => {
+        const response = await this.client.get('/clients/call-insight-tags', {
+          params: { client_ids: clientIds.join(',') },
+        });
+        return response.data || {};
+      },
+      3,
+      1000
+    );
   }
 
   async getNextCheckIn(clientId: string) {
@@ -737,6 +815,8 @@ class ApiClient {
       params: { force_full: forceFull, sync_recent: syncRecent },
       timeout: 300000, // 5 minutes for sync operations
     });
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -746,6 +826,8 @@ class ApiClient {
       params: { force_full: forceFull, sync_recent: syncRecent },
       timeout: 300000, // 5 minutes
     });
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -780,22 +862,23 @@ class ApiClient {
     const response = await this.client.post('/oauth/calcom/connect-direct', {
       api_key: apiKey
     });
-    cache.delete(CACHE_KEYS.CALCOM_STATUS);
+    clearCalendarIntegrationStatusCache();
     return response.data;
   }
 
   async getCalComStatus() {
-    const cached = cache.get<unknown>(CACHE_KEYS.CALCOM_STATUS);
+    const key = calComStatusCacheKey();
+    const cached = cache.get<unknown>(key);
     if (cached != null) return cached;
     const response = await this.client.get('/integrations/calcom/status');
     const data = response.data;
-    cache.set(CACHE_KEYS.CALCOM_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    cache.set(key, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
   async disconnectCalCom() {
     await this.client.delete('/oauth/calcom/disconnect');
-    cache.delete(CACHE_KEYS.CALCOM_STATUS);
+    clearCalendarIntegrationStatusCache();
   }
 
   async getCalComBookings(limit: number = 50, offset: number = 0) {
@@ -814,8 +897,12 @@ class ApiClient {
 
   /** Fetch Cal.com booking by UID (string). Uses GET /v2/bookings/{bookingUid} with cal-api-version 2026-02-25. */
   async getCalComBookingDetails(bookingUid: string) {
-    const response = await this.client.get(`/integrations/calcom/booking/${encodeURIComponent(bookingUid)}`);
-    return response.data;
+    return withRetry(async () => {
+      const response = await this.client.get(`/integrations/calcom/booking/${encodeURIComponent(bookingUid)}`, {
+        timeout: 20000,
+      });
+      return response.data;
+    }, 2, 1200);
   }
 
   // Calendly
@@ -823,22 +910,23 @@ class ApiClient {
     const response = await this.client.post('/oauth/calendly/connect-direct', {
       api_key: apiKey
     });
-    cache.delete(CACHE_KEYS.CALENDLY_STATUS);
+    clearCalendarIntegrationStatusCache();
     return response.data;
   }
 
   async getCalendlyStatus() {
-    const cached = cache.get<unknown>(CACHE_KEYS.CALENDLY_STATUS);
+    const key = calendlyStatusCacheKey();
+    const cached = cache.get<unknown>(key);
     if (cached != null) return cached;
     const response = await this.client.get('/integrations/calendly/status');
     const data = response.data;
-    cache.set(CACHE_KEYS.CALENDLY_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    cache.set(key, data, TERMINAL_CACHE_TTL_MS);
     return data;
   }
 
   async disconnectCalendly() {
     await this.client.delete('/oauth/calendly/disconnect');
-    cache.delete(CACHE_KEYS.CALENDLY_STATUS);
+    clearCalendarIntegrationStatusCache();
   }
 
   async getCalendlyScheduledEvents(params?: {
@@ -867,6 +955,29 @@ class ApiClient {
     return response.data;
   }
 
+  /** Same shape as getCalendarSalesCloseRate; all orgs combined (admin only). Owner Health tab KPI. */
+  async getPlatformCalendarSalesCloseRate() {
+    const response = await this.client.get('/integrations/calendar/platform-sales-close-rate');
+    return response.data as {
+      all_time: { total_sales_calls: number; closed_count: number; close_rate_pct: number };
+      last_30d: { total_sales_calls: number; closed_count: number; close_rate_pct: number };
+    };
+  }
+
+  /** Monthly show-up % vs sales close % for the current org (Calendar tab). */
+  async getCalendarMonthlyCoachingMetrics() {
+    const response = await this.client.get('/clients/calendar/monthly-coaching-metrics');
+    return response.data as {
+      periods: Array<{
+        period_label: string;
+        period_start: string;
+        period_end: string;
+        show_up_rate_pct: number | null;
+        close_rate_pct: number | null;
+      }>;
+    };
+  }
+
   /** Manual check-ins for the calendar grid (date range YYYY-MM-DD). */
   async getCalendarManualEvents(start: string, end: string) {
     const response = await this.client.get('/integrations/calendar/manual-events', {
@@ -876,10 +987,16 @@ class ApiClient {
   }
 
   /** Canonical Cal.com / Calendly rows from synced `client_check_ins` (after `syncCheckIns`). */
-  async getCalendarSyncedBookings(params?: { upcoming_limit?: number; past_limit?: number }) {
+  async getCalendarSyncedBookings(params?: {
+    upcoming_limit?: number;
+    past_limit?: number;
+    provider?: 'calcom' | 'calendly';
+  }) {
+    // DB-backed read must stay under Postgres statement_timeout (see backend session); allow headroom
+    // for pool wait + JSON when the API is busy right after check-in sync.
     const response = await this.client.get('/integrations/calendar/synced-bookings', {
       params: params || {},
-      timeout: 60000,
+      timeout: 120000,
     });
     return response.data as {
       server_time: string;
@@ -904,8 +1021,12 @@ class ApiClient {
   async getCalendlyEventDetails(eventUri: string) {
     // Encode the URI for the path parameter
     const encodedUri = encodeURIComponent(eventUri);
-    const response = await this.client.get(`/integrations/calendly/event/${encodedUri}`);
-    return response.data;
+    return withRetry(async () => {
+      const response = await this.client.get(`/integrations/calendly/event/${encodedUri}`, {
+        timeout: 20000,
+      });
+      return response.data;
+    }, 2, 1200);
   }
 
   async cancelCalComBooking(bookingUid: string, reason?: string) {
@@ -969,6 +1090,91 @@ class ApiClient {
   /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
   async getStripeLastUpdated(): Promise<{ last_updated: string | null; last_updated_ms: number | null }> {
     const response = await this.client.get('/integrations/stripe/last-updated');
+    return response.data;
+  }
+
+  /**
+   * Combined Stripe + Whop cash KPIs. Pass `fin` to match the All Finances time range (see Finances dashboard).
+   * `last_30_days_revenue` in the response is the selected **primary** window, not always 30d.
+   */
+  async getFinancesSummary(
+    bypassCache?: boolean,
+    fin?: { range?: number; scope?: 'mtd' | 'all' }
+  ) {
+    const range = fin?.range ?? 30;
+    const scope = fin?.scope;
+    const cacheKey = `${CACHE_KEYS.FINANCES_SUMMARY}:${scope ?? 'r'}:${range}`;
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(cacheKey);
+      if (cached != null) return cached;
+    }
+    const params: Record<string, string | number> = { range };
+    if (scope) params.scope = scope;
+    const response = await this.client.get('/integrations/finances/summary', { params });
+    const data = response.data;
+    if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
+  }
+
+  async getFinancesRevenueTimeline(
+    rangeDays: number = 30,
+    groupBy: 'day' | 'week' = 'day',
+    scope?: 'mtd' | 'all' | null
+  ) {
+    const params: Record<string, string | number> = { range: rangeDays, group_by: groupBy };
+    if (scope) params.scope = scope;
+    const response = await this.client.get('/integrations/finances/revenue-timeline', { params });
+    return response.data;
+  }
+
+  async getWhopStatus(bypassCache?: boolean) {
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(CACHE_KEYS.WHOP_STATUS);
+      if (cached != null) return cached;
+    }
+    const response = await this.client.get('/integrations/whop/status');
+    const data = response.data;
+    if (!bypassCache) cache.set(CACHE_KEYS.WHOP_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
+  }
+
+  async postWhopConnect(body: { api_key: string; company_id: string }) {
+    const response = await this.client.post('/integrations/whop/connect', body);
+    cache.delete(CACHE_KEYS.WHOP_STATUS);
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    return response.data;
+  }
+
+  async postWhopDisconnect() {
+    await this.client.post('/integrations/whop/disconnect');
+    cache.delete(CACHE_KEYS.WHOP_STATUS);
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  }
+
+  async postWhopSync(forceFull?: boolean) {
+    const response = await this.client.post('/integrations/whop/sync', null, {
+      params: { force_full: !!forceFull },
+      timeout: 300000,
+    });
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    cache.deleteByPrefix('whop_payments');
+    return response.data;
+  }
+
+  async getWhopPayments(page: number = 1, pageSize: number = 50) {
+    const response = await this.client.get('/integrations/whop/payments', {
+      params: { page, page_size: pageSize },
+    });
+    return response.data;
+  }
+
+  async getWhopRevenueTimeline(rangeDays: number = 30, groupBy: 'day' | 'week' = 'day') {
+    const response = await this.client.get('/integrations/whop/revenue-timeline', {
+      params: { range_days: rangeDays, group_by: groupBy },
+    });
     return response.data;
   }
 
@@ -1340,7 +1546,11 @@ class ApiClient {
       if (cached != null) return cached;
     }
     const params = range ? { range } : {};
-    const response = await this.client.get(`/funnels/${funnelId}/analytics`, { params });
+    // Analytics can scan large event tables; default 20s axios timeout caused ECONNABORTED on busy orgs.
+    const response = await this.client.get(`/funnels/${funnelId}/analytics`, {
+      params,
+      timeout: 120000,
+    });
     const data = response.data;
     cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
@@ -1566,12 +1776,43 @@ class ApiClient {
     };
   }
 
-  // Content Studio (bootstrap may draft the v2 bundle via LLM when signals change — long timeout)
+  /**
+   * Auto-generate (and persist) send-ready emails for one or more Performance task ids.
+   * Empty `task_ids` = top open tasks. `force` true regenerates even if a saved draft exists.
+   * Backend rate-limits these (429) — caller should surface a friendly message.
+   */
+  async postPerformanceEmailDrafts(
+    task_ids?: string[],
+    options?: { force?: boolean }
+  ): Promise<PerformanceEmailDraftsResponse> {
+    const response = await this.client.post(
+      '/performance/email-drafts',
+      { task_ids: task_ids ?? [], force: !!options?.force },
+      { timeout: 120000 }
+    );
+    return response.data as PerformanceEmailDraftsResponse;
+  }
+
+  // Marketing Intel / content_studio (bootstrap may draft the v2 bundle via LLM when signals change — long timeout)
   async getContentStudioBootstrap(): Promise<ContentStudioBootstrap> {
     return withRetry(async () => {
       const response = await this.client.get('/content-studio/bootstrap', { timeout: 120000 });
       return response.data;
     });
+  }
+
+  /**
+   * Fathom sync + health cache bust + queued bundle regeneration (rate-limited server-side).
+   */
+  async postContentStudioReanalyze(): Promise<{
+    fathom_sync: Record<string, unknown>;
+    bundle_regenerating: boolean;
+    health_clients_invalidated: number;
+  }> {
+    const response = await this.client.post('/content-studio/reanalyze', null, {
+      timeout: 180000,
+    });
+    return response.data;
   }
 
   async putContentStudioKnowledge(body: {

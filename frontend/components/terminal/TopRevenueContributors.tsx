@@ -228,9 +228,9 @@ export default function TopRevenueContributors({ initialSummary, initialSummaryS
   };
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
+    <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 min-w-0">
+        <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
           Top 5 Revenue Contributors
         </h3>
         <div className="flex space-x-2">
@@ -267,13 +267,13 @@ export default function TopRevenueContributors({ initialSummary, initialSummaryS
           No revenue contributors found for the selected period.
         </p>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 min-w-0">
           {contributors.map((contributor, index) => (
             <div
               key={contributor.client_id}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 glass-panel rounded-lg"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 glass-panel rounded-lg min-w-0 max-w-full overflow-hidden"
             >
-              <div className="flex items-center space-x-3 flex-1 min-w-0">
+              <div className="flex items-center space-x-3 flex-1 min-w-0 overflow-hidden">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
                   {index + 1}
                 </div>
@@ -286,8 +286,11 @@ export default function TopRevenueContributors({ initialSummary, initialSummaryS
                   </p>
                 </div>
               </div>
-              <div className="text-left sm:text-right flex-shrink-0">
-                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100">
+              <div className="text-left sm:text-right flex-shrink-0 min-w-0 max-w-full sm:max-w-[45%]">
+                <p
+                  className="text-base sm:text-lg font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate"
+                  title={formatCurrency(contributor.revenue)}
+                >
                   {formatCurrency(contributor.revenue)}
                 </p>
               </div>

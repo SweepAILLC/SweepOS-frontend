@@ -21,9 +21,9 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     loadLeadSources();
   }, []);
 
-  // Live polling for accurate terminal funnel data (refresh every 60s; bypass cache)
+  // Live polling: avoid forceRefresh — same N×analytics pattern as BookingRateByFunnel.
   useEffect(() => {
-    const interval = setInterval(() => loadLeadSources(true), 60 * 1000);
+    const interval = setInterval(() => loadLeadSources(false), 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -127,7 +127,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
   ];
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
+    <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
       <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
         Leads by Source
         <span className="text-xs sm:text-sm font-normal text-gray-500 dark:text-gray-400 ml-1 sm:ml-2">(Last 30d)</span>
@@ -143,8 +143,8 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
           No lead source data available.
         </p>
       ) : (
-        <div className="flex flex-col gap-4">
-          <div className="w-full h-[220px]">
+        <div className="flex flex-col gap-4 min-w-0">
+          <div className="w-full min-w-0 max-w-full h-[220px] overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Tooltip
@@ -189,9 +189,9 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
           </div>
 
           {/* Legend dropdown */}
-          <details className="glass-panel rounded-lg px-3 py-2">
-            <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-3">
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+          <details className="glass-panel rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+            <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-3 min-w-0">
+              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
                 Sources
               </span>
               <span className="text-gray-500 dark:text-gray-400 text-xs group-open:rotate-180 transition-transform">
@@ -204,7 +204,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
                 return (
                   <div
                     key={source.source}
-                    className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2"
+                    className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2 min-w-0 max-w-full overflow-hidden"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <span
@@ -215,8 +215,8 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
                         {source.source}
                       </span>
                     </div>
-                    <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100 digitized-text">
+                    <div className="text-right flex-shrink-0 min-w-0">
+                      <div className="text-sm font-bold text-gray-900 dark:text-gray-100 digitized-text tabular-nums truncate">
                         {source.visitors.toLocaleString()}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">

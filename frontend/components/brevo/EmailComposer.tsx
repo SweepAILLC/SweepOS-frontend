@@ -3,8 +3,6 @@ import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
 
 interface EmailComposerProps {
-  contactIds?: number[];
-  listId?: number;
   recipients?: Array<{ email: string; name?: string }>;
   onClose: () => void;
   onSuccess?: () => void;
@@ -14,14 +12,12 @@ interface EmailComposerProps {
 }
 
 export default function EmailComposer({
-  contactIds,
-  listId,
   recipients: initialRecipients,
   onClose,
   onSuccess,
   initialSubject,
   initialHtmlContent,
-  initialTextContent
+  initialTextContent,
 }: EmailComposerProps) {
   const [senderEmail, setSenderEmail] = useState('');
   const [senderName, setSenderName] = useState('');
@@ -34,28 +30,18 @@ export default function EmailComposer({
   const [selectedRecipientIndices, setSelectedRecipientIndices] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [recipientCount, setRecipientCount] = useState(0);
   const [senders, setSenders] = useState<Array<{ id: number; name: string; email: string; active: boolean }>>([]);
   const [loadingSenders, setLoadingSenders] = useState(false);
   const [selectedSenderId, setSelectedSenderId] = useState<number | null>(null);
 
   useEffect(() => {
-    // Load recipient information based on contactIds or listId
-    if (contactIds && contactIds.length > 0) {
-      loadContactEmails(contactIds);
-    } else if (listId) {
-      loadListEmails(listId);
-    } else if (initialRecipients) {
+    if (initialRecipients) {
       setRecipients(initialRecipients);
-      setRecipientCount(initialRecipients.length);
       setSelectedRecipientIndices(new Set(initialRecipients.map((_, i) => i)));
     }
-    
-    // Load verified senders
-    loadSenders();
-  }, [contactIds, listId, initialRecipients]);
+    void loadSenders();
+  }, [initialRecipients]);
 
-  // Update form fields when initial values change (e.g., when opening with pre-filled content)
   useEffect(() => {
     if (initialSubject) setSubject(initialSubject);
     if (initialHtmlContent) setHtmlContent(initialHtmlContent);
@@ -67,14 +53,11 @@ export default function EmailComposer({
     try {
       const data = await apiClient.getBrevoSenders();
       const sendersList = data.senders || [];
-      console.log('[EmailComposer] Loaded senders:', sendersList);
       setSenders(sendersList);
-      
-      // Auto-select first active sender if available and no sender is already selected
+
       if (sendersList.length > 0 && !senderEmail) {
-        const activeSender = sendersList.find((s: any) => s.active);
+        const activeSender = sendersList.find((s: { active?: boolean }) => s.active);
         if (activeSender) {
-          console.log('[EmailComposer] Auto-selecting sender:', activeSender);
           setSelectedSenderId(activeSender.id);
           setSenderEmail(activeSender.email);
           setSenderName(activeSender.name || activeSender.email);
@@ -82,34 +65,15 @@ export default function EmailComposer({
       }
     } catch (err) {
       console.error('[EmailComposer] Failed to load senders:', err);
-      // Don't show error to user, just allow manual entry
       setSenders([]);
     } finally {
       setLoadingSenders(false);
     }
   };
 
-  const loadContactEmails = async (ids: number[]) => {
-    // For now, we'll fetch them on the backend, but we can show a count
-    setRecipientCount(ids.length);
-  };
-
-  const loadListEmails = async (id: number) => {
-    try {
-      // Get list info to show count
-      const lists = await apiClient.getBrevoLists(1000, 0);
-      const list = lists.lists?.find((l: { id: number; uniqueSubscribers?: number }) => l.id === id);
-      if (list) {
-        setRecipientCount(list.uniqueSubscribers || 0);
-      }
-    } catch (err) {
-      console.error('Failed to load list info:', err);
-    }
-  };
-
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!senderEmail || !subject) {
       setError('Sender email and subject are required');
       return;
@@ -129,66 +93,59 @@ export default function EmailComposer({
     setError(null);
 
     try {
-      const payload: any = {
-        sender: {
-          email: senderEmail,
-          name: senderName || senderEmail
-        },
-        subject
-      };
-
-      if (contactIds && contactIds.length > 0) {
-        payload.contactIds = contactIds;
-      } else if (listId) {
-        payload.listId = listId;
-      } else if (recipients.length > 0) {
-        const toSend = selectedRecipientIndices.size > 0
+      const toSend =
+        selectedRecipientIndices.size > 0
           ? recipients.filter((_, i) => selectedRecipientIndices.has(i))
           : recipients;
-        payload.recipients = toSend;
-        if (toSend.length === 0) {
-          setError('Select at least one recipient');
-          setLoading(false);
-          return;
-        }
-      } else {
-        setError('No recipients specified');
+      if (toSend.length === 0) {
+        setError('Select at least one recipient');
         setLoading(false);
         return;
       }
 
-      if (useTemplate) {
-        payload.templateId = templateId;
-      } else {
-        // Plain text is primary; HTML is optional fallback for HTML-capable clients
-        if (textContent) payload.textContent = textContent;
-        if (htmlContent) payload.htmlContent = htmlContent;
-      }
+      const payload: Parameters<typeof apiClient.sendBrevoTransactionalEmail>[0] = {
+        sender: {
+          email: senderEmail,
+          name: senderName || senderEmail,
+        },
+        subject,
+        recipients: toSend,
+        ...(useTemplate
+          ? { templateId: templateId ?? undefined }
+          : {
+              ...(textContent ? { textContent } : {}),
+              ...(htmlContent ? { htmlContent } : {}),
+            }),
+      };
 
-      const result = await apiClient.sendBrevoTransactionalEmail(payload);
-      const sentCount = payload.recipients?.length ?? result.recipientsCount ?? recipientCount;
-      alert(`Email sent successfully to ${sentCount} recipient(s)!`);
-      if (onSuccess) onSuccess();
+      await apiClient.sendBrevoTransactionalEmail(payload);
+      alert(`Email sent successfully to ${toSend.length} recipient(s)!`);
+      onSuccess?.();
       onClose();
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to send email');
+    } catch (err: unknown) {
+      const e = err as { response?: { data?: { detail?: string } }; message?: string };
+      setError(e?.response?.data?.detail || e?.message || 'Failed to send email');
     } finally {
       setLoading(false);
     }
   };
 
+  const sendButtonCount =
+    selectedRecipientIndices.size > 0 ? selectedRecipientIndices.size : recipients.length;
+
   const modalContent = (
-    <div className="fixed inset-0 bg-black bg-opacity-70 dark:bg-opacity-80 flex items-start justify-center z-[99999] p-4 overflow-y-auto" onClick={onClose} style={{ paddingTop: '2rem' }}>
-      <div 
+    <div
+      className="fixed inset-0 bg-black bg-opacity-70 dark:bg-opacity-80 flex items-start justify-center z-[99999] p-4 overflow-y-auto"
+      onClick={onClose}
+      style={{ paddingTop: '2rem' }}
+    >
+      <div
         className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-6 max-w-3xl w-full my-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Send Transactional Email</h3>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-          >
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
             ✕
           </button>
         </div>
@@ -200,63 +157,73 @@ export default function EmailComposer({
         )}
 
         <form onSubmit={handleSend} className="space-y-4">
-          {/* Recipients Info */}
-          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
-            <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Recipients</p>
-            {contactIds && contactIds.length > 0 && (
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Sending to {contactIds.length} selected contact(s)
-              </p>
-            )}
-            {listId && (
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Sending to entire list ({recipientCount} subscribers)
-              </p>
-            )}
-            {recipients.length > 0 && !contactIds && !listId && (
-              <div className="space-y-1">
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                  {recipients.length > 1
-                    ? `Select recipients (${selectedRecipientIndices.size} of ${recipients.length} selected):`
-                    : `Sending to 1 recipient:`}
-                </p>
-                <div className="space-y-1">
-                  {recipients.map((recipient, index) => (
-                    <label key={index} className="flex items-center gap-2 cursor-pointer">
-                      {recipients.length > 1 && (
-                        <input
-                          type="checkbox"
-                          checked={selectedRecipientIndices.has(index)}
-                          onChange={() => {
-                            const next = new Set(selectedRecipientIndices);
-                            if (next.has(index)) next.delete(index);
-                            else next.add(index);
-                            setSelectedRecipientIndices(next);
-                          }}
-                          className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                        />
-                      )}
-                      <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                        {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
-                      </span>
-                    </label>
-                  ))}
+          <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200/80 dark:border-gray-600/50">
+            {recipients.length > 0 ? (
+              <details className="group">
+                <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-2 text-sm font-medium text-gray-700 dark:text-gray-300 [&::-webkit-details-marker]:hidden">
+                  <span className="min-w-0">
+                    {recipients.length === 1 ? (
+                      <>1 recipient</>
+                    ) : (
+                      <>
+                        {recipients.length} recipients
+                        <span className="font-normal text-gray-500 dark:text-gray-400">
+                          {' '}
+                          ({selectedRecipientIndices.size} selected)
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  <span className="flex-shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md border border-gray-300 dark:border-gray-600 bg-white/60 dark:bg-gray-700/80 text-gray-600 dark:text-gray-300 group-open:border-primary-400/50">
+                    <svg
+                      className="w-4 h-4 transition-transform group-open:rotate-180"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </span>
+                </summary>
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-600 space-y-2">
+                  {recipients.length > 1 ? (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Uncheck anyone who should not receive this send.
+                    </p>
+                  ) : null}
+                  <div className="space-y-1 max-h-56 overflow-y-auto pr-1">
+                    {recipients.map((recipient, index) => (
+                      <label key={index} className="flex items-center gap-2 cursor-pointer py-0.5">
+                        {recipients.length > 1 && (
+                          <input
+                            type="checkbox"
+                            checked={selectedRecipientIndices.has(index)}
+                            onChange={() => {
+                              const next = new Set(selectedRecipientIndices);
+                              if (next.has(index)) next.delete(index);
+                              else next.add(index);
+                              setSelectedRecipientIndices(next);
+                            }}
+                            className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                        )}
+                        <span className="text-sm text-gray-900 dark:text-gray-100 break-all">
+                          {recipient.name ? `${recipient.name} <${recipient.email}>` : recipient.email}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
-            {recipients.length === 0 && !contactIds && !listId && (
-              <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-                No recipients specified
-              </p>
+              </details>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400 italic">No recipients specified</p>
             )}
           </div>
 
-          {/* Sender */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Sender Email *
-              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sender Email *</label>
               {loadingSenders ? (
                 <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                   Loading senders...
@@ -264,7 +231,13 @@ export default function EmailComposer({
               ) : senders.length > 0 ? (
                 <>
                   <select
-                    value={selectedSenderId === null ? (senderEmail && !senders.some(s => s.email === senderEmail) ? 'custom' : '') : selectedSenderId}
+                    value={
+                      selectedSenderId === null
+                        ? senderEmail && !senders.some((s) => s.email === senderEmail)
+                          ? 'custom'
+                          : ''
+                        : selectedSenderId
+                    }
                     onChange={(e) => {
                       if (e.target.value === 'custom') {
                         setSelectedSenderId(null);
@@ -275,9 +248,9 @@ export default function EmailComposer({
                         setSenderEmail('');
                         setSenderName('');
                       } else {
-                        const senderId = parseInt(e.target.value);
+                        const senderId = parseInt(e.target.value, 10);
                         setSelectedSenderId(senderId);
-                        const selectedSender = senders.find(s => s.id === senderId);
+                        const selectedSender = senders.find((s) => s.id === senderId);
                         if (selectedSender) {
                           setSenderEmail(selectedSender.email);
                           setSenderName(selectedSender.name || selectedSender.email);
@@ -288,7 +261,7 @@ export default function EmailComposer({
                   >
                     <option value="">Select a verified sender...</option>
                     {senders
-                      .filter(s => s.active)
+                      .filter((s) => s.active)
                       .map((sender) => (
                         <option key={sender.id} value={sender.id}>
                           {sender.name ? `${sender.name} <${sender.email}>` : sender.email}
@@ -321,9 +294,7 @@ export default function EmailComposer({
               )}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Sender Name
-              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sender Name</label>
               <input
                 type="text"
                 value={senderName}
@@ -334,11 +305,8 @@ export default function EmailComposer({
             </div>
           </div>
 
-          {/* Subject */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Subject *
-            </label>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subject *</label>
             <input
               type="text"
               value={subject}
@@ -349,7 +317,6 @@ export default function EmailComposer({
             />
           </div>
 
-          {/* Template vs Content */}
           <div>
             <label className="flex items-center space-x-2">
               <input
@@ -364,23 +331,18 @@ export default function EmailComposer({
 
           {useTemplate ? (
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Template ID
-              </label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Template ID</label>
               <input
                 type="number"
                 value={templateId || ''}
-                onChange={(e) => setTemplateId(e.target.value ? parseInt(e.target.value) : null)}
+                onChange={(e) => setTemplateId(e.target.value ? parseInt(e.target.value, 10) : null)}
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
                 placeholder="Enter template ID"
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Enter the Brevo template ID you want to use
-              </p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Enter the Brevo template ID you want to use</p>
             </div>
           ) : (
             <>
-              {/* Plain text: primary body */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Plain text <span className="text-gray-500 dark:text-gray-400 font-normal">(primary)</span>
@@ -397,7 +359,6 @@ export default function EmailComposer({
                 </p>
               </div>
 
-              {/* HTML: optional fallback / rich alternative */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   HTML <span className="text-gray-500 dark:text-gray-400 font-normal">(optional fallback)</span>
@@ -413,7 +374,6 @@ export default function EmailComposer({
             </>
           )}
 
-          {/* Actions */}
           <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700">
             <button
               type="button"
@@ -427,19 +387,17 @@ export default function EmailComposer({
               disabled={loading}
               className="px-4 py-2 text-sm font-medium rounded-md bg-primary-500 dark:bg-primary-600 text-white hover:bg-primary-600 dark:hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {loading ? 'Sending...' : `Send to ${selectedRecipientIndices.size > 0 ? selectedRecipientIndices.size : recipients.length} recipient(s)`}
+              {loading ? 'Sending...' : `Send to ${sendButtonCount} recipient(s)`}
             </button>
           </div>
-      </form>
+        </form>
+      </div>
     </div>
-  </div>
   );
 
-  // Use portal to render modal at document.body level, ensuring it's on top of everything
   if (typeof window !== 'undefined') {
     return createPortal(modalContent, document.body);
   }
-  
+
   return modalContent;
 }
-

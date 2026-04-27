@@ -17,9 +17,9 @@ export default function FunnelAnalyticsTab({ funnelId }: FunnelAnalyticsTabProps
     loadAnalytics();
   }, [funnelId, timeRange]);
 
-  // Live polling for accurate analytics (refresh every 60s; bypass cache so data is fresh)
+  // Live polling: use cache-friendly fetch so we don't hammer the API (matches terminal widgets).
   useEffect(() => {
-    const interval = setInterval(() => loadAnalytics(true), 60 * 1000);
+    const interval = setInterval(() => loadAnalytics(false), 60 * 1000);
     return () => clearInterval(interval);
   }, [funnelId, timeRange]);
 

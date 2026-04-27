@@ -3,9 +3,8 @@ import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
 import { APP_SIDEBAR_WIDTH } from '@/components/ui/layoutConstants';
 
 export type TabId =
-  | 'brevo'
   | 'terminal'
-  | 'stripe'
+  | 'finances'
   | 'funnels'
   | 'content_studio'
   | 'call_library'
@@ -48,11 +47,15 @@ export default function Navbar({
   }, []);
 
   const shouldShowTab = (tab: string): boolean => {
+    const roleLower = String(userRole || 'member').toLowerCase().trim();
     if (tab === 'owner') {
       return isOwner;
     }
+    // Members: never show restricted product tabs
+    if (roleLower === 'member' && (tab === 'integrations' || tab === 'intelligence')) {
+      return false;
+    }
     if (tab === 'users') {
-      const roleLower = String(userRole || 'member').toLowerCase().trim();
       if (roleLower === 'member') {
         return false;
       }
@@ -60,6 +63,11 @@ export default function Navbar({
         return tabPermissions[tab] !== false;
       }
       return false;
+    }
+    if (tab === 'finances') {
+      const v =
+        tabPermissions.finances !== undefined ? tabPermissions.finances : tabPermissions.stripe;
+      return v !== false;
     }
     return tabPermissions[tab] !== false;
   };
@@ -136,11 +144,10 @@ export default function Navbar({
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-2 px-2 space-y-1">
         {shouldShowTab('terminal') && tabBtn('terminal', 'Terminal')}
-        {shouldShowTab('brevo') && tabBtn('brevo', 'Email')}
-        {shouldShowTab('stripe') && tabBtn('stripe', 'Stripe')}
+        {shouldShowTab('finances') && tabBtn('finances', 'Finances')}
         {shouldShowTab('calcom') && tabBtn('calcom', 'Calendar')}
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
-        {shouldShowTab('content_studio') && tabBtn('content_studio', 'Content Studio')}
+        {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
         {shouldShowTab('integrations') && tabBtn('integrations', 'Integrations')}
         {shouldShowTab('users') && tabBtn('users', 'Users')}
@@ -165,23 +172,24 @@ export default function Navbar({
               title: 'Performance priorities & ROI',
             }
           )}
-        {iconBtn(
-          () => onTabChange('intelligence'),
-          'Intelligence',
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-            />
-          </svg>,
-          {
-            extraClass: activeTab === 'intelligence' ? 'ring-2 ring-violet-500/50' : '',
-            ariaLabel: 'AI Intelligence',
-            title: 'AI Intelligence profile',
-          }
-        )}
+        {shouldShowTab('intelligence') &&
+          iconBtn(
+            () => onTabChange('intelligence'),
+            'Intelligence',
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
+              />
+            </svg>,
+            {
+              extraClass: activeTab === 'intelligence' ? 'ring-2 ring-violet-500/50' : '',
+              ariaLabel: 'AI Intelligence',
+              title: 'AI Intelligence profile',
+            }
+          )}
         {iconBtn(
           () => onTabChange('settings'),
           'Settings',

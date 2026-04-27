@@ -1,12 +1,46 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
-import { apiClient, PerformanceSnapshot, PerformanceTask } from '@/lib/api';
+import { apiClient, PerformanceSnapshot, PerformanceTask, PerformanceTaskEmailDraft } from '@/lib/api';
 import { useLoading } from '@/contexts/LoadingContext';
 import PerformancePipelineMini from '@/components/ui/PerformancePipelineMini';
+import EmailComposer from '@/components/brevo/EmailComposer';
 
 type RxMap = Record<string, { why: string; prescription: string; next_step: string }>;
+type DraftMap = Record<string, PerformanceTaskEmailDraft>;
+type ComposerPayload = {
+  recipients: Array<{ email: string; name?: string }>;
+  subject: string;
+  htmlContent: string;
+  textContent: string;
+};
+/** Cap how many auto-drafts we kick off per snapshot load to keep LLM cost predictable. */
+const AUTO_EMAIL_DRAFT_CAP = 6;
+/** How long a just-completed priority stays in the open list with a checked visual before moving to Completed. */
+const COMPLETE_VISUAL_GRACE_MS = 850;
+
+function recipientsForTask(
+  task: PerformanceTask,
+  draft?: PerformanceTaskEmailDraft
+): Array<{ email: string; name?: string }> {
+  const ev = (task.evidence || {}) as Record<string, unknown>;
+  const email = (draft?.client_email || (ev.client_email as string) || '').trim();
+  if (!email) return [];
+  const name = ((ev.client_name as string) || '').trim() || undefined;
+  return [{ email, name }];
+}
+
+function composerPayloadFrom(
+  task: PerformanceTask,
+  draft: PerformanceTaskEmailDraft
+): ComposerPayload {
+  return {
+    recipients: recipientsForTask(task, draft),
+    subject: draft.subject || '',
+    htmlContent: draft.body_html || '',
+    textContent: draft.body_plain || '',
+  };
+}
 
 function severityStyles(level: string): string {
   const v = (level || 'ok').toLowerCase();
@@ -40,84 +74,354 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
   const [rx, setRx] = useState<RxMap>({});
   const [rxStatus, setRxStatus] = useState<'idle' | 'loading' | 'done' | 'skipped'>('idle');
   const [patching, setPatching] = useState(false);
-  /** LLM prescription runs at most once per mounted panel lifetime (not on every tab return). */
+  const [drafts, setDrafts] = useState<DraftMap>({});
+  /** Per-task email-generation status (UI only). */
+  const [draftStatus, setDraftStatus] = useState<Record<string, 'loading' | 'done' | 'error'>>({});
+  const [draftBatchStatus, setDraftBatchStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  /** EmailComposer modal mounted at the panel root. */
+  const [composer, setComposer] = useState<ComposerPayload | null>(null);
+  /** When set, auto-open the composer the moment a draft for this task lands (after Generate-from-row click). */
+  const [pendingComposerTaskId, setPendingComposerTaskId] = useState<string | null>(null);
+  /** Per-task error surfaced when there's no email on the client to send to. */
+  const [composerErrors, setComposerErrors] = useState<Record<string, string>>({});
+  /** Single-shot reanalyze button state (snapshot + prescription + drafts batch). */
+  const [reanalyzing, setReanalyzing] = useState(false);
+  const [reanalyzeNotice, setReanalyzeNotice] = useState<string | null>(null);
+  /** LLM prescription + email-draft batch run once per mounted panel lifetime; later refreshes go through Re-analyze. */
   const prescriptionRequestedRef = useRef(false);
   /** After first successful snapshot we soft-refresh without full-page skeleton. */
   const hasSnapshotDataRef = useRef(false);
-  const [signalsRefreshing, setSignalsRefreshing] = useState(false);
+  /** Task ids that are persisted as completed but still shown under open priorities until grace elapses. */
+  const [completingGraceIds, setCompletingGraceIds] = useState<Set<string>>(() => new Set());
+  const completingGraceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
-  const loadSnapshot = useCallback(async () => {
-    if (!hasSnapshotDataRef.current) {
-      setLoading(true);
+  const clearAllCompletingGrace = useCallback(() => {
+    completingGraceTimersRef.current.forEach((t) => clearTimeout(t));
+    completingGraceTimersRef.current.clear();
+    setCompletingGraceIds(new Set());
+  }, []);
+
+  const scheduleCompletingGrace = useCallback((id: string) => {
+    const prevTimer = completingGraceTimersRef.current.get(id);
+    if (prevTimer) clearTimeout(prevTimer);
+    setCompletingGraceIds((s) => {
+      const n = new Set(s);
+      n.add(id);
+      return n;
+    });
+    const t = setTimeout(() => {
+      completingGraceTimersRef.current.delete(id);
+      setCompletingGraceIds((s) => {
+        if (!s.has(id)) return s;
+        const n = new Set(s);
+        n.delete(id);
+        return n;
+      });
+    }, COMPLETE_VISUAL_GRACE_MS);
+    completingGraceTimersRef.current.set(id, t);
+  }, []);
+
+  const cancelCompletingGrace = useCallback((id: string) => {
+    const prevTimer = completingGraceTimersRef.current.get(id);
+    if (prevTimer) {
+      clearTimeout(prevTimer);
+      completingGraceTimersRef.current.delete(id);
     }
-    setError(null);
-    try {
-      const data = await apiClient.getPerformanceSnapshot();
-      setError(null);
-      setSnap(data);
-      setTasks(data.tasks || []);
-      hasSnapshotDataRef.current = true;
-      setLoading(false);
-      setGlobalLoading(false);
+    setCompletingGraceIds((s) => {
+      if (!s.has(id)) return s;
+      const n = new Set(s);
+      n.delete(id);
+      return n;
+    });
+  }, []);
 
-      if (!prescriptionRequestedRef.current) {
-        prescriptionRequestedRef.current = true;
-        setRxStatus('loading');
-        void (async () => {
-          try {
-            const pr = await apiClient.postPerformancePrescription();
-            const m: RxMap = {};
-            for (const t of pr.tasks || []) {
-              m[t.id] = {
-                why: t.why || '',
-                prescription: t.prescription || '',
-                next_step: t.next_step || '',
-              };
-            }
-            setRx(m);
-            setRxStatus('done');
-          } catch {
-            setRxStatus('skipped');
+  useEffect(() => {
+    return () => {
+      completingGraceTimersRef.current.forEach((t) => clearTimeout(t));
+      completingGraceTimersRef.current.clear();
+    };
+  }, []);
+
+  const generateDraftsBatch = useCallback(
+    async (candidateTaskIds: string[], { force = false }: { force?: boolean } = {}) => {
+      const ids = candidateTaskIds.slice(0, AUTO_EMAIL_DRAFT_CAP);
+      if (ids.length === 0) {
+        setDraftBatchStatus('done');
+        return;
+      }
+      setDraftBatchStatus('loading');
+      setDraftStatus((prev) => {
+        const next = { ...prev };
+        for (const id of ids) next[id] = 'loading';
+        return next;
+      });
+      try {
+        const res = await apiClient.postPerformanceEmailDrafts(ids, { force });
+        setDrafts((prev) => {
+          const next = { ...prev };
+          for (const d of res.drafts || []) {
+            if (d?.task_id) next[d.task_id] = d;
           }
-        })();
+          return next;
+        });
+        setDraftStatus((prev) => {
+          const next = { ...prev };
+          const made = new Set((res.drafts || []).map((d) => d.task_id));
+          const skipped = new Set(res.skipped || []);
+          for (const id of ids) {
+            if (made.has(id)) next[id] = 'done';
+            else if (skipped.has(id)) next[id] = 'error';
+            else next[id] = 'error';
+          }
+          return next;
+        });
+        setDraftBatchStatus('done');
+      } catch {
+        setDraftStatus((prev) => {
+          const next = { ...prev };
+          for (const id of ids) next[id] = 'error';
+          return next;
+        });
+        setDraftBatchStatus('error');
       }
-    } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e as Error)?.message ||
-        'Failed to load performance data';
-      setError(String(msg));
-      if (!hasSnapshotDataRef.current) {
-        setSnap(null);
-        setTasks([]);
-      }
-      setLoading(false);
-      setGlobalLoading(false);
-    }
-  }, [setGlobalLoading]);
+    },
+    []
+  );
 
-  const refreshPipelineSignals = useCallback(async () => {
-    setSignalsRefreshing(true);
+  const requestPrescriptionsAndDrafts = useCallback(
+    async (snapshot: PerformanceSnapshot) => {
+      const seededDrafts: DraftMap = {};
+      for (const d of snapshot.drafts || []) {
+        if (d?.task_id) seededDrafts[d.task_id] = d;
+      }
+      setDrafts(seededDrafts);
+
+      setRxStatus('loading');
+      try {
+        const pr = await apiClient.postPerformancePrescription();
+        const m: RxMap = {};
+        for (const t of pr.tasks || []) {
+          m[t.id] = {
+            why: t.why || '',
+            prescription: t.prescription || '',
+            next_step: t.next_step || '',
+          };
+        }
+        setRx(m);
+        setRxStatus('done');
+      } catch {
+        setRxStatus('skipped');
+      }
+
+      const eligible = (snapshot.tasks || [])
+        .filter((t) => !t.completed)
+        .filter((t) => {
+          const ev = t.evidence as Record<string, unknown> | undefined;
+          return Boolean(ev?.client_id);
+        })
+        .sort((a, b) => b.impact_score - a.impact_score)
+        .map((t) => t.id)
+        .filter((id) => !seededDrafts[id]);
+
+      if (eligible.length > 0) {
+        await generateDraftsBatch(eligible);
+      } else {
+        setDraftBatchStatus('done');
+      }
+    },
+    [generateDraftsBatch]
+  );
+
+  const loadSnapshot = useCallback(
+    async ({ runFollowups = true }: { runFollowups?: boolean } = {}) => {
+      if (!hasSnapshotDataRef.current) {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const data = await apiClient.getPerformanceSnapshot();
+        setError(null);
+        setSnap(data);
+        setTasks(data.tasks || []);
+        const seededDrafts: DraftMap = {};
+        for (const d of data.drafts || []) {
+          if (d?.task_id) seededDrafts[d.task_id] = d;
+        }
+        setDrafts(seededDrafts);
+        hasSnapshotDataRef.current = true;
+        setLoading(false);
+        setGlobalLoading(false);
+        // Server is source of truth — drop any in-flight “stay in open list” grace so lists match API.
+        clearAllCompletingGrace();
+
+        if (runFollowups && !prescriptionRequestedRef.current) {
+          prescriptionRequestedRef.current = true;
+          void requestPrescriptionsAndDrafts(data);
+        }
+        return data;
+      } catch (e: unknown) {
+        const msg =
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          (e as Error)?.message ||
+          'Failed to load performance data';
+        setError(String(msg));
+        if (!hasSnapshotDataRef.current) {
+          setSnap(null);
+          setTasks([]);
+        }
+        setLoading(false);
+        setGlobalLoading(false);
+        return null;
+      }
+    },
+    [clearAllCompletingGrace, requestPrescriptionsAndDrafts, setGlobalLoading]
+  );
+
+  const handleReanalyze = useCallback(async () => {
+    if (reanalyzing) return;
+    setReanalyzing(true);
+    setReanalyzeNotice(null);
     try {
-      await loadSnapshot();
+      const data = await loadSnapshot({ runFollowups: false });
+      if (!data) {
+        setReanalyzeNotice('Could not refresh — try again in a moment.');
+        return;
+      }
+      // Force a fresh prescription pass.
+      setRxStatus('loading');
+      try {
+        const pr = await apiClient.postPerformancePrescription();
+        const m: RxMap = {};
+        for (const t of pr.tasks || []) {
+          m[t.id] = {
+            why: t.why || '',
+            prescription: t.prescription || '',
+            next_step: t.next_step || '',
+          };
+        }
+        setRx(m);
+        setRxStatus('done');
+      } catch (e: unknown) {
+        const status = (e as { response?: { status?: number } })?.response?.status;
+        if (status === 429) {
+          setReanalyzeNotice('Rate limit reached for AI re-analysis — try again shortly.');
+        }
+        setRxStatus('skipped');
+      }
+      // Force-regenerate emails for the top eligible tasks.
+      const eligible = (data.tasks || [])
+        .filter((t) => !t.completed)
+        .filter((t) => {
+          const ev = t.evidence as Record<string, unknown> | undefined;
+          return Boolean(ev?.client_id);
+        })
+        .sort((a, b) => b.impact_score - a.impact_score)
+        .map((t) => t.id);
+      if (eligible.length > 0) {
+        try {
+          await generateDraftsBatch(eligible, { force: true });
+        } catch (e: unknown) {
+          const status = (e as { response?: { status?: number } })?.response?.status;
+          if (status === 429) {
+            setReanalyzeNotice('Rate limit reached for email drafts — try again shortly.');
+          }
+        }
+      }
     } finally {
-      setSignalsRefreshing(false);
+      setReanalyzing(false);
     }
-  }, [loadSnapshot]);
+  }, [generateDraftsBatch, loadSnapshot, reanalyzing]);
+
+  const generateDraftForTask = useCallback(
+    async (taskId: string, { force = false }: { force?: boolean } = {}) => {
+      setDraftStatus((prev) => ({ ...prev, [taskId]: 'loading' }));
+      try {
+        const res = await apiClient.postPerformanceEmailDrafts([taskId], { force });
+        const made = (res.drafts || []).find((d) => d.task_id === taskId);
+        if (made) {
+          setDrafts((prev) => ({ ...prev, [taskId]: made }));
+          setDraftStatus((prev) => ({ ...prev, [taskId]: 'done' }));
+          return made;
+        }
+        setDraftStatus((prev) => ({ ...prev, [taskId]: 'error' }));
+        return null;
+      } catch {
+        setDraftStatus((prev) => ({ ...prev, [taskId]: 'error' }));
+        return null;
+      }
+    },
+    []
+  );
+
+  const tryOpenComposerWith = useCallback((task: PerformanceTask, draft: PerformanceTaskEmailDraft) => {
+    const payload = composerPayloadFrom(task, draft);
+    if (payload.recipients.length === 0) {
+      setComposerErrors((prev) => ({
+        ...prev,
+        [task.id]: 'No email on file for this client — add one to their contact, then re-open.',
+      }));
+      return;
+    }
+    setComposerErrors((prev) => {
+      if (!(task.id in prev)) return prev;
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
+    setComposer(payload);
+  }, []);
+
+  /**
+   * Open the email composer modal for a task. If no draft exists yet, generate one first
+   * (Performance auto-batches drafts on load, so this is mostly for stragglers / regenerate).
+   */
+  const openComposerForTask = useCallback(
+    async (task: PerformanceTask, { force = false }: { force?: boolean } = {}) => {
+      const existing = drafts[task.id];
+      if (existing && !force) {
+        tryOpenComposerWith(task, existing);
+        return;
+      }
+      setPendingComposerTaskId(task.id);
+      const made = await generateDraftForTask(task.id, { force });
+      if (!made) {
+        setPendingComposerTaskId((curr) => (curr === task.id ? null : curr));
+      }
+    },
+    [drafts, generateDraftForTask, tryOpenComposerWith]
+  );
+
+  // Auto-open the composer when the draft we asked for arrives.
+  useEffect(() => {
+    if (!pendingComposerTaskId) return;
+    const draft = drafts[pendingComposerTaskId];
+    if (!draft) return;
+    const task = tasks.find((t) => t.id === pendingComposerTaskId);
+    if (!task) {
+      setPendingComposerTaskId(null);
+      return;
+    }
+    tryOpenComposerWith(task, draft);
+    setPendingComposerTaskId(null);
+  }, [drafts, pendingComposerTaskId, tasks, tryOpenComposerWith]);
 
   useEffect(() => {
     loadSnapshot();
   }, [loadSnapshot]);
 
   const { topOpen, backlogOpen, completedTasks } = useMemo(() => {
-    const open = tasks.filter((t) => !t.completed).sort((a, b) => b.impact_score - a.impact_score);
-    const done = tasks.filter((t) => t.completed).sort((a, b) => b.impact_score - a.impact_score);
+    const open = tasks
+      .filter((t) => !t.completed || completingGraceIds.has(t.id))
+      .sort((a, b) => b.impact_score - a.impact_score);
+    const done = tasks
+      .filter((t) => t.completed && !completingGraceIds.has(t.id))
+      .sort((a, b) => b.impact_score - a.impact_score);
     return {
       topOpen: open.slice(0, 10),
       backlogOpen: open.slice(10, 40),
       completedTasks: done,
     };
-  }, [tasks]);
+  }, [tasks, completingGraceIds]);
 
   const flushCompleted = useCallback(
     async (nextTasks: PerformanceTask[]) => {
@@ -140,6 +444,14 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
   );
 
   const toggleCompleted = (id: string) => {
+    const current = tasks.find((t) => t.id === id);
+    if (!current) return;
+    const willComplete = !current.completed;
+    if (willComplete) {
+      scheduleCompletingGrace(id);
+    } else {
+      cancelCompletingGrace(id);
+    }
     const next = tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
     setTasks(next);
     void flushCompleted(next);
@@ -169,74 +481,65 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
     );
   }
 
+  const reanalyzeButton = (
+    <button
+      type="button"
+      onClick={() => void handleReanalyze()}
+      disabled={reanalyzing}
+      title="Re-pull pipeline signals, re-run AI prescriptions, and regenerate emails for top tasks (rate limited)."
+      className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-white/15 bg-white/70 dark:bg-white/5 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <svg
+        className={`h-3.5 w-3.5 ${reanalyzing ? 'animate-spin' : ''}`}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2}
+        aria-hidden
+      >
+        <path
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+        />
+      </svg>
+      {reanalyzing ? 'Re-analyzing…' : 'Re-analyze'}
+    </button>
+  );
+
+  const instructionLine = (
+    <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+      Tasks blend org metrics, per-client ROI signals from call drawers, your Intelligence pipeline order, and your
+      offer ladder — every prescription and auto-drafted email proposes the next move toward ROI from that ladder.
+    </p>
+  );
+
   return (
     <div className={`w-full mx-auto px-1 pb-8 ${variant === 'drawer' ? 'max-w-none' : 'max-w-3xl pb-12'}`}>
       {variant === 'drawer' ? (
-        <div className="flex flex-wrap gap-2 mb-4 text-xs">
-          <Link
-            href="/?tab=intelligence"
-            className="glass-button-secondary px-3 py-1.5 rounded-md whitespace-nowrap"
-          >
-            Personalize
-          </Link>
-          <Link href="/?tab=funnels" className="glass-button-secondary px-3 py-1.5 rounded-md whitespace-nowrap">
-            Funnels
-          </Link>
+        <div className="mb-4 space-y-2">
+          <div className="flex items-center justify-end">{reanalyzeButton}</div>
+          {instructionLine}
         </div>
       ) : (
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Performance</h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              ROI-ranked actions from your pipeline, funnels, and payments.
-            </p>
+            <div className="mt-1">{instructionLine}</div>
           </div>
-          <div className="flex flex-wrap gap-2 text-xs">
-            <Link
-              href="/?tab=intelligence"
-              className="glass-button-secondary px-3 py-1.5 rounded-md whitespace-nowrap"
-            >
-              Personalize recommendations
-            </Link>
-            <Link href="/?tab=funnels" className="glass-button-secondary px-3 py-1.5 rounded-md whitespace-nowrap">
-              Funnels
-            </Link>
-          </div>
+          {reanalyzeButton}
         </div>
+      )}
+
+      {reanalyzeNotice && (
+        <p className="text-xs text-amber-700 dark:text-amber-300 mb-3">{reanalyzeNotice}</p>
       )}
 
       {diagnosis && (
         <div className="glass-card neon-glow p-4 mb-6 rounded-xl">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-              Pipeline signals
-            </p>
-            {variant === 'drawer' && (
-              <button
-                type="button"
-                onClick={() => void refreshPipelineSignals()}
-                disabled={signalsRefreshing}
-                className="shrink-0 inline-flex items-center justify-center rounded-lg p-1.5 text-gray-500 hover:text-violet-600 hover:bg-violet-500/10 dark:text-gray-400 dark:hover:text-violet-300 dark:hover:bg-violet-500/15 transition-colors disabled:opacity-60 disabled:pointer-events-none"
-                aria-label="Refresh pipeline signals"
-                title="Refresh pipeline signals"
-              >
-                <svg
-                  className={`h-4 w-4 ${signalsRefreshing ? 'animate-spin' : ''}`}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                  />
-                </svg>
-              </button>
-            )}
-          </div>
+          <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
+            Pipeline signals
+          </p>
           <div className="flex flex-wrap gap-2">
             <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${severityStyles(diagnosis.traffic)}`}>
               Traffic: {diagnosis.traffic}
@@ -403,7 +706,13 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       {error && snap && <p className="text-sm text-amber-600 dark:text-amber-400 mb-3">{error}</p>}
 
       <section className="mb-6">
-        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-3">Top priorities</h3>
+        <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Top priorities</h3>
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3 leading-snug">
+          Each priority gets a send-ready email tailored to your voice, the client&apos;s ROI signals, and the next
+          rung on your offer ladder — click <span className="font-medium text-gray-600 dark:text-gray-300">Open email</span>{' '}
+          on a task to review and send via Brevo. Use Re-analyze to refresh after new calls or pipeline changes.
+          {draftBatchStatus === 'loading' ? ' Drafting emails…' : ''}
+        </p>
         {topOpen.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400 glass-card p-4 rounded-xl">
             No open tasks — great job. Refresh after new leads or funnel traffic.
@@ -415,6 +724,12 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
                 key={t.id}
                 task={t}
                 rx={rx[t.id]}
+                draft={drafts[t.id]}
+                draftStatus={draftStatus[t.id]}
+                pendingComposer={pendingComposerTaskId === t.id}
+                composerError={composerErrors[t.id]}
+                completingGrace={completingGraceIds.has(t.id) && t.completed}
+                onOpenEmail={(force) => void openComposerForTask(t, { force })}
                 disabled={patching}
                 onToggle={() => toggleCompleted(t.id)}
               />
@@ -435,6 +750,12 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
                 key={t.id}
                 task={t}
                 rx={rx[t.id]}
+                draft={drafts[t.id]}
+                draftStatus={draftStatus[t.id]}
+                pendingComposer={pendingComposerTaskId === t.id}
+                composerError={composerErrors[t.id]}
+                completingGrace={completingGraceIds.has(t.id) && t.completed}
+                onOpenEmail={(force) => void openComposerForTask(t, { force })}
                 disabled={patching}
                 onToggle={() => toggleCompleted(t.id)}
               />
@@ -454,6 +775,12 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
                 key={t.id}
                 task={t}
                 rx={rx[t.id]}
+                draft={drafts[t.id]}
+                draftStatus={draftStatus[t.id]}
+                pendingComposer={pendingComposerTaskId === t.id}
+                composerError={composerErrors[t.id]}
+                completingGrace={false}
+                onOpenEmail={(force) => void openComposerForTask(t, { force })}
                 disabled={patching}
                 onToggle={() => toggleCompleted(t.id)}
               />
@@ -465,6 +792,18 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       <p className="text-xs text-gray-500 dark:text-gray-500 mt-8 text-center">
         {snap?.generated_at ? `Snapshot ${new Date(snap.generated_at).toLocaleString()}` : ''}
       </p>
+
+      {composer && composer.recipients.length > 0 && (
+        <EmailComposer
+          key={`perf-email-${composer.recipients[0]?.email ?? 'blank'}-${composer.subject}-${composer.textContent.length}`}
+          recipients={composer.recipients}
+          initialSubject={composer.subject}
+          initialHtmlContent={composer.htmlContent}
+          initialTextContent={composer.textContent}
+          onClose={() => setComposer(null)}
+          onSuccess={() => setComposer(null)}
+        />
+      )}
     </div>
   );
 }
@@ -472,11 +811,24 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
 function TaskRow({
   task,
   rx,
+  draft,
+  draftStatus,
+  pendingComposer,
+  composerError,
+  completingGrace,
+  onOpenEmail,
   disabled,
   onToggle,
 }: {
   task: PerformanceTask;
   rx?: { why: string; prescription: string; next_step: string };
+  draft?: PerformanceTaskEmailDraft;
+  draftStatus?: 'loading' | 'done' | 'error';
+  pendingComposer?: boolean;
+  composerError?: string;
+  /** True while the row stays in open priorities after check — before it slides to Completed. */
+  completingGrace?: boolean;
+  onOpenEmail?: (force?: boolean) => void;
   disabled: boolean;
   onToggle: () => void;
 }) {
@@ -487,12 +839,27 @@ function TaskRow({
   const fix = actions[0] || prescription;
   const ev = task.evidence as Record<string, unknown> | undefined;
   const fromTerminal = ev?.source === 'client_card';
+  const fromRoi = ev?.source === 'call_insight_roi';
+  const hasClient = Boolean(ev?.client_id);
+  const roiTags = Array.isArray(ev?.roi_tags) ? (ev.roi_tags as string[]).filter(Boolean) : [];
   const healthLabel =
     typeof ev?.health_score === 'number' ? `${(ev.health_score as number).toFixed(0)} health` : null;
+  const offerSuggestion = (() => {
+    const raw = (ev as Record<string, unknown> | undefined)?.offer_suggestion;
+    if (!raw || typeof raw !== 'object') return null;
+    const o = raw as Record<string, unknown>;
+    return {
+      kind_label: typeof o.kind_label === 'string' ? o.kind_label : '',
+      name: typeof o.name === 'string' ? o.name : '',
+      promise: typeof o.promise === 'string' ? o.promise : '',
+      rationale: typeof o.rationale === 'string' ? o.rationale : '',
+      script_hint: typeof o.script_hint === 'string' ? o.script_hint : '',
+    };
+  })();
 
   const evidenceEntries = (() => {
     if (!ev || typeof ev !== 'object') return [] as [string, string][];
-    const skip = new Set(['source']);
+    const skip = new Set(['source', 'roi_tags', 'offer_suggestion']);
     const rows: [string, string][] = [];
     for (const [k, v] of Object.entries(ev)) {
       if (skip.has(k) || v === undefined || v === null) continue;
@@ -505,15 +872,23 @@ function TaskRow({
     return rows;
   })();
 
+  const archivedStyle = task.completed && !completingGrace;
+
   return (
-    <li className={`glass-card rounded-xl overflow-hidden ${task.completed ? 'opacity-75' : ''}`}>
+    <li
+      className={`glass-card rounded-xl overflow-hidden transition-[opacity,box-shadow,background-color] duration-300 ${
+        completingGrace
+          ? 'ring-2 ring-emerald-500/40 border border-emerald-500/30 bg-emerald-500/[0.07] dark:bg-emerald-950/20'
+          : ''
+      } ${archivedStyle ? 'opacity-75' : ''}`}
+    >
       <div className="flex gap-3 p-4">
         <input
           type="checkbox"
           checked={task.completed}
           onChange={onToggle}
           disabled={disabled}
-          className="mt-1.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+          className="mt-1.5 h-4 w-4 shrink-0 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500"
           aria-label={`Mark complete: ${task.title}`}
           onClick={(e) => e.stopPropagation()}
         />
@@ -521,11 +896,29 @@ function TaskRow({
           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className={`flex flex-wrap items-baseline gap-2 ${task.completed ? 'line-through' : ''}`}>
+                <div className={`flex flex-wrap items-baseline gap-2 ${archivedStyle ? 'line-through' : ''}`}>
                   <span className="font-medium text-gray-900 dark:text-gray-100">{task.title}</span>
                   <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {task.category === 'client' ? 'Terminal' : task.category}
+                    {task.category === 'client'
+                      ? 'Terminal'
+                      : task.category === 'roi_signal'
+                        ? 'ROI signal'
+                        : task.category}
                   </span>
+                  {fromRoi && roiTags.length > 0 && (
+                    <span className="text-[10px] text-sky-700 dark:text-sky-300 font-medium">
+                      {roiTags.join(' · ')}
+                    </span>
+                  )}
+                  {offerSuggestion && offerSuggestion.name && (
+                    <span
+                      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-500/25"
+                      title={offerSuggestion.rationale}
+                    >
+                      <span className="opacity-70">Prescribe:</span>
+                      {offerSuggestion.kind_label} · {offerSuggestion.name}
+                    </span>
+                  )}
                   {fromTerminal && healthLabel && (
                     <span className="text-[10px] text-emerald-600 dark:text-emerald-400 tabular-nums">
                       {healthLabel}
@@ -541,9 +934,15 @@ function TaskRow({
                 {fix && !why && (
                   <p className="text-sm text-gray-700 dark:text-gray-200 mt-1 line-clamp-2 pr-6">Fix: {fix}</p>
                 )}
-                <span className="mt-1 block text-xs text-violet-600/90 dark:text-violet-400/90 group-open:hidden">
-                  Expand for full details
-                </span>
+                {completingGrace ? (
+                  <span className="mt-1 block text-[11px] font-medium text-emerald-700 dark:text-emerald-300 group-open:hidden">
+                    Saved — moving to Completed…
+                  </span>
+                ) : (
+                  <span className="mt-1 block text-xs text-violet-600/90 dark:text-violet-400/90 group-open:hidden">
+                    Expand for full details
+                  </span>
+                )}
               </div>
               <span
                 className="mt-0.5 shrink-0 text-gray-400 transition-transform group-open:rotate-180"
@@ -554,13 +953,40 @@ function TaskRow({
             </div>
           </summary>
           <div className="mt-3 space-y-3 border-t border-gray-200/60 pt-3 text-sm dark:border-gray-700/60">
-            {fromTerminal && (
-              <Link
-                href="/?tab=terminal"
-                className="text-xs text-violet-600 dark:text-violet-400 hover:underline inline-block"
-              >
-                Open in Terminal
-              </Link>
+            {hasClient && onOpenEmail && (
+              <EmailDraftActionRow
+                draft={draft}
+                status={draftStatus}
+                pendingComposer={pendingComposer}
+                error={composerError}
+                onOpenEmail={onOpenEmail}
+              />
+            )}
+            {offerSuggestion && offerSuggestion.name && (
+              <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                <p className="text-[10px] font-medium text-emerald-700 dark:text-emerald-300 uppercase tracking-wide">
+                  Suggested offer · {offerSuggestion.kind_label}
+                </p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 mt-0.5">
+                  {offerSuggestion.name}
+                </p>
+                {offerSuggestion.promise && (
+                  <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">
+                    {offerSuggestion.promise}
+                  </p>
+                )}
+                {offerSuggestion.rationale && (
+                  <p className="text-xs text-gray-600 dark:text-gray-400 mt-1.5 italic">
+                    {offerSuggestion.rationale}
+                  </p>
+                )}
+                {offerSuggestion.script_hint && (
+                  <p className="text-xs text-gray-700 dark:text-gray-300 mt-1.5 leading-relaxed">
+                    <span className="font-medium text-gray-800 dark:text-gray-200">Script hint: </span>
+                    {offerSuggestion.script_hint}
+                  </p>
+                )}
+              </div>
             )}
             {why && <p className="text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap">{why}</p>}
             {prescription && (
@@ -612,5 +1038,92 @@ function TaskRow({
         </details>
       </div>
     </li>
+  );
+}
+
+function EmailDraftActionRow({
+  draft,
+  status,
+  pendingComposer,
+  error,
+  onOpenEmail,
+}: {
+  draft?: PerformanceTaskEmailDraft;
+  status?: 'loading' | 'done' | 'error';
+  pendingComposer?: boolean;
+  error?: string;
+  onOpenEmail: (force?: boolean) => void;
+}) {
+  const generating = status === 'loading' || pendingComposer === true;
+  const hasDraft = Boolean(draft && (draft.subject || draft.body_plain));
+  const errored = status === 'error';
+
+  const generatedLabel =
+    draft?.generated_at ? new Date(draft.generated_at).toLocaleString() : '';
+
+  let helper: string;
+  if (error) {
+    helper = error;
+  } else if (generating && !hasDraft) {
+    helper = 'Drafting a send-ready email tailored to your voice and offer ladder…';
+  } else if (generating && hasDraft) {
+    helper = 'Regenerating — the modal will reopen with the fresh draft.';
+  } else if (errored && !hasDraft) {
+    helper = 'Could not draft an email — try again or check Intelligence settings.';
+  } else if (hasDraft) {
+    helper = generatedLabel
+      ? `Pre-drafted ${generatedLabel} · opens in the email modal ready to send.`
+      : 'Pre-drafted · opens in the email modal ready to send.';
+  } else {
+    helper = 'Click Open email to draft a send-ready message and open it in the modal.';
+  }
+
+  return (
+    <div className="rounded-lg border border-violet-500/25 bg-violet-500/[0.06] p-3 text-xs flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="font-medium text-violet-800 dark:text-violet-200">
+          Email
+          {hasDraft && draft?.source ? (
+            <span className="ml-2 text-[10px] uppercase tracking-wide text-violet-700/70 dark:text-violet-300/70">
+              {draft.source}
+            </span>
+          ) : null}
+        </p>
+        <p
+          className={`mt-0.5 text-[11px] leading-snug ${error ? 'text-amber-700 dark:text-amber-300' : 'text-gray-600 dark:text-gray-400'}`}
+        >
+          {helper}
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onOpenEmail(false);
+          }}
+          disabled={generating}
+          className="px-3 py-1.5 rounded-md text-[11px] font-medium border border-violet-500/40 bg-white/70 dark:bg-white/5 text-violet-800 dark:text-violet-100 hover:bg-violet-500/10 disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {generating ? 'Drafting…' : hasDraft ? 'Open email' : 'Generate & open'}
+        </button>
+        {hasDraft && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenEmail(true);
+            }}
+            disabled={generating}
+            title="Regenerate this draft and open the modal"
+            className="px-2 py-1.5 rounded-md text-[10px] font-medium border border-violet-500/30 bg-white/60 dark:bg-white/5 text-violet-800 dark:text-violet-100 hover:bg-violet-500/10 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            Regenerate
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

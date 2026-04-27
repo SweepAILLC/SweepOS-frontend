@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
 import React, { memo, useMemo, useCallback } from 'react';
 import { gradeFromHealthScore } from '@/lib/api';
+import { computeLeadFollowUpBar } from '@/lib/leadFollowUp';
 
 const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
@@ -25,6 +26,8 @@ interface ClientCardProps {
   healthScore?: number | null;
   /** Opportunity tags from call insights (subset shown) */
   insightTags?: string[];
+  /** Cold / warm lead columns: show follow-up timer instead of program progress */
+  isLeadColumn?: boolean;
 }
 
 function gradeTagColor(grade: string): string {
@@ -44,13 +47,25 @@ const INSIGHT_TAG_STYLES: Record<string, string> = {
   referral: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-400/30',
   conversion: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30',
   win_back: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-400/30',
+  revive: 'bg-rose-600/15 text-rose-800 dark:text-rose-200 border-rose-500/35',
+  deal_follow_up: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-400/30',
 };
 
 function insightChipClass(tag: string): string {
   return INSIGHT_TAG_STYLES[tag] || 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-400/30';
 }
 
-function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlotLineAbove = false, healthGrade = null, healthScore = null, insightTags = undefined }: ClientCardProps) {
+function ClientCard({
+  client,
+  onClick,
+  onDelete,
+  isMergeTarget = false,
+  showSlotLineAbove = false,
+  healthGrade = null,
+  healthScore = null,
+  insightTags = undefined,
+  isLeadColumn = false,
+}: ClientCardProps) {
   const sortableId = client.id;
 
   const numericHealthScore =
@@ -62,6 +77,8 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
         ? gradeFromHealthScore(numericHealthScore)
         : null;
   const showHealthTag = numericHealthScore != null || gradeForTag != null;
+
+  const followUpBar = useMemo(() => (isLeadColumn ? computeLeadFollowUpBar(client) : null), [isLeadColumn, client]);
 
   const slotDroppable = useDroppable({ id: SLOT_DROP_ID(sortableId) });
   const mergeDroppable = useDroppable({ id: MERGE_DROP_ID(sortableId) });
@@ -166,56 +183,87 @@ function ClientCard({ client, onClick, onDelete, isMergeTarget = false, showSlot
               {client.email}
             </div>
           )}
-          <div className="flex flex-wrap gap-1 mt-1">
+          <div className="flex flex-wrap gap-1 mt-1 items-center">
+            {insightTags &&
+              insightTags.slice(0, 4).map((t) => (
+                <span
+                  key={t}
+                  className={`inline-block text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${insightChipClass(t)}`}
+                  title="ROI / call insight"
+                >
+                  {t.replace(/_/g, ' ')}
+                </span>
+              ))}
             {showHealthTag && gradeForTag && (
               <span
-                className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded border ${gradeTagColor(gradeForTag)}`}
-                title="Health score"
+                className={`inline-block text-[9px] font-medium px-1 py-0.5 rounded border opacity-90 ${gradeTagColor(gradeForTag)}`}
+                title="Engagement (health score)"
               >
                 {numericHealthScore != null ? `${Math.round(numericHealthScore)}% ` : ''}
                 {gradeForTag}
               </span>
             )}
-            {insightTags &&
-              insightTags.slice(0, 3).map((t) => (
-                <span
-                  key={t}
-                  className={`inline-block text-[9px] font-semibold uppercase px-1 py-0.5 rounded border ${insightChipClass(t)}`}
-                  title="Call insight"
-                >
-                  {t.replace(/_/g, ' ')}
-                </span>
-              ))}
           </div>
           {client.estimated_mrr > 0 && (
             <div className="text-sm font-semibold text-green-600 dark:text-green-400 mt-2">
               ${client.estimated_mrr.toFixed(2)}/mo
             </div>
           )}
-          {client.program_progress_percent !== undefined && client.program_progress_percent !== null && (
-            <div className="mt-2">
+          {isLeadColumn && followUpBar ? (
+            <div
+              className="mt-2"
+              title={
+                followUpBar.hasExplicitDue
+                  ? 'Specific follow-up date (profile or call insight)'
+                  : 'Default 14 days from last activity (or created date)'
+              }
+            >
               <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
-                <span className="digitized-text">Program Progress</span>
-                <span>{client.program_progress_percent.toFixed(0)}%</span>
+                <span className="digitized-text">Follow-up</span>
+                <span>{followUpBar.percent.toFixed(0)}%</span>
               </div>
               <div className="w-full bg-white/20 rounded-full h-2">
                 <div
                   className={`h-2 rounded-full transition-all ${
-                    client.program_progress_percent >= 100
+                    followUpBar.percent >= 100
                       ? 'bg-red-500'
-                      : client.program_progress_percent >= 75
-                      ? 'bg-yellow-500'
-                      : 'bg-blue-500'
+                      : followUpBar.percent >= 75
+                        ? 'bg-yellow-500'
+                        : 'bg-blue-500'
                   }`}
-                  style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
+                  style={{ width: `${Math.min(100, Math.max(0, followUpBar.percent))}%` }}
                 />
               </div>
-              {client.program_end_date && (
-                <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Ends: {new Date(client.program_end_date).toLocaleDateString()}
-                </div>
-              )}
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">{followUpBar.subtitle}</div>
             </div>
+          ) : (
+            !isLeadColumn &&
+            client.program_progress_percent !== undefined &&
+            client.program_progress_percent !== null && (
+              <div className="mt-2">
+                <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                  <span className="digitized-text">Program Progress</span>
+                  <span>{client.program_progress_percent.toFixed(0)}%</span>
+                </div>
+                <div className="w-full bg-white/20 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all ${
+                      client.program_progress_percent >= 100
+                        ? 'bg-red-500'
+                        : client.program_progress_percent >= 75
+                          ? 'bg-yellow-500'
+                          : 'bg-blue-500'
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
+                  />
+                </div>
+                {client.program_end_date && (
+                  <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Ends: {new Date(client.program_end_date).toLocaleDateString()}
+                  </div>
+                )}
+              </div>
+            )
           )}
         </div>
       </div>

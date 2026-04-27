@@ -153,7 +153,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
 
   if (loading && !summary) {
     return (
-      <div className="glass-card p-4 sm:p-6 min-w-0">
+      <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
         <div className="animate-pulse">
           <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-1/4 mb-4"></div>
           <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
@@ -165,15 +165,15 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
   if (!summary) {
     // Show error or loading state
     return (
-      <div className="glass-card p-4 sm:p-6 min-w-0">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
+      <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <div className="flex-1 min-w-0 overflow-hidden">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
               Calendar Notifications
             </h3>
             {error ? (
               <div>
-                <p className="text-sm text-red-600 dark:text-red-400 mb-2">
+                <p className="text-sm text-red-600 dark:text-red-400 mb-2 break-words">
                   {error}
                 </p>
                 <button
@@ -189,7 +189,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
               </p>
             )}
           </div>
-          <div className="text-4xl text-gray-300 dark:text-gray-600">📅</div>
+          <div className="text-4xl text-gray-300 dark:text-gray-600 shrink-0">📅</div>
         </div>
       </div>
     );
@@ -197,9 +197,9 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
 
   if (!summary.connected) {
     return (
-      <div className="glass-card p-4 sm:p-6 min-w-0">
-        <div className="flex items-center justify-between">
-          <div>
+      <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
+        <div className="flex items-center justify-between gap-3 min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
               Calendar Notifications
             </h3>
@@ -207,7 +207,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
               Connect Cal.com or Calendly to see upcoming appointments
             </p>
           </div>
-          <div className="text-4xl text-gray-300 dark:text-gray-600">📅</div>
+          <div className="text-4xl text-gray-300 dark:text-gray-600 shrink-0">📅</div>
         </div>
       </div>
     );
@@ -216,8 +216,8 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
   const monthChange = summary.last_month_percentage_change;
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
-      <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+    <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-4 min-w-0">
         <div className="min-w-0">
           <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-1">
             Calendar Notifications
@@ -249,10 +249,10 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
         </button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3 mb-4 min-w-0">
         {/* Upcoming Count */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
-          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0 overflow-hidden">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate">
             {summary.upcoming_count}
           </div>
           <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
@@ -261,13 +261,13 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
         </div>
 
         {/* Last 30 Days */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0 overflow-hidden">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+            <div className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate min-w-0">
               {summary.last_month_count}
             </div>
             {monthChange !== null && monthChange !== undefined && (
-              <span className={`text-xs font-medium ${monthChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              <span className={`text-xs font-medium shrink-0 tabular-nums ${monthChange >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {monthChange >= 0 ? '+' : ''}{monthChange.toFixed(1)}%
               </span>
             )}
@@ -278,15 +278,15 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
         </div>
 
         {/* Sales Close Rate */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
-          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0 overflow-hidden">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate">
             {closeRateData?.all_time?.close_rate_pct != null ? `${closeRateData.all_time.close_rate_pct}%` : '—'}
           </div>
           <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
             Sales close rate
           </div>
           {closeRateData && closeRateData.all_time.total_sales_calls > 0 && (
-            <div className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+            <div className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 tabular-nums break-words">
               All time: {closeRateData.all_time.closed_count} / {closeRateData.all_time.total_sales_calls} closed
             </div>
           )}
@@ -294,8 +294,8 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
         </div>
 
         {/* Show-up Rate */}
-        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0">
-          <div className="text-xl font-bold text-gray-900 dark:text-gray-100">
+        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0 overflow-hidden">
+          <div className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate">
             {summary.show_up_rate != null ? `${summary.show_up_rate}%` : '—'}
           </div>
           <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
@@ -308,10 +308,10 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
       {summary.upcoming_appointments && summary.upcoming_appointments.length > 0 && (
         <div className="space-y-3">
           {summary.upcoming_appointments.map((appointment, index) => (
-            <div key={appointment.id || index} className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
+            <div key={appointment.id || index} className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800 min-w-0 max-w-full overflow-hidden">
+              <div className="flex items-start justify-between gap-3 min-w-0">
+                <div className="flex-1 min-w-0 overflow-hidden">
+                  <div className="flex items-center gap-2 mb-2 flex-wrap min-w-0">
                     <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">
                       {index === 0 ? 'Next Appointment' : `Upcoming ${index + 1}`}
                     </span>
@@ -321,17 +321,17 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                       </span>
                     )}
                   </div>
-                  <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
+                  <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1 break-words">
                     {appointment.title}
                   </h4>
                   {appointment.client_name && (
-                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-1 font-medium">
+                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-1 font-medium truncate">
                       {appointment.client_name}
                     </p>
                   )}
-                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                    <div className="flex items-center gap-2">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap min-w-0">
+                      <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                       </svg>
                       <span>{formatDate(appointment.start_time)}</span>
@@ -339,9 +339,9 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                       <span>{formatTime(appointment.start_time)}</span>
                     </div>
                     {appointment.location && (
-                      <div className="flex items-center gap-2">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <div className="flex items-start gap-2 min-w-0">
+                        <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                         </svg>
                         {isUrl(appointment.location) ? (
@@ -349,12 +349,12 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                             href={appointment.location}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors"
+                            className="text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors min-w-0 break-all"
                           >
                             {appointment.location}
                           </a>
                         ) : (
-                          <span>{appointment.location}</span>
+                          <span className="min-w-0 break-words">{appointment.location}</span>
                         )}
                       </div>
                     )}
@@ -365,7 +365,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                     href={appointment.link}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+                    className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
                   >
                     View Details
                   </a>
@@ -378,20 +378,20 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
       
       {/* Fallback to most_upcoming if upcoming_appointments is not available */}
       {(!summary.upcoming_appointments || summary.upcoming_appointments.length === 0) && summary.most_upcoming && (
-        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800 min-w-0 max-w-full overflow-hidden">
+          <div className="flex items-start justify-between gap-3 min-w-0">
+            <div className="flex-1 min-w-0 overflow-hidden">
+              <div className="flex items-center gap-2 mb-2 flex-wrap min-w-0">
                 <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wide">
                   Next Appointment
                 </span>
               </div>
-              <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1">
+              <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100 mb-1 break-words">
                 {summary.most_upcoming.title}
               </h4>
-              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                <div className="flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                   </svg>
                   <span>{formatDate(summary.most_upcoming.start_time)}</span>
@@ -399,8 +399,8 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                   <span>{formatTime(summary.most_upcoming.start_time)}</span>
                 </div>
                 {summary.most_upcoming.location && (
-                  <div className="flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <div className="flex items-start gap-2 min-w-0">
+                    <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
                     </svg>
@@ -409,12 +409,12 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                         href={summary.most_upcoming.location}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors"
+                        className="text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 underline cursor-pointer transition-colors min-w-0 break-all"
                       >
                         {summary.most_upcoming.location}
                       </a>
                     ) : (
-                      <span>{summary.most_upcoming.location}</span>
+                      <span className="min-w-0 break-words">{summary.most_upcoming.location}</span>
                     )}
                   </div>
                 )}
@@ -425,7 +425,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
                 href={summary.most_upcoming.link}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
+                className="shrink-0 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
               >
                 View Details
               </a>

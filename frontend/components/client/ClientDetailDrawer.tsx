@@ -1,18 +1,26 @@
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Client, ClientPaymentsResponse } from '@/types/client';
 import { apiClient } from '@/lib/api';
+import {
+  computeLeadFollowUpBar,
+  followUpIsoToDateInput,
+  dateInputToFollowUpIso,
+} from '@/lib/leadFollowUp';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
 import ClientHealthScoreContent from './ClientHealthScoreContent';
 import IntelligenceSection from './IntelligenceSection';
+import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
 
 interface ClientDetailDrawerProps {
   client: Client | null;
   isOpen: boolean;
   onClose: () => void;
   onUpdate: () => void;
+  /** After PATCH /clients/:id — merge into board + drawer before full reload (instant follow-up, etc.). */
+  onClientSaved?: (client: Client) => void;
   healthRefreshToken?: number;
   /** Called when the in-drawer health score loads so the board card tag can update instantly. */
   onHealthScoreLoaded?: (clientId: string, score: number, grade: string) => void;
@@ -23,6 +31,7 @@ export default function ClientDetailDrawer({
   isOpen,
   onClose,
   onUpdate,
+  onClientSaved,
   healthRefreshToken = 0,
   onHealthScoreLoaded,
 }: ClientDetailDrawerProps) {
@@ -53,6 +62,7 @@ export default function ClientDetailDrawer({
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [showCheckInCalendar, setShowCheckInCalendar] = useState(false);
   const [nextCheckIn, setNextCheckIn] = useState<any>(null);
+  const [engagementOpen, setEngagementOpen] = useState(false);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -65,7 +75,12 @@ export default function ClientDetailDrawer({
     notes: '',
     program_start_date: '',
     program_end_date: '',
+    follow_up_due_date: '',
   });
+
+  useEffect(() => {
+    if (!isOpen) setEngagementOpen(false);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) setShowCheckInCalendar(false);
@@ -85,6 +100,9 @@ export default function ClientDetailDrawer({
         program_end_date: client.program_end_date 
           ? new Date(client.program_end_date).toISOString().split('T')[0] 
           : '',
+        follow_up_due_date: followUpIsoToDateInput(
+          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
+        ),
       });
       setIsEditing(false);
       loadPayments();
@@ -106,6 +124,14 @@ export default function ClientDetailDrawer({
       }
     }
   }, [client, isOpen]);
+
+  // When the board triggers a refresh (Stripe/Whop/calendar sync), reload the drawer's
+  // transactions + calendar summary even if the selected client didn't change.
+  useEffect(() => {
+    if (!isOpen || !client) return;
+    loadPayments();
+    loadNextCheckIn();
+  }, [healthRefreshToken]);
 
   const getAllClientEmails = (c: Client) => {
     const set = new Set<string>();
@@ -238,9 +264,36 @@ export default function ClientDetailDrawer({
           updateData.program_end_date = null; // Clear if removed
         }
       }
-      
-      await apiClient.updateClient(client.id, updateData);
+
+      const isLeadClient =
+        client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
+      if (isLeadClient) {
+        const currentInput = followUpIsoToDateInput(
+          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
+        );
+        const nextInput = (formData.follow_up_due_date || '').trim();
+        if (currentInput !== nextInput) {
+          const nextMeta: Record<string, unknown> = {
+            ...(client.meta && typeof client.meta === 'object' ? { ...client.meta } : {}),
+          };
+          if (nextInput) {
+            try {
+              nextMeta.follow_up_due_at = dateInputToFollowUpIso(nextInput);
+            } catch {
+              alert('Invalid follow-up date');
+              setLoading(false);
+              return;
+            }
+          } else {
+            delete nextMeta.follow_up_due_at;
+          }
+          updateData.meta = nextMeta as Client['meta'];
+        }
+      }
+
+      const updated = await apiClient.updateClient(client.id, updateData);
       setIsEditing(false);
+      onClientSaved?.(updated);
       onUpdate();
     } catch (error) {
       console.error('Failed to update client:', error);
@@ -266,6 +319,9 @@ export default function ClientDetailDrawer({
         program_end_date: client.program_end_date 
           ? new Date(client.program_end_date).toISOString().split('T')[0] 
           : '',
+        follow_up_due_date: followUpIsoToDateInput(
+          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
+        ),
       });
     }
     setIsEditing(false);
@@ -370,7 +426,35 @@ export default function ClientDetailDrawer({
     }
   };
 
+  const followUpBar = useMemo(() => {
+    if (!client) return null;
+    const isLeadLocal =
+      client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
+    if (!isLeadLocal) return null;
+    let effective: Client = client;
+    if (isEditing) {
+      const baseMeta: Record<string, unknown> =
+        client.meta && typeof client.meta === 'object' ? { ...client.meta } : {};
+      const trimmed = formData.follow_up_due_date?.trim();
+      if (trimmed) {
+        try {
+          baseMeta.follow_up_due_at = dateInputToFollowUpIso(trimmed);
+          effective = { ...client, meta: baseMeta as Client['meta'] };
+        } catch {
+          effective = client;
+        }
+      } else {
+        delete baseMeta.follow_up_due_at;
+        effective = { ...client, meta: baseMeta as Client['meta'] };
+      }
+    }
+    return computeLeadFollowUpBar(effective);
+  }, [client, isEditing, formData.follow_up_due_date]);
+
   if (!client) return null;
+
+  const isLead =
+    client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
 
   const formatDate = (date: string | null | undefined) => {
     if (!date) return 'Never';
@@ -513,15 +597,63 @@ export default function ClientDetailDrawer({
                         </div>
                     </div>
 
-                    {/* Content - scrollable: Health Score first, then rest */}
+                    {/* Content - scrollable: holistic profile → engagement → checklist */}
                     <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
                       <div className="space-y-6">
-                        <ClientHealthScoreContent client={client} refreshToken={healthRefreshToken} onScoreLoaded={onHealthScoreLoaded} />
-
                         <IntelligenceSection
                           client={client}
                           refreshToken={healthRefreshToken}
+                          showChecklist={false}
                           onClientUpdated={onUpdate}
+                          onOpenEmailComposerWithDraft={(draft) => {
+                            const emails = getAllClientEmails(client);
+                            if (emails.length === 0) {
+                              alert('Add an email address to this client to compose a message.');
+                              return;
+                            }
+                            setEmailComposerDraft({
+                              initialSubject: draft.subject,
+                              initialHtmlContent: draft.bodyHtml,
+                              initialTextContent: draft.bodyText,
+                            });
+                            setShowEmailComposer(true);
+                          }}
+                        />
+
+                        <div className="border-t border-gray-200 dark:border-white/10 pt-4">
+                          <button
+                            type="button"
+                            onClick={() => setEngagementOpen((o) => !o)}
+                            className="flex w-full items-center justify-between gap-2 text-left rounded-lg px-1 py-1 text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
+                            aria-expanded={engagementOpen}
+                          >
+                            <span>Engagement (health score)</span>
+                            <svg
+                              className={`w-4 h-4 shrink-0 text-gray-500 transition-transform ${engagementOpen ? 'rotate-180' : ''}`}
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          {engagementOpen ? (
+                            <div className="mt-3">
+                              <ClientHealthScoreContent
+                                client={client}
+                                refreshToken={healthRefreshToken}
+                                engagementStrip
+                                showFactors={false}
+                                onScoreLoaded={onHealthScoreLoaded}
+                              />
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <AIRecommendationsSection
+                          client={client}
+                          refreshToken={healthRefreshToken}
+                          embedded
                           onOpenEmailComposerWithDraft={(draft) => {
                             const emails = getAllClientEmails(client);
                             if (emails.length === 0) {
@@ -1018,6 +1150,25 @@ export default function ClientDetailDrawer({
                                     Client will automatically move to offboarding at 75% and dead when expired
                                   </p>
                                 </div>
+                                {isLead && (
+                                  <div>
+                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">
+                                      Follow-up due date
+                                    </dt>
+                                    <input
+                                      type="date"
+                                      value={formData.follow_up_due_date}
+                                      onChange={(e) =>
+                                        setFormData({ ...formData, follow_up_due_date: e.target.value })
+                                      }
+                                      className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                    />
+                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                      Optional. Clear the field to use a 14-day window from last activity (see
+                                      timer below). Dates use your local calendar day.
+                                    </p>
+                                  </div>
+                                )}
                               </>
                             ) : (
                               <>
@@ -1043,44 +1194,98 @@ export default function ClientDetailDrawer({
                                         </dd>
                                       </div>
                                     )}
-                                    {client.program_progress_percent !== undefined && client.program_progress_percent !== null && (
-                                      <div>
-                                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
-                                        <dd className="mt-1">
-                                          <div className="space-y-1">
-                                            <div className="flex items-center justify-between text-sm">
-                                              <span className="text-gray-900 dark:text-gray-100">{client.program_progress_percent.toFixed(1)}% Complete</span>
-                                              <span className="text-gray-500 dark:text-gray-100">
-                                                {client.program_progress_percent >= 100 
-                                                  ? 'Expired' 
-                                                  : client.program_progress_percent >= 75 
-                                                  ? 'Offboarding' 
-                                                  : 'Active'}
-                                              </span>
-                                            </div>
-                                            <div className="w-full bg-gray-200 rounded-full h-3">
-                                              <div
-                                                className={`h-3 rounded-full transition-all ${
-                                                  client.program_progress_percent >= 100
-                                                    ? 'bg-red-500'
+                                    {!isLead &&
+                                      client.program_progress_percent !== undefined &&
+                                      client.program_progress_percent !== null && (
+                                        <div>
+                                          <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
+                                          <dd className="mt-1">
+                                            <div className="space-y-1">
+                                              <div className="flex items-center justify-between text-sm">
+                                                <span className="text-gray-900 dark:text-gray-100">
+                                                  {client.program_progress_percent.toFixed(1)}% Complete
+                                                </span>
+                                                <span className="text-gray-500 dark:text-gray-100">
+                                                  {client.program_progress_percent >= 100
+                                                    ? 'Expired'
                                                     : client.program_progress_percent >= 75
-                                                    ? 'bg-yellow-500'
-                                                    : 'bg-blue-500'
-                                                }`}
-                                                style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
-                                              />
+                                                      ? 'Offboarding'
+                                                      : 'Active'}
+                                                </span>
+                                              </div>
+                                              <div className="w-full bg-gray-200 rounded-full h-3">
+                                                <div
+                                                  className={`h-3 rounded-full transition-all ${
+                                                    client.program_progress_percent >= 100
+                                                      ? 'bg-red-500'
+                                                      : client.program_progress_percent >= 75
+                                                        ? 'bg-yellow-500'
+                                                        : 'bg-blue-500'
+                                                  }`}
+                                                  style={{
+                                                    width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%`,
+                                                  }}
+                                                />
+                                              </div>
                                             </div>
-                                          </div>
-                                        </dd>
-                                      </div>
-                                    )}
+                                          </dd>
+                                        </div>
+                                      )}
                                   </>
-                                ) : (
+                                ) : !isLead ? (
                                   <div className="text-sm text-gray-500 dark:text-gray-100">
                                     No program timeline set. Client will remain in current state unless manually moved.
                                   </div>
-                                )}
+                                ) : null}
                               </>
+                            )}
+                            {isLead && followUpBar && (
+                              <div>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">
+                                  Follow-up
+                                  {isEditing && (
+                                    <span className="ml-2 font-normal text-gray-400 dark:text-gray-500">
+                                      (live preview)
+                                    </span>
+                                  )}
+                                </dt>
+                                <dd className="mt-1">
+                                  <div
+                                    className="space-y-1"
+                                    title={
+                                      followUpBar.hasExplicitDue
+                                        ? 'Specific follow-up date (profile or call insight)'
+                                        : 'Default 14 days from last activity (or created date)'
+                                    }
+                                  >
+                                    <div className="flex items-center justify-between text-sm">
+                                      <span className="text-gray-900 dark:text-gray-100">
+                                        {followUpBar.percent.toFixed(1)}% to due date
+                                      </span>
+                                      <span className="text-gray-500 dark:text-gray-100">
+                                        {followUpBar.percent >= 100 ? 'Due' : 'Open'}
+                                      </span>
+                                    </div>
+                                    <div className="w-full bg-gray-200 rounded-full h-3">
+                                      <div
+                                        className={`h-3 rounded-full transition-all ${
+                                          followUpBar.percent >= 100
+                                            ? 'bg-red-500'
+                                            : followUpBar.percent >= 75
+                                              ? 'bg-yellow-500'
+                                              : 'bg-blue-500'
+                                        }`}
+                                        style={{
+                                          width: `${Math.min(100, Math.max(0, followUpBar.percent))}%`,
+                                        }}
+                                      />
+                                    </div>
+                                    <p className="text-xs text-gray-500 dark:text-gray-100 mt-1">
+                                      {followUpBar.subtitle}
+                                    </p>
+                                  </div>
+                                </dd>
+                              </div>
                             )}
                           </dl>
                         </div>

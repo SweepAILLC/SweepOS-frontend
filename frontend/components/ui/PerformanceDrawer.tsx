@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -35,6 +36,7 @@ function PerformanceDrawerPanel({ canAccess }: { canAccess: boolean }) {
   const isOpen = ctx?.isOpen ?? false;
   const everOpened = ctx?.everOpened ?? false;
   const close = ctx?.close ?? (() => {});
+  const asideRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -45,12 +47,29 @@ function PerformanceDrawerPanel({ canAccess }: { canAccess: boolean }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [isOpen, close]);
 
+  // Use the `inert` attribute (not aria-hidden) when closed so screen readers and focus both skip
+  // the drawer. Avoids "Blocked aria-hidden on an element because its descendant retained focus"
+  // when closing via the close button. Also moves focus out so the just-clicked button is not
+  // left focused inside an inert subtree.
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    if (isOpen) {
+      el.removeAttribute('inert');
+    } else {
+      if (el.contains(document.activeElement)) {
+        (document.activeElement as HTMLElement | null)?.blur();
+      }
+      el.setAttribute('inert', '');
+    }
+  }, [isOpen]);
+
   if (!ctx || !everOpened) return null;
 
   return (
     <aside
+      ref={asideRef}
       id="performance-drawer"
-      aria-hidden={!isOpen}
       className={`fixed left-56 top-0 bottom-0 z-[45] flex ${APP_PERF_DRAWER_WIDTH_CLASS} flex-col border-r border-gray-200/80 bg-gray-50/95 shadow-xl backdrop-blur-md transition-transform duration-300 ease-out dark:border-gray-700/80 dark:bg-gray-900/95 ${
         isOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none'
       }`}

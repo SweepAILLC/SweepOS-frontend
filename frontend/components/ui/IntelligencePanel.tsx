@@ -9,6 +9,38 @@ interface AssetLink {
   url: string;
 }
 
+interface OfferEntry {
+  name?: string;
+  promise?: string;
+  ideal_for?: string;
+  not_for?: string;
+  price_terms?: string;
+  when_to_use?: string;
+  triggers?: string[];
+  contraindications?: string;
+}
+
+interface ReferralOffer {
+  incentive?: string;
+  eligibility?: string;
+  ask_script_hints?: string;
+}
+
+interface ObjectionHandler {
+  objection: string;
+  response: string;
+}
+
+interface OfferLadder {
+  version?: number;
+  core_offer?: OfferEntry;
+  downsells?: OfferEntry[];
+  upsells?: OfferEntry[];
+  referral_offer?: ReferralOffer;
+  positioning_notes?: string[];
+  objection_handlers?: ObjectionHandler[];
+}
+
 interface AIProfile {
   writing_style?: string;
   writing_tone?: string;
@@ -23,16 +55,24 @@ interface AIProfile {
   marketing_channels?: string;
   pipeline_priorities?: string[];
   asset_links?: AssetLink[];
+  offer_ladder?: OfferLadder;
 }
 
-type SectionId = 'priorities' | 'writing' | 'coaching' | 'business' | 'sales' | 'marketing' | 'assets';
+type SectionId =
+  | 'priorities'
+  | 'voice'
+  | 'business'
+  | 'offers'
+  | 'sales'
+  | 'marketing'
+  | 'assets';
 
 const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
   { id: 'priorities', title: 'Pipeline Priorities', subtitle: 'What matters most right now?' },
-  { id: 'writing', title: 'Writing & Communication', subtitle: 'How should the AI write on your behalf?' },
-  { id: 'coaching', title: 'Coaching Style', subtitle: 'Your approach to coaching and client relationships' },
+  { id: 'voice', title: 'Voice & Coaching', subtitle: 'How emails and copy should sound on your behalf' },
   { id: 'business', title: 'Your Business', subtitle: 'Help the AI understand what you do' },
-  { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics you use to close' },
+  { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, downsells, upsells, and referral offer' },
+  { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
   { id: 'marketing', title: 'Marketing', subtitle: 'How you attract and nurture prospects' },
   { id: 'assets', title: 'Resource Library', subtitle: 'Links the AI can reference in drafts' },
 ];
@@ -121,6 +161,30 @@ export default function IntelligencePanel() {
   }, [setGlobalLoading]);
 
   useEffect(() => { loadProfile(); }, [loadProfile]);
+
+  // Marketing Intel (content_studio tab) "Re-analyze" pulls Fathom + regenerates bundles; refresh profile and sales themes.
+  useEffect(() => {
+    const onContentStudioReanalyze = () => {
+      void loadProfile();
+      setOrgThemesLoading(true);
+      setOrgThemesError(null);
+      apiClient
+        .getOrgSalesContentThemes()
+        .then((res) => {
+          setOrgThemes(Array.isArray(res?.themes) ? res.themes : []);
+        })
+        .catch((err: unknown) => {
+          setOrgThemesError(
+            (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+              (err as Error)?.message ||
+              'Could not load themes'
+          );
+        })
+        .finally(() => setOrgThemesLoading(false));
+    };
+    window.addEventListener('sweep:content-studio-reanalyzed', onContentStudioReanalyze);
+    return () => window.removeEventListener('sweep:content-studio-reanalyzed', onContentStudioReanalyze);
+  }, [loadProfile]);
 
   useEffect(() => {
     if (activeSection !== 'sales') return;
@@ -218,6 +282,45 @@ export default function IntelligencePanel() {
     update('asset_links', links);
   };
 
+  // ── Offer ladder helpers ──
+  const updateLadder = (next: OfferLadder) => update('offer_ladder', { version: 1, ...next });
+
+  const updateCoreOffer = (field: keyof OfferEntry, value: string) => {
+    const ladder = profile.offer_ladder || {};
+    const core = { ...(ladder.core_offer || {}), [field]: value };
+    updateLadder({ ...ladder, core_offer: core });
+  };
+
+  const addLadderItem = (kind: 'downsells' | 'upsells') => {
+    const ladder = profile.offer_ladder || {};
+    const items = [...(ladder[kind] || []), { name: '', promise: '' } as OfferEntry];
+    updateLadder({ ...ladder, [kind]: items });
+  };
+
+  const updateLadderItem = (
+    kind: 'downsells' | 'upsells',
+    idx: number,
+    field: keyof OfferEntry,
+    value: string | string[],
+  ) => {
+    const ladder = profile.offer_ladder || {};
+    const items = [...(ladder[kind] || [])];
+    items[idx] = { ...(items[idx] || {}), [field]: value };
+    updateLadder({ ...ladder, [kind]: items });
+  };
+
+  const removeLadderItem = (kind: 'downsells' | 'upsells', idx: number) => {
+    const ladder = profile.offer_ladder || {};
+    const items = (ladder[kind] || []).filter((_, i) => i !== idx);
+    updateLadder({ ...ladder, [kind]: items });
+  };
+
+  const updateReferralOffer = (field: keyof ReferralOffer, value: string) => {
+    const ladder = profile.offer_ladder || {};
+    const referral = { ...(ladder.referral_offer || {}), [field]: value };
+    updateLadder({ ...ladder, referral_offer: referral });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -252,9 +355,24 @@ export default function IntelligencePanel() {
               const filled = (() => {
                 switch (s.id) {
                   case 'priorities': return (profile.pipeline_priorities || []).length > 0;
-                  case 'writing': return !!(profile.writing_style || profile.writing_tone);
-                  case 'coaching': return !!(profile.coaching_style || profile.client_management_philosophy);
+                  case 'voice': return !!(
+                    profile.writing_style ||
+                    profile.writing_tone ||
+                    profile.coaching_style ||
+                    profile.client_management_philosophy
+                  );
                   case 'business': return !!(profile.business_description || profile.target_audience || profile.unique_selling_proposition);
+                  case 'offers': {
+                    const l = profile.offer_ladder;
+                    return !!(
+                      l && (
+                        (l.core_offer && (l.core_offer.name || l.core_offer.promise)) ||
+                        (l.upsells || []).length > 0 ||
+                        (l.downsells || []).length > 0 ||
+                        (l.referral_offer && (l.referral_offer.incentive || l.referral_offer.ask_script_hints))
+                      )
+                    );
+                  }
                   case 'sales': return !!(profile.sales_framework || profile.sales_tactics);
                   case 'marketing': return !!(profile.marketing_strategy || profile.marketing_channels);
                   case 'assets': return (profile.asset_links || []).length > 0;
@@ -383,12 +501,16 @@ export default function IntelligencePanel() {
               </>
             )}
 
-            {/* ── Writing ── */}
-            {activeSection === 'writing' && (
+            {/* ── Voice & Coaching ── */}
+            {activeSection === 'voice' && (
               <>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Writing & Communication</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">The AI will mirror this style when drafting emails, follow-ups, and nurture sequences.</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Voice & Coaching</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    The single source of truth for how the AI sounds when it writes on your behalf — emails,
+                    follow-ups, nurture sequences, and Performance prescriptions. Your coaching style here also
+                    shapes how the AI frames advice and how it relates to your clients.
+                  </p>
                 </div>
 
                 <div>
@@ -438,19 +560,15 @@ export default function IntelligencePanel() {
                     ))}
                   </div>
                 </div>
-              </>
-            )}
 
-            {/* ── Coaching ── */}
-            {activeSection === 'coaching' && (
-              <>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Coaching Style</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Helps the AI tailor next-step recommendations and talking points to how you actually work with clients.</p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">How would you describe your coaching approach?</label>
+                <div className="border-t border-gray-200 dark:border-white/10 pt-5 mt-2">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Coaching style
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    The relational backbone for everything the AI writes — advice framing, what you push on,
+                    what you stay soft on.
+                  </p>
                   <div className="flex flex-wrap gap-2">
                     {COACHING_STYLE_OPTIONS.map((opt) => (
                       <button
@@ -477,7 +595,9 @@ export default function IntelligencePanel() {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Client management philosophy</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Client management philosophy
+                  </label>
                   <textarea
                     value={profile.client_management_philosophy || ''}
                     onChange={(e) => update('client_management_philosophy', e.target.value)}
@@ -485,7 +605,9 @@ export default function IntelligencePanel() {
                     placeholder="e.g. I believe in radical honesty and meeting clients where they are. I never push a sale — I let results and relationships do the talking."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
-                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">This shapes how the AI frames recommendations and follow-up suggestions.</p>
+                  <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    Used as voice context for follow-ups and how recommendations get framed.
+                  </p>
                 </div>
               </>
             )}
@@ -528,6 +650,264 @@ export default function IntelligencePanel() {
                     rows={2}
                     placeholder="e.g. Medically-informed programming, direct access to me via Voxer, and a money-back guarantee if you don't see results in 8 weeks."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* ── Offers & Ladder ── */}
+            {activeSection === 'offers' && (
+              <>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Offers & Ladder</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Define your core offer plus any downsells, upsells, and referral offer. Performance ROI rows
+                    will prescribe the best fit when a client&apos;s buying signals match — and the AI will tailor
+                    pitch language using each client&apos;s prospect voice profile.
+                  </p>
+                </div>
+
+                {/* Core offer */}
+                <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-4 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Core offer</h4>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      The flagship thing you sell. Used as the default prescription for active clients without a
+                      stronger signal.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      value={profile.offer_ladder?.core_offer?.name || ''}
+                      onChange={(e) => updateCoreOffer('name', e.target.value)}
+                      placeholder="Name (e.g. Inner Circle 12-week 1:1)"
+                      className="px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <input
+                      type="text"
+                      value={profile.offer_ladder?.core_offer?.price_terms || ''}
+                      onChange={(e) => updateCoreOffer('price_terms', e.target.value)}
+                      placeholder="Price / terms (e.g. $9k or 3x $3.5k)"
+                      className="px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </div>
+                  <textarea
+                    value={profile.offer_ladder?.core_offer?.promise || ''}
+                    onChange={(e) => updateCoreOffer('promise', e.target.value)}
+                    rows={2}
+                    placeholder="Promise / outcome (e.g. Add $10k MRR in 90 days with a single repeatable offer)"
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <textarea
+                      value={profile.offer_ladder?.core_offer?.ideal_for || ''}
+                      onChange={(e) => updateCoreOffer('ideal_for', e.target.value)}
+                      rows={2}
+                      placeholder="Ideal for (audience + their situation)"
+                      className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                    <textarea
+                      value={profile.offer_ladder?.core_offer?.not_for || ''}
+                      onChange={(e) => updateCoreOffer('not_for', e.target.value)}
+                      rows={2}
+                      placeholder="Not for (who you'd turn away)"
+                      className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Upsells */}
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upsells</h4>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Expansion offers prescribed when the system detects an upsell tag. Add the behavioral
+                        triggers that make each upsell the right fit.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addLadderItem('upsells')}
+                      className="text-xs text-emerald-700 dark:text-emerald-300 hover:underline whitespace-nowrap"
+                    >
+                      + Add upsell
+                    </button>
+                  </div>
+                  {(profile.offer_ladder?.upsells || []).length === 0 && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      None yet. Add the next-step offers your best clients move into.
+                    </p>
+                  )}
+                  {(profile.offer_ladder?.upsells || []).map((u, idx) => (
+                    <div key={idx} className="rounded-md border border-gray-200 dark:border-white/10 p-3 space-y-2">
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="text"
+                          value={u.name || ''}
+                          onChange={(e) => updateLadderItem('upsells', idx, 'name', e.target.value)}
+                          placeholder="Name (e.g. Done-with-you sprint)"
+                          className="flex-1 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <input
+                          type="text"
+                          value={u.price_terms || ''}
+                          onChange={(e) => updateLadderItem('upsells', idx, 'price_terms', e.target.value)}
+                          placeholder="Price / terms"
+                          className="w-40 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeLadderItem('upsells', idx)}
+                          className="mt-1 p-1.5 text-gray-400 hover:text-red-500"
+                          title="Remove"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <textarea
+                        value={u.promise || ''}
+                        onChange={(e) => updateLadderItem('upsells', idx, 'promise', e.target.value)}
+                        rows={2}
+                        placeholder="Promise / outcome of this upsell"
+                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <input
+                        type="text"
+                        value={(u.triggers || []).join(', ')}
+                        onChange={(e) =>
+                          updateLadderItem(
+                            'upsells',
+                            idx,
+                            'triggers',
+                            e.target.value
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean),
+                          )
+                        }
+                        placeholder="Triggers (comma-separated, e.g. wants done-for-you, hit revenue ceiling, ready to hire)"
+                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <textarea
+                          value={u.ideal_for || ''}
+                          onChange={(e) => updateLadderItem('upsells', idx, 'ideal_for', e.target.value)}
+                          rows={2}
+                          placeholder="Who it's for"
+                          className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                        <textarea
+                          value={u.contraindications || ''}
+                          onChange={(e) => updateLadderItem('upsells', idx, 'contraindications', e.target.value)}
+                          rows={2}
+                          placeholder="Skip if (e.g. still pre-product, cashflow tight)"
+                          className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Downsells */}
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Downsells</h4>
+                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Lighter alternatives prescribed for cold/warm leads who hesitate at the core offer.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addLadderItem('downsells')}
+                      className="text-xs text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap"
+                    >
+                      + Add downsell
+                    </button>
+                  </div>
+                  {(profile.offer_ladder?.downsells || []).length === 0 && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      None yet. A trial, mini-program, or low-ticket on-ramp works well here.
+                    </p>
+                  )}
+                  {(profile.offer_ladder?.downsells || []).map((d, idx) => (
+                    <div key={idx} className="rounded-md border border-gray-200 dark:border-white/10 p-3 space-y-2">
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="text"
+                          value={d.name || ''}
+                          onChange={(e) => updateLadderItem('downsells', idx, 'name', e.target.value)}
+                          placeholder="Name (e.g. 30-day starter)"
+                          className="flex-1 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <input
+                          type="text"
+                          value={d.price_terms || ''}
+                          onChange={(e) => updateLadderItem('downsells', idx, 'price_terms', e.target.value)}
+                          placeholder="Price / terms"
+                          className="w-40 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeLadderItem('downsells', idx)}
+                          className="mt-1 p-1.5 text-gray-400 hover:text-red-500"
+                          title="Remove"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                      <textarea
+                        value={d.promise || ''}
+                        onChange={(e) => updateLadderItem('downsells', idx, 'promise', e.target.value)}
+                        rows={2}
+                        placeholder="Promise / outcome"
+                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                      <textarea
+                        value={d.when_to_use || ''}
+                        onChange={(e) => updateLadderItem('downsells', idx, 'when_to_use', e.target.value)}
+                        rows={2}
+                        placeholder="When to use (e.g. price objection, not ready for full commitment)"
+                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+                      />
+                    </div>
+                  ))}
+                </div>
+
+                {/* Referral offer */}
+                <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-4 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Referral offer</h4>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Prescribed to active clients with a testimonial-class win or referral intent on their last call.
+                    </p>
+                  </div>
+                  <input
+                    type="text"
+                    value={profile.offer_ladder?.referral_offer?.incentive || ''}
+                    onChange={(e) => updateReferralOffer('incentive', e.target.value)}
+                    placeholder="Incentive (e.g. 1 month free for both, $500 cash, lifetime upgrade)"
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                  <input
+                    type="text"
+                    value={profile.offer_ladder?.referral_offer?.eligibility || ''}
+                    onChange={(e) => updateReferralOffer('eligibility', e.target.value)}
+                    placeholder="Eligibility (e.g. active 60+ days, on a paying plan)"
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                  <textarea
+                    value={profile.offer_ladder?.referral_offer?.ask_script_hints || ''}
+                    onChange={(e) => updateReferralOffer('ask_script_hints', e.target.value)}
+                    rows={3}
+                    placeholder="Ask-script hints — how you'd phrase the referral request to feel natural for this client"
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
               </>

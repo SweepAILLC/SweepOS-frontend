@@ -17,9 +17,13 @@ export interface HealthTrendPeriod {
   show_up_rate_pct: number | null;
   close_rate_pct: number | null;
   stripe_revenue_usd: number;
+  /** Monthly cash matching Finances "combined" (Stripe + Whop) when API provides it; charts prefer this over stripe-only. */
+  combined_revenue_usd?: number | null;
   calls_booked_count: number;
   cumulative_total_clients: number;
   active_clients_cohort: number;
+  /** When set by API, preferred over derived cumulative revenue ÷ roster for LTV charts. */
+  avg_client_ltv_usd?: number | null;
 }
 
 export interface GlobalHealth {
@@ -38,7 +42,13 @@ export interface GlobalHealth {
   total_mrr_usd: number;
   total_revenue_stripe_succeeded_usd: number;
   last_30_days_revenue_stripe_usd: number;
+  /** Finances-style Stripe + Whop; falls back to Stripe-only in UI when absent. */
+  last_30_days_combined_revenue_usd?: number;
   treasury_posted_last_30_days_usd: number;
+  treasury_posted_all_time_usd: number;
+  cash_collected_all_time_combined_usd: number;
+  manual_cash_all_time_usd: number;
+  total_processor_revenue_all_time_usd: number;
   funnel_first_step_views_all_time: number;
   funnel_first_step_views_last_30_days: number;
   unique_visitors_all_time: number;
@@ -46,7 +56,9 @@ export interface GlobalHealth {
   orgs_with_stripe_connected: number;
   orgs_with_brevo_connected: number;
   pending_invitations: number;
-  revenue_from_existing_clients_last_30d_usd: number;
+  stripe_revenue_post_onboarding_usd: number;
+  /** Cumulative combined (Finances) post-onboarding; UI prefers this over `stripe_revenue_post_onboarding_usd` when set. */
+  combined_revenue_post_onboarding_usd?: number;
   invitation_emails_sent_last_30d: number;
   invitation_emails_sent_previous_30d: number;
   calls_booked_last_30d: number;
@@ -113,5 +125,13 @@ export interface OrganizationDashboardSummary {
     domain: string | null;
     created_at: string | null;
   }>;
+  organization_onboarded_at?: string | null;
+  /** Finances combined (Stripe + Whop) since onboarding when API reports it. */
+  finances_combined_since_onboarding_usd?: number;
+  cash_collected_since_onboarding_usd?: number;
+  cash_collected_all_time_usd?: number;
+  manual_cash_all_time_usd?: number;
+  total_processor_revenue_all_time_usd?: number;
+  monthly_health_since_onboarding?: HealthTrendPeriod[];
 }
 

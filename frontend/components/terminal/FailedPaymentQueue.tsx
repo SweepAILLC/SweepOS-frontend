@@ -215,7 +215,7 @@ Your Team
   };
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
+    <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
         <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
           Failed Payment Queue
@@ -241,9 +241,9 @@ Your Team
           {failedPayments.map((payment) => (
             <div
               key={payment.id}
-              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 glass-panel rounded-lg border border-red-500/20"
+              className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 p-3 sm:p-4 glass-panel rounded-lg border border-red-500/20 min-w-0 max-w-full overflow-hidden"
             >
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 overflow-hidden">
                 <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">
                   {payment.client_name || payment.client_email || 'Unknown'}
                 </p>
@@ -259,13 +259,16 @@ Your Team
                   Failed: {formatDate(payment.failed_at)}
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-3 sm:space-x-4 sm:gap-0">
-                <div className="text-left sm:text-right w-full sm:w-auto">
-                  <p className="text-lg font-bold text-red-500 dark:text-red-400">
+              <div className="flex flex-wrap items-center gap-3 sm:space-x-4 sm:gap-0 min-w-0 shrink-0">
+                <div className="text-left sm:text-right w-full sm:w-auto min-w-0">
+                  <p
+                    className="text-lg font-bold text-red-500 dark:text-red-400 tabular-nums truncate sm:max-w-[10rem]"
+                    title={formatCurrency(payment.amount)}
+                  >
                     {formatCurrency(payment.amount)}
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-2 shrink-0">
                   {brevoStatus?.connected && payment.client_email ? (
                     <button
                       onClick={() => handleRecover(payment)}
