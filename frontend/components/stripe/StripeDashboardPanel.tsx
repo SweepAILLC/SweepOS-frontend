@@ -394,26 +394,6 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
     }
   };
 
-  const handleDisconnect = async () => {
-    if (!confirm('Are you sure you want to disconnect Stripe? You will need to reconnect to view data.')) {
-      return;
-    }
-    
-    try {
-      await apiClient.disconnectStripe();
-      setIsConnected(false);
-      setSummary(null);
-      setRevenueTimeline(null);
-      setChurnData(null);
-      setMrrTrend(null);
-      setPayments([]);
-      setFailedPayments([]);
-    } catch (error: any) {
-      console.error('Failed to disconnect Stripe:', error);
-      setError(error?.response?.data?.detail || 'Failed to disconnect Stripe.');
-    }
-  };
-
   const handleVerifyConnection = async () => {
     try {
       const verification = await apiClient.verifyStripeConnection();
@@ -883,15 +863,6 @@ Your Team
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Stripe Financial Dashboard</h2>
           <div className="flex items-center gap-2">
-            {canManageIntegrations ? (
-              <button
-                onClick={handleDisconnect}
-                className="text-sm text-red-300 px-3 py-1 border border-red-400/40 rounded-md hover:bg-red-500/10"
-                title="Disconnect Stripe to connect a different account"
-              >
-                Disconnect
-              </button>
-            ) : null}
             <select
               value={timeRange}
               onChange={(e) => {
@@ -919,6 +890,11 @@ Your Team
             </div>
           </div>
         </div>
+        {canManageIntegrations && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+            To disconnect Stripe or connect a different account, use <span className="font-medium">Integrations</span> in the sidebar.
+          </p>
+        )}
 
         {/* KPI Cards */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">

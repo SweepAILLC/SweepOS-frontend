@@ -217,6 +217,8 @@ export default function AdminPanel() {
       console.error('Failed to load tab permissions:', err);
       // Set defaults if loading fails
       setOrgTabPermissions([
+        { tab_name: 'terminal', enabled: true },
+        { tab_name: 'pipeline', enabled: true },
         { tab_name: 'clients', enabled: true },
         { tab_name: 'stripe', enabled: true },
         { tab_name: 'funnels', enabled: true },

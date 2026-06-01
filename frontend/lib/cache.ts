@@ -1,4 +1,6 @@
 // Simple in-memory cache with TTL support
+import { clearPipelineStore } from './pipelineStore';
+
 interface CacheEntry<T> {
   data: T;
   timestamp: number;
@@ -116,6 +118,8 @@ export const CACHE_KEYS = {
   ADMIN_HEALTH: 'admin_health',
   ADMIN_SETTINGS: 'admin_settings',
   TERMINAL_SUMMARY: 'terminal_summary',
+  TERMINAL_MONTHLY_TRENDS: 'terminal_monthly_trends',
+  TERMINAL_LEADS_BY_SOURCE: 'terminal_leads_by_source',
 } as const;
 
 // TTL for terminal dashboard data (90s) so switching tabs feels instant
@@ -156,6 +160,7 @@ export function clearSessionCaches(): void {
   cache.deleteByPrefix('stripe_');
   // Client list must not bleed across orgs or sessions (key was previously global `clients`)
   cache.deleteByPrefix('clients');
+  clearPipelineStore();
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem(TERMINAL_STRIPE_UPDATED_KEY);
     sessionStorage.removeItem(TERMINAL_STRIPE_MS_KEY);
@@ -171,12 +176,37 @@ export function invalidateStripeCache(): void {
 export function invalidateStripeAndTerminalAfterWebhook(seenMs: number): void {
   cache.deleteByPrefix('stripe_');
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+  cache.delete(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE);
   cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
   setSeenStripeDataMs(seenMs);
 }
 
 /** Custom event name: dispatch when Stripe data was updated by webhook so components can refetch in background without full loading. */
 export const STRIPE_DATA_UPDATED_EVENT = 'stripeDataUpdated';
+
+/** Terminal dashboard finished sync + cache invalidation — refetch charts and KPIs. */
+export const TERMINAL_DATA_REFRESHED_EVENT = 'terminalDataRefreshed';
+
+/** Manual payment recorded — refresh terminal summary, KPI row, and cash widgets. */
+export const MANUAL_PAYMENT_CREATED_EVENT = 'manualPaymentCreated';
+
+/** Bust terminal/finances caches after manual payment CRUD so KPIs include new cash. */
+export function invalidateCachesAfterManualPayment(): void {
+  cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+  cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+  cache.deleteByPrefix('stripe_payments_');
+  cache.deleteByPrefix(CACHE_KEYS.STRIPE_FAILED_PAYMENTS);
+}
+
+export function dispatchManualPaymentCreated(): void {
+  if (typeof window === 'undefined') return;
+  invalidateCachesAfterManualPayment();
+  window.dispatchEvent(new CustomEvent(MANUAL_PAYMENT_CREATED_EVENT));
+  window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+  window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
+}
 
 /** Dispatched when client list/board was updated (move, create, delete, drawer save) so Pipeline Snapshot can refetch. */
 export const TERMINAL_CLIENTS_UPDATED_EVENT = 'terminalClientsUpdated';

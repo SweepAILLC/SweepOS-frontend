@@ -3,6 +3,12 @@ import StripeDashboardPanel from '@/components/stripe/StripeDashboardPanel';
 import { apiClient } from '@/lib/api';
 import type { FinancesCombinedSummary, FinancesTimelinePoint } from '@/types/integration';
 import {
+  type DashboardTimeRange,
+  dashboardPeriodLabel,
+  financesSummaryApiParams,
+  financesTimelineApiParams,
+} from '@/lib/dashboardTimeRange';
+import {
   LineChart,
   Line,
   XAxis,
@@ -30,30 +36,12 @@ const tabBtn =
 const tabActive = 'bg-white/15 text-gray-900 dark:text-gray-100';
 const tabInactive = 'text-gray-600 dark:text-gray-400 hover:bg-white/10';
 
-/** Match Stripe dashboard: MTD, rolling N days, last year (365), or combined all-time scope. */
-export type FinancesTimeRange = number | 'mtd' | 'all';
-
-function financesSummaryApiParams(tr: FinancesTimeRange): { range: number; scope?: 'mtd' | 'all' } {
-  if (tr === 'mtd') return { range: 30, scope: 'mtd' };
-  if (tr === 'all') return { range: 365, scope: 'all' };
-  return { range: tr };
-}
-
-function financesTimelineApiParams(tr: FinancesTimeRange): { days: number; scope?: 'mtd' | 'all' } {
-  if (tr === 'mtd') return { days: 31, scope: 'mtd' };
-  if (tr === 'all') return { days: 365, scope: 'all' };
-  return { days: tr };
-}
-
-function financesPeriodLabel(tr: FinancesTimeRange): string {
-  if (tr === 'mtd') return 'Month to date';
-  if (tr === 'all') return 'All recorded history';
-  return `Last ${tr} days`;
-}
+/** @deprecated use DashboardTimeRange from `@/lib/dashboardTimeRange` */
+export type FinancesTimeRange = DashboardTimeRange;
 
 export default function FinancesDashboardPanel({ userRole = 'member' }: { userRole?: string }) {
   const [source, setSource] = useState<SourceTab>('all');
-  const [timeRange, setTimeRange] = useState<FinancesTimeRange>('mtd');
+  const [timeRange, setTimeRange] = useState<DashboardTimeRange>('mtd');
   const [summary, setSummary] = useState<FinancesCombinedSummary | null>(null);
   const [timeline, setTimeline] = useState<FinancesTimelinePoint[]>([]);
   const [loadingAll, setLoadingAll] = useState(false);
@@ -132,20 +120,6 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
     }
   };
 
-  const disconnectWhop = async () => {
-    if (!confirm('Disconnect Whop for this organization?')) return;
-    setWhopBusy(true);
-    try {
-      await apiClient.postWhopDisconnect();
-      await loadWhop();
-      await loadCombined();
-    } catch {
-      setWhopErr('Disconnect failed');
-    } finally {
-      setWhopBusy(false);
-    }
-  };
-
   const syncWhop = async () => {
     setWhopBusy(true);
     setWhopErr(null);
@@ -208,7 +182,7 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
                 <div className="rounded-lg bg-white/5 p-4">
                   <p className="text-xs text-gray-500 uppercase">
-                    Combined ({financesPeriodLabel(timeRange)})
+                    Combined ({dashboardPeriodLabel(timeRange)})
                   </p>
                   <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                     ${summary.combined.last_30_days_revenue.toFixed(2)}
@@ -224,12 +198,12 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
                   <p>
                     <span className="text-gray-500">Stripe:</span>{' '}
                     <span className="font-medium">${summary.stripe.last_30_days_revenue.toFixed(2)}</span>{' '}
-                    <span className="text-gray-500">({financesPeriodLabel(timeRange)})</span>
+                    <span className="text-gray-500">({dashboardPeriodLabel(timeRange)})</span>
                   </p>
                   <p>
                     <span className="text-gray-500">Whop:</span>{' '}
                     <span className="font-medium">${summary.whop.last_30_days_revenue.toFixed(2)}</span>{' '}
-                    <span className="text-gray-500">({financesPeriodLabel(timeRange)})</span>
+                    <span className="text-gray-500">({dashboardPeriodLabel(timeRange)})</span>
                   </p>
                   <p className="text-xs text-gray-500 mt-2">
                     Stripe {summary.stripe_connected ? 'connected' : 'not connected'} · Whop{' '}
@@ -242,7 +216,7 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
 
           <div className="glass-card p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-              Revenue by source ({financesPeriodLabel(timeRange)})
+              Revenue by source ({dashboardPeriodLabel(timeRange)})
             </h3>
             {chartData.length === 0 ? (
               <p className="text-sm text-gray-500">No timeline data yet. Connect Stripe and/or Whop and sync.</p>
@@ -281,6 +255,9 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 Connected · company <code className="text-xs">{whopStatus.company_id}</code>
               </p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Disconnect or reconnect from <span className="font-medium">Integrations → Whop</span>.
+              </p>
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -289,14 +266,6 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
                   className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm disabled:opacity-50"
                 >
                   Sync payments
-                </button>
-                <button
-                  type="button"
-                  disabled={whopBusy}
-                  onClick={disconnectWhop}
-                  className="px-4 py-2 rounded-lg border border-red-500/50 text-red-600 text-sm"
-                >
-                  Disconnect
                 </button>
               </div>
               <div className="overflow-x-auto border border-white/10 rounded-lg">

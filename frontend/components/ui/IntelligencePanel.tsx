@@ -1,7 +1,21 @@
 'use client';
 
+import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, type OrgSalesContentTheme } from '@/lib/api';
+import { DEFAULT_EMAIL_HTML_TEMPLATE } from '@/lib/emailHtmlDefaultTemplate';
+
+const CAMPAIGN_SAMPLE_KINDS = [
+  'onboarding_email',
+  'referral_campaign',
+  'upsell_campaign',
+  're_sign_campaign',
+] as const;
+type CampaignSampleKind = (typeof CAMPAIGN_SAMPLE_KINDS)[number];
+
+function isCampaignSampleKind(k: string): k is CampaignSampleKind {
+  return (CAMPAIGN_SAMPLE_KINDS as readonly string[]).includes(k);
+}
 import { useLoading } from '@/contexts/LoadingContext';
 
 interface AssetLink {
@@ -41,6 +55,39 @@ interface OfferLadder {
   objection_handlers?: ObjectionHandler[];
 }
 
+type WritingSampleKind =
+  | 'email'
+  | 'message'
+  | 'other'
+  | 'onboarding_email'
+  | 'referral_campaign'
+  | 'upsell_campaign'
+  | 're_sign_campaign';
+
+const WRITING_SAMPLE_KIND_OPTIONS: { value: WritingSampleKind; label: string; description: string }[] = [
+  { value: 'email', label: 'Voice example — email', description: 'Past email that sounds like you' },
+  { value: 'message', label: 'Voice example — message', description: 'DM, SMS, or chat snippet for tone' },
+  { value: 'other', label: 'Voice example — other', description: 'Any other writing that captures your voice' },
+  { value: 'onboarding_email', label: 'Onboarding email', description: 'Welcome / first-steps email for new clients' },
+  { value: 'referral_campaign', label: 'Referral campaign', description: 'Asks clients to share with a friend' },
+  { value: 'upsell_campaign', label: 'Upsell campaign', description: 'Offers a higher tier / next step' },
+  { value: 're_sign_campaign', label: 'Re-sign / renewal', description: 'Win-back / commitment renewal' },
+];
+
+interface WritingSample {
+  kind: WritingSampleKind;
+  title?: string;
+  /** Plain text version. Used when format = 'plain', and as a fallback / voice anchor when format = 'html'. */
+  body?: string;
+  /** Branded HTML. Optional even for campaign kinds — only used when format = 'html'. */
+  html_template?: string;
+  /**
+   * Which side is the source of truth for this sample. Defaults to 'plain' so
+   * voice examples stay simple and HTML wrappers are explicitly opt-in.
+   */
+  format?: 'plain' | 'html';
+}
+
 interface AIProfile {
   writing_style?: string;
   writing_tone?: string;
@@ -56,20 +103,31 @@ interface AIProfile {
   pipeline_priorities?: string[];
   asset_links?: AssetLink[];
   offer_ladder?: OfferLadder;
+  writing_samples?: WritingSample[];
+  email_html_template_enabled?: boolean;
+  email_html_template?: string;
 }
 
 type SectionId =
   | 'priorities'
   | 'voice'
+  | 'samples'
   | 'business'
   | 'offers'
   | 'sales'
   | 'marketing'
   | 'assets';
 
+const MAX_WRITING_SAMPLES = 12;
+
 const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
   { id: 'priorities', title: 'Pipeline Priorities', subtitle: 'What matters most right now?' },
   { id: 'voice', title: 'Voice & Coaching', subtitle: 'How emails and copy should sound on your behalf' },
+  {
+    id: 'samples',
+    title: 'Writing Samples',
+    subtitle: 'Voice examples plus optional branded HTML for referral, upsell, and re-sign campaigns',
+  },
   { id: 'business', title: 'Your Business', subtitle: 'Help the AI understand what you do' },
   { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, downsells, upsells, and referral offer' },
   { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
@@ -125,7 +183,11 @@ const SALES_FRAMEWORK_OPTIONS = [
   'None / custom',
 ];
 
-export default function IntelligencePanel() {
+export default function IntelligencePanel({
+  onOpenAutomations,
+}: {
+  onOpenAutomations?: () => void;
+} = {}) {
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -282,6 +344,43 @@ export default function IntelligencePanel() {
     update('asset_links', links);
   };
 
+  const addWritingSample = (kind: WritingSampleKind = 'email') => {
+    const list = [...(profile.writing_samples || [])];
+    if (list.length >= MAX_WRITING_SAMPLES) return;
+    list.push({
+      kind,
+      title: '',
+      body: '',
+      html_template: '',
+      // Default to plain text. HTML is always opt-in via the per-sample Format toggle.
+      format: 'plain',
+    });
+    update('writing_samples', list);
+  };
+
+  const brandedWrapperStarter = () =>
+    (profile.email_html_template || '').trim() || DEFAULT_EMAIL_HTML_TEMPLATE;
+
+  const updateWritingSample = (idx: number, patch: Partial<WritingSample>) => {
+    const list = [...(profile.writing_samples || [])];
+    const cur = list[idx];
+    if (!cur) return;
+    list[idx] = { ...cur, ...patch };
+    update('writing_samples', list);
+  };
+
+  const removeWritingSample = (idx: number) => {
+    const list = (profile.writing_samples || []).filter((_, i) => i !== idx);
+    update('writing_samples', list);
+  };
+
+  /** Back-fill `format` for existing samples (saved before the toggle existed). */
+  const sampleFormat = (s: WritingSample): 'plain' | 'html' => {
+    if (s.format === 'html' || s.format === 'plain') return s.format;
+    if ((s.html_template || '').trim()) return 'html';
+    return 'plain';
+  };
+
   // ── Offer ladder helpers ──
   const updateLadder = (next: OfferLadder) => update('offer_ladder', { version: 1, ...next });
 
@@ -361,6 +460,9 @@ export default function IntelligencePanel() {
                     profile.coaching_style ||
                     profile.client_management_philosophy
                   );
+                  case 'samples': return (profile.writing_samples || []).some(
+                    (s) => (s.body || '').trim().length > 0 || (s.html_template || '').trim().length > 0
+                  );
                   case 'business': return !!(profile.business_description || profile.target_audience || profile.unique_selling_proposition);
                   case 'offers': {
                     const l = profile.offer_ladder;
@@ -401,6 +503,46 @@ export default function IntelligencePanel() {
               );
             })}
           </nav>
+
+          {/* Email Playbooks deep-link — Intelligence configures voice/templates/offers; Automations is where they actually fire. */}
+          <div className="mt-3 glass-card p-4">
+            <div className="flex items-start gap-2">
+              <span
+                className="flex-shrink-0 w-8 h-8 rounded-md bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 flex items-center justify-center"
+                aria-hidden
+              >
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" className="w-4 h-4">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  />
+                </svg>
+              </span>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">Email Playbooks</p>
+                <p className="mt-0.5 text-[11px] leading-snug text-gray-500 dark:text-gray-400">
+                  Voice, samples, and offers here power your automated emails. Configure the
+                  triggers and timing in Automations.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (onOpenAutomations) {
+                      onOpenAutomations();
+                    } else if (typeof window !== 'undefined') {
+                      window.location.href = '/?tab=automations';
+                    }
+                  }}
+                  className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-violet-700 dark:text-violet-300 hover:text-violet-900 dark:hover:text-violet-100"
+                >
+                  Open Automations
+                  <span aria-hidden>→</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </aside>
 
         {/* Content */}
@@ -608,6 +750,250 @@ export default function IntelligencePanel() {
                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                     Used as voice context for follow-ups and how recommendations get framed.
                   </p>
+                </div>
+              </>
+            )}
+
+            {/* ── Writing samples ── */}
+            {activeSection === 'samples' && (
+              <>
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Writing samples</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Drop in real examples of how you communicate so the AI sounds like you. Each sample
+                    can be plain text (the default) or a branded HTML template — choose per sample.
+                    Onboarding, referral, upsell, and re-sign campaign samples are auto-picked by the
+                    matching <Link className="underline" href="/?tab=automations">Automations</Link> playbooks.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {
+                      (profile.writing_samples || []).filter(
+                        (s) => (s.body || '').trim() || (s.html_template || '').trim()
+                      ).length
+                    }{' '}
+                    / {MAX_WRITING_SAMPLES} samples filled in
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => addWritingSample('email')}
+                    disabled={(profile.writing_samples || []).length >= MAX_WRITING_SAMPLES}
+                    className="ml-auto inline-flex items-center gap-1 rounded-lg border border-teal-500/40 bg-teal-500/10 px-3 py-1.5 text-xs font-medium text-teal-800 dark:text-teal-200 hover:bg-teal-500/20 disabled:opacity-40"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Add sample
+                  </button>
+                </div>
+
+                <div className="space-y-4">
+                  {(profile.writing_samples || []).map((sample, idx) => {
+                    const campaign = isCampaignSampleKind(sample.kind || '');
+                    const fmt = sampleFormat(sample);
+                    const kindOpt = WRITING_SAMPLE_KIND_OPTIONS.find((o) => o.value === sample.kind);
+                    return (
+                    <div
+                      key={idx}
+                      className={`rounded-lg border p-4 space-y-3 ${
+                        campaign
+                          ? 'border-violet-500/30 bg-violet-500/[0.06]'
+                          : 'border-teal-500/25 bg-teal-500/5'
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-start gap-3">
+                        <div className="flex-1 min-w-[16rem] space-y-2">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                              Type
+                            </label>
+                            <select
+                              value={sample.kind || 'email'}
+                              onChange={(e) =>
+                                updateWritingSample(idx, { kind: e.target.value as WritingSampleKind })
+                              }
+                              className="max-w-[min(100%,16rem)] px-2 py-1 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            >
+                              {WRITING_SAMPLE_KIND_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          {kindOpt?.description && (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400">{kindOpt.description}</p>
+                          )}
+                          <input
+                            type="text"
+                            value={sample.title || ''}
+                            onChange={(e) => updateWritingSample(idx, { title: e.target.value })}
+                            placeholder="Optional label (e.g. Post-payment welcome v2)"
+                            className="w-full px-3 py-1.5 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+
+                        {/* Format toggle — Plain text / HTML template — always user-controlled. */}
+                        <div className="flex flex-col items-end gap-2">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                            Format
+                          </span>
+                          <div
+                            role="tablist"
+                            aria-label="Sample format"
+                            className="inline-flex rounded-lg border border-gray-300 dark:border-white/10 overflow-hidden text-xs"
+                          >
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={fmt === 'plain'}
+                              onClick={() => updateWritingSample(idx, { format: 'plain' })}
+                              className={`px-3 py-1.5 font-medium transition-colors ${
+                                fmt === 'plain'
+                                  ? 'bg-teal-600 text-white'
+                                  : 'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              Plain text
+                            </button>
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={fmt === 'html'}
+                              onClick={() => updateWritingSample(idx, { format: 'html' })}
+                              className={`px-3 py-1.5 font-medium border-l border-gray-300 dark:border-white/10 transition-colors ${
+                                fmt === 'html'
+                                  ? 'bg-violet-600 text-white'
+                                  : 'bg-transparent text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5'
+                              }`}
+                            >
+                              HTML template
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeWritingSample(idx)}
+                            className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                            title="Remove sample"
+                            aria-label="Remove sample"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+
+                      {fmt === 'html' ? (
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <label className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                              Branded HTML
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                updateWritingSample(idx, { html_template: brandedWrapperStarter() })
+                              }
+                              className="text-xs font-medium text-violet-600 dark:text-violet-400 hover:underline"
+                            >
+                              Load starter template
+                            </button>
+                          </div>
+                          <textarea
+                            value={sample.html_template || ''}
+                            onChange={(e) => updateWritingSample(idx, { html_template: e.target.value })}
+                            rows={12}
+                            placeholder="Paste branded HTML, or click “Load starter template”. Use {{BODY_HTML}} where the message body should appear."
+                            className="w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-violet-500"
+                          />
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                            Tokens supported:{' '}
+                            <span className="font-mono">{"{{BODY_HTML}}"}</span>,{' '}
+                            <span className="font-mono">{"{{SUBJECT}}"}</span>,{' '}
+                            <span className="font-mono">{"{{SENDER_NAME}}"}</span>,{' '}
+                            <span className="font-mono">{"{{SENDER_EMAIL}}"}</span>.
+                          </p>
+                          <details className="text-xs text-gray-600 dark:text-gray-400">
+                            <summary className="cursor-pointer hover:text-gray-900 dark:hover:text-gray-200">
+                              Add a plain-text fallback (recommended)
+                            </summary>
+                            <textarea
+                              value={sample.body || ''}
+                              onChange={(e) => updateWritingSample(idx, { body: e.target.value })}
+                              rows={5}
+                              placeholder="Plain version used for inbox preview text and as a voice anchor for the AI."
+                              className="mt-2 w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                            />
+                          </details>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1 block">
+                            Plain text
+                          </label>
+                          <textarea
+                            value={sample.body || ''}
+                            onChange={(e) => updateWritingSample(idx, { body: e.target.value })}
+                            rows={8}
+                            placeholder={
+                              sample.kind === 'message'
+                                ? 'Paste a DM or text thread (you can redact names).'
+                                : 'Paste the full email or the main paragraphs (redact names if you prefer).'
+                            }
+                            className="w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
+
+                  {(profile.writing_samples || []).length === 0 && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      No samples yet. Click <strong>Add sample</strong>, then pick the type and format
+                      inside the card. Even one strong example will sharpen drafts noticeably.
+                    </p>
+                  )}
+                </div>
+
+                <div className="border-t border-gray-200 dark:border-white/10 pt-5 mt-2 space-y-3">
+                  <div>
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                      Global branded wrapper{' '}
+                      <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
+                        — optional, off by default
+                      </span>
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                      If you turn this on, the EmailComposer modal will wrap any plain-text draft you
+                      send (and the live preview) in this HTML so all manual outbound looks branded.
+                      Per-sample HTML templates above are independent — leaving this off does not
+                      disable them.
+                    </p>
+                  </div>
+
+                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                    <input
+                      type="checkbox"
+                      checked={!!profile.email_html_template_enabled}
+                      onChange={(e) => update('email_html_template_enabled', e.target.checked)}
+                      className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span className="font-medium">Enable global branded HTML wrapper</span>
+                  </label>
+
+                  {!!profile.email_html_template_enabled && (
+                    <textarea
+                      value={(profile.email_html_template || DEFAULT_EMAIL_HTML_TEMPLATE) as string}
+                      onChange={(e) => update('email_html_template', e.target.value)}
+                      rows={10}
+                      className="w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
+                      placeholder={DEFAULT_EMAIL_HTML_TEMPLATE}
+                    />
+                  )}
                 </div>
               </>
             )}

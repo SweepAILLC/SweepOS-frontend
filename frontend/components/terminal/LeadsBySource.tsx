@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
+import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS } from '@/lib/cache';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 interface LeadSource {
@@ -17,76 +18,92 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
   const [loading, setLoading] = useState(true);
   const hasCalledOnLoadComplete = useRef(false);
 
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
-    loadLeadSources();
+    const run = () => void loadLeadSources(false, true);
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      const id = window.requestIdleCallback(run, { timeout: 2500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = setTimeout(run, 400);
+    return () => clearTimeout(t);
   }, []);
 
   // Live polling: avoid forceRefresh — same N×analytics pattern as BookingRateByFunnel.
   useEffect(() => {
-    const interval = setInterval(() => loadLeadSources(false), 60 * 1000);
+    const interval = setInterval(() => loadLeadSources(false, false), 60 * 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const loadLeadSources = async (forceRefresh = false) => {
+  const loadLeadSources = async (forceRefresh = false, showLoading = false) => {
     try {
-      setLoading(true);
-      
-      // Get all funnels
-      const funnels = await apiClient.getFunnels();
-      
-      // Aggregate data from all funnels (last 30 days)
-      const sourceMap = new Map<string, { visitors: number; conversions: number }>();
-      
-      for (const funnel of funnels) {
-        try {
-          const analytics = await apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh);
-          
-          // Process UTM sources
-          analytics.top_utm_sources?.forEach((utm: any) => {
-            const source = utm.source || 'Unknown';
-            const existing = sourceMap.get(source) || { visitors: 0, conversions: 0 };
-            sourceMap.set(source, {
-              visitors: existing.visitors + (utm.unique_visitors || utm.count), // Use unique_visitors if available
-              conversions: existing.conversions + utm.conversions,
-            });
-          });
-          
-          // Process referrers (categorize them)
-          // Use unique_visitors from backend (now tracked and returned)
-          analytics.top_referrers?.forEach((ref: any) => {
-            let source = 'Direct';
-            if (ref.referrer && ref.referrer !== 'Direct') {
-              const referrer = ref.referrer.toLowerCase();
-              if (referrer.includes('instagram') || referrer.includes('ig')) {
-                source = 'Instagram';
-              } else if (referrer.includes('facebook') || referrer.includes('fb')) {
-                source = 'Facebook';
-              } else if (referrer.includes('google') || referrer.includes('gclid')) {
-                source = 'Google';
-              } else if (referrer.includes('organic') || referrer.includes('search')) {
-                source = 'Organic';
-              } else if (referrer.includes('paid') || referrer.includes('ad')) {
-                source = 'Paid';
-              } else if (referrer.includes('referral') || referrer.includes('ref')) {
-                source = 'Referral';
-              } else {
-                // Use the actual referrer name instead of "Other"
-                source = ref.referrer;
-              }
-            }
-            
-            const existing = sourceMap.get(source) || { visitors: 0, conversions: 0 };
-            sourceMap.set(source, {
-              visitors: existing.visitors + (ref.unique_visitors || ref.count), // Use unique_visitors if available
-              conversions: existing.conversions + ref.conversions,
-            });
-          });
-        } catch (error) {
-          console.warn(`Failed to load analytics for funnel ${funnel.id}:`, error);
+      if (showLoading || !initialLoadDone.current) setLoading(true);
+
+      if (!forceRefresh) {
+        const cached = cache.get<LeadSource[]>(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE);
+        if (cached?.length) {
+          setLeadSources(cached);
+          initialLoadDone.current = true;
+          setLoading(false);
+          if (!hasCalledOnLoadComplete.current && onLoadComplete) {
+            hasCalledOnLoadComplete.current = true;
+            onLoadComplete();
+          }
+          return;
         }
       }
-      
-      // Convert to array and sort by visitor count
+
+      const funnels = await apiClient.getFunnels();
+      const sourceMap = new Map<string, { visitors: number; conversions: number }>();
+
+      const analyticsResults = await Promise.allSettled(
+        funnels.map((funnel: { id: string }) =>
+          apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh)
+        )
+      );
+
+      for (const result of analyticsResults) {
+        if (result.status !== 'fulfilled') continue;
+        const analytics = result.value;
+        analytics.top_utm_sources?.forEach((utm: { source?: string; unique_visitors?: number; count?: number; conversions?: number }) => {
+          const source = utm.source || 'Unknown';
+          const existing = sourceMap.get(source) || { visitors: 0, conversions: 0 };
+          sourceMap.set(source, {
+            visitors: existing.visitors + (utm.unique_visitors || utm.count || 0),
+            conversions: existing.conversions + (utm.conversions || 0),
+          });
+        });
+
+        analytics.top_referrers?.forEach((ref: { referrer?: string; unique_visitors?: number; count?: number; conversions?: number }) => {
+          let source = 'Direct';
+          if (ref.referrer && ref.referrer !== 'Direct') {
+            const referrer = ref.referrer.toLowerCase();
+            if (referrer.includes('instagram') || referrer.includes('ig')) {
+              source = 'Instagram';
+            } else if (referrer.includes('facebook') || referrer.includes('fb')) {
+              source = 'Facebook';
+            } else if (referrer.includes('google') || referrer.includes('gclid')) {
+              source = 'Google';
+            } else if (referrer.includes('organic') || referrer.includes('search')) {
+              source = 'Organic';
+            } else if (referrer.includes('paid') || referrer.includes('ad')) {
+              source = 'Paid';
+            } else if (referrer.includes('referral') || referrer.includes('ref')) {
+              source = 'Referral';
+            } else {
+              source = ref.referrer;
+            }
+          }
+
+          const existing = sourceMap.get(source) || { visitors: 0, conversions: 0 };
+          sourceMap.set(source, {
+            visitors: existing.visitors + (ref.unique_visitors || ref.count || 0),
+            conversions: existing.conversions + (ref.conversions || 0),
+          });
+        });
+      }
+
       const sources: LeadSource[] = Array.from(sourceMap.entries())
         .map(([source, data]) => ({
           source,
@@ -94,9 +111,11 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
           conversions: data.conversions,
         }))
         .sort((a, b) => b.visitors - a.visitors)
-        .slice(0, 10); // Top 10
-      
+        .slice(0, 10);
+
       setLeadSources(sources);
+      cache.set(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE, sources, TERMINAL_CACHE_TTL_MS);
+      initialLoadDone.current = true;
     } catch (error) {
       console.error('Failed to load lead sources:', error);
     } finally {

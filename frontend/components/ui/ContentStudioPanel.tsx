@@ -1,82 +1,103 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   apiClient,
   ContentStudioBootstrap,
   ContentStudioBundle,
-  ContentStudioSectionIdea,
+  ContentStudioStage,
+  ContentStudioStageId,
 } from '@/lib/api';
 import { useLoading } from '@/contexts/LoadingContext';
+import { formatApiError } from '@/lib/apiError';
 
-const STAGES: ('TOF' | 'MOF' | 'BOF')[] = ['TOF', 'MOF', 'BOF'];
-const STAGE_LABEL: Record<string, string> = {
+const STAGES: ContentStudioStageId[] = ['TOF', 'MOF', 'BOF'];
+
+const STAGE_LABEL: Record<ContentStudioStageId, string> = {
   TOF: 'Top of funnel',
   MOF: 'Middle of funnel',
   BOF: 'Bottom of funnel',
 };
 
-function formatFormatLabel(fmt: string): string {
-  return (fmt || 'reel').replace(/_/g, ' ');
-}
-
-const SECTION_THEME: Record<
-  string,
-  { bg: string; border: string; iconColor: string; icon: React.ReactNode }
+const STAGE_THEME: Record<
+  ContentStudioStageId,
+  { ring: string; chip: string; chipText: string; tint: string; border: string; iconColor: string; icon: React.ReactNode }
 > = {
-  common_objections: {
-    bg: 'bg-rose-500/[0.06] dark:bg-rose-500/[0.08]',
-    border: 'border-rose-400/30 dark:border-rose-500/20',
-    iconColor: 'text-rose-500 dark:text-rose-400',
+  TOF: {
+    ring: 'ring-sky-400/30',
+    chip: 'bg-sky-500/15',
+    chipText: 'text-sky-700 dark:text-sky-300',
+    tint: 'bg-sky-500/[0.04] dark:bg-sky-500/[0.06]',
+    border: 'border-sky-400/30 dark:border-sky-500/20',
+    iconColor: 'text-sky-500 dark:text-sky-400',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-8-5a.75.75 0 0 1 .75.75v4.5a.75.75 0 0 1-1.5 0v-4.5A.75.75 0 0 1 10 5Zm0 10a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z" clipRule="evenodd" />
+        <path d="M10 3a7 7 0 1 0 4.95 11.95.75.75 0 1 1 1.06 1.06A8.5 8.5 0 1 1 18.5 10a.75.75 0 0 1-1.5 0A7 7 0 0 0 10 3Zm0 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z" />
       </svg>
     ),
   },
-  active_client_issues: {
-    bg: 'bg-amber-500/[0.06] dark:bg-amber-500/[0.08]',
-    border: 'border-amber-400/30 dark:border-amber-500/20',
-    iconColor: 'text-amber-500 dark:text-amber-400',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M10 1a6 6 0 0 0-3.815 10.631C7.237 12.5 8 13.443 8 14.456v.644a.75.75 0 0 0 .75.75h2.5a.75.75 0 0 0 .75-.75v-.644c0-1.013.762-1.957 1.815-2.825A6 6 0 0 0 10 1ZM8.863 17.414a.75.75 0 0 0-.226 1.483 9.066 9.066 0 0 0 2.726 0 .75.75 0 0 0-.226-1.483 7.563 7.563 0 0 1-2.274 0Z" />
-      </svg>
-    ),
-  },
-  testimonials_wins: {
-    bg: 'bg-emerald-500/[0.06] dark:bg-emerald-500/[0.08]',
-    border: 'border-emerald-400/30 dark:border-emerald-500/20',
-    iconColor: 'text-emerald-500 dark:text-emerald-400',
-    icon: (
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path fillRule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z" clipRule="evenodd" />
-      </svg>
-    ),
-  },
-  pain_points_and_dream_outcomes: {
-    bg: 'bg-violet-500/[0.06] dark:bg-violet-500/[0.08]',
+  MOF: {
+    ring: 'ring-violet-400/30',
+    chip: 'bg-violet-500/15',
+    chipText: 'text-violet-700 dark:text-violet-300',
+    tint: 'bg-violet-500/[0.04] dark:bg-violet-500/[0.06]',
     border: 'border-violet-400/30 dark:border-violet-500/20',
     iconColor: 'text-violet-500 dark:text-violet-400',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-        <path d="M15.98 1.804a1 1 0 0 0-1.96 0l-.24 1.192a1 1 0 0 1-.784.785l-1.192.238a1 1 0 0 0 0 1.962l1.192.238a1 1 0 0 1 .785.785l.238 1.192a1 1 0 0 0 1.962 0l.238-1.192a1 1 0 0 1 .785-.785l1.192-.238a1 1 0 0 0 0-1.962l-1.192-.238a1 1 0 0 1-.785-.785l-.238-1.192ZM6.949 5.684a1 1 0 0 0-1.898 0l-.683 2.051a1 1 0 0 1-.633.633l-2.051.683a1 1 0 0 0 0 1.898l2.051.684a1 1 0 0 1 .633.632l.683 2.051a1 1 0 0 0 1.898 0l.683-2.051a1 1 0 0 1 .633-.633l2.051-.683a1 1 0 0 0 0-1.898l-2.051-.683a1 1 0 0 1-.633-.633L6.95 5.684ZM13.949 13.684a1 1 0 0 0-1.898 0l-.184.551a1 1 0 0 1-.632.633l-.551.183a1 1 0 0 0 0 1.898l.551.183a1 1 0 0 1 .633.633l.183.551a1 1 0 0 0 1.898 0l.184-.551a1 1 0 0 1 .632-.633l.551-.183a1 1 0 0 0 0-1.898l-.551-.184a1 1 0 0 1-.633-.632l-.183-.551Z" />
+        <path d="M3.75 3A1.75 1.75 0 0 0 2 4.75v10.5C2 16.216 2.784 17 3.75 17h12.5A1.75 1.75 0 0 0 18 15.25V4.75A1.75 1.75 0 0 0 16.25 3H3.75ZM6 7.5A.75.75 0 0 1 6.75 7h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 6 7.5Zm0 3A.75.75 0 0 1 6.75 10h6.5a.75.75 0 0 1 0 1.5h-6.5A.75.75 0 0 1 6 10.5Zm.75 2.5a.75.75 0 0 0 0 1.5h3.5a.75.75 0 0 0 0-1.5h-3.5Z" />
+      </svg>
+    ),
+  },
+  BOF: {
+    ring: 'ring-emerald-400/30',
+    chip: 'bg-emerald-500/15',
+    chipText: 'text-emerald-700 dark:text-emerald-300',
+    tint: 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06]',
+    border: 'border-emerald-400/30 dark:border-emerald-500/20',
+    iconColor: 'text-emerald-500 dark:text-emerald-400',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+        <path
+          fillRule="evenodd"
+          d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm3.857-9.809a.75.75 0 0 0-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 1 0-1.06 1.061l2.5 2.5a.75.75 0 0 0 1.137-.089l4-5.5Z"
+          clipRule="evenodd"
+        />
       </svg>
     ),
   },
 };
 
-const DEFAULT_SECTION_THEME = {
-  bg: 'bg-gray-500/[0.04] dark:bg-gray-500/[0.06]',
-  border: 'border-gray-300/40 dark:border-gray-600/30',
-  iconColor: 'text-gray-500 dark:text-gray-400',
-  icon: (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-      <path fillRule="evenodd" d="M18 10a8 8 0 1 1-16 0 8 8 0 0 1 16 0Zm-7-4a1 1 0 1 1-2 0 1 1 0 0 1 2 0ZM9 9a.75.75 0 0 0 0 1.5h.253a.25.25 0 0 1 .244.304l-.459 2.066A1.75 1.75 0 0 0 10.747 15H11a.75.75 0 0 0 0-1.5h-.253a.25.25 0 0 1-.244-.304l.459-2.066A1.75 1.75 0 0 0 9.253 9H9Z" clipRule="evenodd" />
-    </svg>
-  ),
-};
+function formatLabel(fmt: string): string {
+  if (fmt === 'long') return 'Long-form';
+  if (fmt === 'short') return 'Short-form';
+  return fmt;
+}
+
+function FormatBadge({ format }: { format: string }) {
+  const isLong = format === 'long';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+        isLong
+          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+          : 'bg-pink-500/15 text-pink-700 dark:text-pink-300'
+      }`}
+    >
+      {isLong ? (
+        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+          <path d="M2 5.75A2.75 2.75 0 0 1 4.75 3h10.5A2.75 2.75 0 0 1 18 5.75v8.5A2.75 2.75 0 0 1 15.25 17H4.75A2.75 2.75 0 0 1 2 14.25v-8.5Zm6.34 1.71a.75.75 0 0 0-1.18.61v3.86a.75.75 0 0 0 1.18.61l2.86-1.93a.75.75 0 0 0 0-1.22L8.34 7.46Z" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 20 20" fill="currentColor" className="w-3 h-3">
+          <path d="M5 2.75A2.75 2.75 0 0 1 7.75 0h4.5A2.75 2.75 0 0 1 15 2.75v14.5A2.75 2.75 0 0 1 12.25 20h-4.5A2.75 2.75 0 0 1 5 17.25V2.75ZM10 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" />
+        </svg>
+      )}
+      {formatLabel(format)}
+    </span>
+  );
+}
 
 export default function ContentStudioPanel() {
   const [loading, setLoading] = useState(true);
@@ -87,8 +108,9 @@ export default function ContentStudioPanel() {
   const [contentBundle, setContentBundle] = useState<ContentStudioBundle | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
-  const [openSections, setOpenSections] = useState<Set<string>>(() => new Set());
   const [reanalyzeBusy, setReanalyzeBusy] = useState(false);
+  /** True after a successful re-analyze request while the bundle may still be regenerating in the background. */
+  const [conceptRegenPending, setConceptRegenPending] = useState(false);
   const [reanalyzeMessage, setReanalyzeMessage] = useState<string | null>(null);
   const bundlePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -104,7 +126,7 @@ export default function ContentStudioPanel() {
       const msg =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
         (e as Error)?.message ||
-        'Failed to load Marketing Intel';
+        'Failed to load Content Studio';
       setError(String(msg));
     } finally {
       setLoading(false);
@@ -125,6 +147,43 @@ export default function ContentStudioPanel() {
     };
   }, []);
 
+  // Auto-poll while the bundle is missing or pre-v3 — covers the silent v2 → v3 background regen
+  // triggered by /content-studio/bootstrap so the user doesn't have to refresh manually.
+  useEffect(() => {
+    if (loading) return;
+    const needsPoll = !contentBundle || contentBundle.version < 3;
+    if (!needsPoll) {
+      if (bundlePollRef.current) {
+        clearInterval(bundlePollRef.current);
+        bundlePollRef.current = null;
+      }
+      return;
+    }
+    if (bundlePollRef.current) return;
+    let ticks = 0;
+    bundlePollRef.current = setInterval(() => {
+      ticks += 1;
+      void loadBootstrap();
+      if (ticks >= 12) {
+        if (bundlePollRef.current) clearInterval(bundlePollRef.current);
+        bundlePollRef.current = null;
+      }
+    }, 6000);
+  }, [loading, contentBundle, loadBootstrap]);
+
+  useEffect(() => {
+    if (!conceptRegenPending) return;
+    if (contentBundle && contentBundle.version >= 3) {
+      setConceptRegenPending(false);
+    }
+  }, [conceptRegenPending, contentBundle]);
+
+  useEffect(() => {
+    if (!conceptRegenPending) return;
+    const id = window.setTimeout(() => setConceptRegenPending(false), 120_000);
+    return () => window.clearTimeout(id);
+  }, [conceptRegenPending]);
+
   const handleReanalyze = useCallback(async () => {
     if (reanalyzeBusy) return;
     setReanalyzeBusy(true);
@@ -136,17 +195,18 @@ export default function ContentStudioPanel() {
       const skipped = Boolean(fs.skipped);
       if (skipped) {
         setReanalyzeMessage(
-          `Fathom: ${String(fs.reason || 'skipped')}. Your content bundle is still regenerating from the latest call signals.`
+          `Fathom: ${String(fs.reason || 'skipped')}. Concepts are still regenerating from your latest call signals.`
         );
       } else {
         const ing = Number(fs.ingested ?? 0);
         setReanalyzeMessage(
-          `Fathom: ${ing} new meeting(s) ingested. Cleared health caches for ${res.health_clients_invalidated} clients. Regenerating all sections and marketing suggestions…`
+          `Fathom: ${ing} new meeting(s) ingested. Cleared health caches for ${res.health_clients_invalidated} clients. Drafting fresh TOF / MOF / BOF concepts…`
         );
       }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('sweep:content-studio-reanalyzed'));
       }
+      setConceptRegenPending(true);
       if (bundlePollRef.current) {
         clearInterval(bundlePollRef.current);
         bundlePollRef.current = null;
@@ -161,12 +221,12 @@ export default function ContentStudioPanel() {
         }
       }, 5000);
     } catch (e: unknown) {
+      setConceptRegenPending(false);
       const status = (e as { response?: { status?: number } })?.response?.status;
-      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       if (status === 429) {
         setError('Re-analyze is limited to 3 runs per hour. Try again later.');
       } else {
-        setError(typeof detail === 'string' ? detail : (e as Error)?.message || 'Re-analyze failed');
+        setError(formatApiError(e, 'Re-analyze failed. Try again in a moment.'));
       }
     } finally {
       setReanalyzeBusy(false);
@@ -197,22 +257,30 @@ export default function ContentStudioPanel() {
     void flushCompleted(next);
   };
 
-  const ideaByStage = (ideas: ContentStudioSectionIdea[], stage: 'TOF' | 'MOF' | 'BOF') =>
-    ideas.find((i) => i.stage === stage);
+  const stagesOrdered: ContentStudioStage[] = useMemo(() => {
+    const map = new Map<ContentStudioStageId, ContentStudioStage>();
+    for (const s of contentBundle?.stages ?? []) {
+      if (s && (s.id === 'TOF' || s.id === 'MOF' || s.id === 'BOF')) {
+        map.set(s.id, s);
+      }
+    }
+    return STAGES.map((sid) => map.get(sid)).filter(Boolean) as ContentStudioStage[];
+  }, [contentBundle]);
 
   const bundleLoading = loading && !contentBundle;
+  const bundleStale = contentBundle && contentBundle.version < 3;
 
   return (
-    <div className="max-w-5xl mx-auto w-full px-1 pb-12 space-y-8">
+    <div className="max-w-6xl mx-auto w-full px-1 pb-12 space-y-8">
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Marketing Intel</h2>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-          Reel hooks and concepts from your sales signals, aligned with your{' '}
+          Long-form and short-form video concepts mined purely from your Fathom calls and tied to the ICP defined in{' '}
           <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
             Intelligence
-          </Link>{' '}
-          profile. Ideas refresh when call data meaningfully changes. For full call coaching reports and recording
-          links, use the{' '}
+          </Link>
+          . Bulleted concepts only — no scripts. Each one is intentionally curated to move a viewer one step closer to a
+          sale. For full call coaching reports, use the{' '}
           <Link href="/?tab=call_library" className="text-violet-600 dark:text-violet-400 underline">
             Call Library
           </Link>{' '}
@@ -243,12 +311,13 @@ export default function ContentStudioPanel() {
           <button
             type="button"
             onClick={() => void handleReanalyze()}
-            disabled={reanalyzeBusy || loading}
+            disabled={reanalyzeBusy || loading || conceptRegenPending}
+            aria-busy={reanalyzeBusy || conceptRegenPending}
             className="shrink-0 inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg glass-button-secondary hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-            title="Pull latest Fathom meetings, refresh Intelligence-related caches, and regenerate all Marketing Intel sections (max 3 per hour)"
+            title="Pull latest Fathom meetings, refresh Intelligence-related caches, and regenerate TOF / MOF / BOF concepts (max 3 per hour)"
           >
             <svg
-              className={`w-3.5 h-3.5 ${reanalyzeBusy ? 'animate-spin' : ''}`}
+              className={`w-3.5 h-3.5 ${reanalyzeBusy || conceptRegenPending ? 'animate-spin' : ''}`}
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -261,7 +330,7 @@ export default function ContentStudioPanel() {
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
               />
             </svg>
-            {reanalyzeBusy ? 'Re-analyzing…' : 'Re-analyze from calls'}
+            {reanalyzeBusy ? 'Starting…' : conceptRegenPending ? 'Regenerating concepts…' : 'Re-analyze from calls'}
           </button>
         </div>
         {reanalyzeMessage ? (
@@ -269,16 +338,30 @@ export default function ContentStudioPanel() {
             {reanalyzeMessage}
           </p>
         ) : null}
+        {conceptRegenPending && !reanalyzeBusy ? (
+          <p className="text-xs text-gray-600 dark:text-gray-400 bg-gray-500/10 rounded-lg px-3 py-2 border border-gray-500/15">
+            Finishing concept drafts in the background — this can take up to a couple of minutes. This page keeps polling
+            automatically.
+          </p>
+        ) : null}
         {salesPlaybookSource === 'default' && (
           <p className="text-xs text-amber-700/90 dark:text-amber-300/90 bg-amber-500/10 rounded-lg px-3 py-2 border border-amber-500/20">
-            Connect Fathom and sync calls so objections, wins, and language mirror real conversations.
+            Connect Fathom and sync calls so TOF/MOF/BOF concepts mirror real conversations and on-brand client wins.
           </p>
         )}
+        {bundleStale ? (
+          <p className="text-xs text-amber-700/90 dark:text-amber-300/90 bg-amber-500/10 rounded-lg px-3 py-2 border border-amber-500/20">
+            Upgrading to the new TOF / MOF / BOF concept layout — fresh concepts are drafting in the background. This
+            page will refresh automatically.
+          </p>
+        ) : null}
         {batchId ? (
           <p className="text-[10px] text-gray-500 dark:text-gray-400">
             Bundle batch: {batchId.slice(0, 8)}…
             {contentBundle?.source === 'default' ? (
-              <span className="ml-2 text-amber-600 dark:text-amber-400">(placeholder — enable LLM for full draft)</span>
+              <span className="ml-2 text-amber-600 dark:text-amber-400">
+                (placeholder — enable LLM and sync Fathom for the full draft)
+              </span>
             ) : null}
           </p>
         ) : null}
@@ -288,101 +371,102 @@ export default function ContentStudioPanel() {
         <div className="space-y-4 animate-pulse">
           <div className="h-24 bg-gray-200 dark:bg-gray-700 rounded-xl" />
           <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+          <div className="h-32 bg-gray-200 dark:bg-gray-700 rounded-xl" />
         </div>
       )}
 
-      {contentBundle?.sections?.length ? (
-        <div className="space-y-4">
-          {contentBundle.sections.map((section) => {
-            const theme = SECTION_THEME[section.id] ?? DEFAULT_SECTION_THEME;
-            const isOpen = openSections.has(section.id);
+      {stagesOrdered.length ? (
+        <div className="space-y-6">
+          {stagesOrdered.map((stage) => {
+            const theme = STAGE_THEME[stage.id];
             return (
               <section
-                key={section.id}
-                className={`glass-card rounded-xl border ${theme.bg} ${theme.border}`}
+                key={stage.id}
+                className={`glass-card rounded-2xl border ${theme.tint} ${theme.border} p-4 sm:p-5 space-y-4`}
               >
-                <button
-                  type="button"
-                  onClick={() =>
-                    setOpenSections((prev) => {
-                      const next = new Set(prev);
-                      if (next.has(section.id)) next.delete(section.id);
-                      else next.add(section.id);
-                      return next;
-                    })
-                  }
-                  className="w-full flex items-start gap-3 p-4 sm:p-5 text-left"
-                >
+                <header className="flex items-start gap-3">
                   <span className={`mt-0.5 shrink-0 ${theme.iconColor}`}>{theme.icon}</span>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div>
-                        <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-                          {section.title}
-                        </h3>
-                        <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">
-                          {section.body}
-                        </p>
-                      </div>
-                      <span className="shrink-0 text-gray-400">
-                        <svg
-                          className={`w-4 h-4 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                          viewBox="0 0 20 20"
-                          fill="none"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <path
-                            d="M5 8L10 13L15 8"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full ${theme.chip} ${theme.chipText}`}
+                      >
+                        {stage.id} — {STAGE_LABEL[stage.id]}
+                      </span>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        {stage.concepts.length} concept{stage.concepts.length === 1 ? '' : 's'}
                       </span>
                     </div>
+                    <h3 className="mt-1 text-base font-semibold text-gray-900 dark:text-gray-100">{stage.title}</h3>
+                    {stage.intro ? (
+                      <p className="text-sm text-gray-700 dark:text-gray-300 mt-1 leading-relaxed">{stage.intro}</p>
+                    ) : null}
                   </div>
-                </button>
-                {isOpen && (
-                  <div className="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-gray-200/70 dark:border-gray-700/70">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pt-3">
-                      {STAGES.map((stage) => {
-                        const idea = ideaByStage(section.ideas, stage);
-                        if (!idea) return null;
-                        return (
-                          <div
-                            key={`${section.id}-${stage}`}
-                            className={`rounded-xl p-3 border bg-white/40 dark:bg-gray-900/40 space-y-2 ${theme.border}`}
-                          >
-                            <div className="flex items-start gap-2">
-                              <input
-                                type="checkbox"
-                                checked={completed.has(idea.id)}
-                                onChange={() => toggleCompleted(idea.id)}
-                                className="mt-1 rounded border-gray-400"
-                                aria-label="Mark idea done"
-                              />
-                              <div className="min-w-0 flex-1 space-y-2">
-                                <p className={`text-[10px] font-semibold uppercase tracking-wide ${theme.iconColor}`}>
-                                  {stage} — {STAGE_LABEL[stage]}
-                                </p>
-                                <span className="inline-block text-[10px] px-2 py-0.5 rounded-full bg-gray-200/80 dark:bg-gray-700 text-gray-800 dark:text-gray-200">
-                                  {formatFormatLabel(idea.format)}
-                                </span>
-                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{idea.hook}</p>
-                                <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
-                                  {idea.concept}
-                                </p>
-                                <div className="text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200/50 dark:border-gray-600/50 pt-2 leading-relaxed">
-                                  <span className="font-medium text-gray-500 dark:text-gray-500">Why it works: </span>
-                                  {idea.why_it_works}
-                                </div>
+                </header>
+
+                {stage.concepts.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                    No concepts for this stage yet — sync more Fathom calls.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {stage.concepts.map((concept) => {
+                      const isDone = completed.has(concept.id);
+                      return (
+                        <div
+                          key={concept.id}
+                          className={`rounded-xl p-4 border bg-white/60 dark:bg-gray-900/40 space-y-3 transition-opacity ${
+                            theme.border
+                          } ${isDone ? 'opacity-70' : ''}`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              checked={isDone}
+                              onChange={() => toggleCompleted(concept.id)}
+                              className="mt-1 rounded border-gray-400"
+                              aria-label="Mark concept produced"
+                            />
+                            <div className="min-w-0 flex-1 space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <FormatBadge format={concept.format} />
                               </div>
+                              <p
+                                className={`text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100 ${
+                                  isDone ? 'line-through' : ''
+                                }`}
+                              >
+                                {concept.title}
+                              </p>
+
+                              {concept.bullets.length ? (
+                                <ul className="list-disc list-inside space-y-1 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
+                                  {concept.bullets.map((b, i) => (
+                                    <li key={i}>{b}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+
+                              {concept.why_for_icp ? (
+                                <div className="text-xs text-gray-600 dark:text-gray-400 border-t border-gray-200/50 dark:border-gray-600/50 pt-2 leading-relaxed">
+                                  <span className="font-semibold text-gray-500 dark:text-gray-500">
+                                    Why it lands for your ICP:{' '}
+                                  </span>
+                                  {concept.why_for_icp}
+                                </div>
+                              ) : null}
+
+                              {concept.funnel_path_to_sale ? (
+                                <div className="text-xs text-emerald-700 dark:text-emerald-300 leading-relaxed">
+                                  <span className="font-semibold">Path to sale: </span>
+                                  {concept.funnel_path_to_sale}
+                                </div>
+                              ) : null}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </section>
@@ -390,25 +474,7 @@ export default function ContentStudioPanel() {
           })}
         </div>
       ) : !bundleLoading ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400">No content bundle loaded.</p>
-      ) : null}
-
-      {contentBundle?.voice_marketing ? (
-        <section className="glass-card rounded-xl p-4 sm:p-5 border border-emerald-500/25 space-y-3 bg-emerald-500/5">
-          <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">
-            {contentBundle.voice_marketing.title || 'Language, tonality & what is working on calls'}
-          </h3>
-          <p className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed">
-            {contentBundle.voice_marketing.body}
-          </p>
-          {contentBundle.voice_marketing.bullets?.length ? (
-            <ul className="list-disc list-inside space-y-1 text-sm text-gray-700 dark:text-gray-300">
-              {contentBundle.voice_marketing.bullets.map((b, i) => (
-                <li key={i}>{b}</li>
-              ))}
-            </ul>
-          ) : null}
-        </section>
+        <p className="text-sm text-gray-500 dark:text-gray-400">No concepts loaded yet.</p>
       ) : null}
 
       <section className="glass-card rounded-xl p-4 text-center text-xs text-gray-500 dark:text-gray-400 border border-dashed border-gray-300 dark:border-gray-600">

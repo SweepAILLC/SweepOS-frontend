@@ -3,8 +3,9 @@ import { useDroppable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
 import React, { memo, useMemo, useCallback } from 'react';
-import { gradeFromHealthScore } from '@/lib/api';
 import { computeLeadFollowUpBar } from '@/lib/leadFollowUp';
+import { insightChipClass } from '@/lib/callInsightChips';
+import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 
 const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
@@ -20,39 +21,10 @@ interface ClientCardProps {
   isMergeTarget?: boolean;
   /** When another card is dragged over the slot above this card (insert between) */
   showSlotLineAbove?: boolean;
-  /** Health score grade for board tag (e.g. "A", "B") */
-  healthGrade?: string | null;
-  /** Health score 0–100 for display in tag (e.g. "85% A") */
-  healthScore?: number | null;
   /** Opportunity tags from call insights (subset shown) */
   insightTags?: string[];
   /** Cold / warm lead columns: show follow-up timer instead of program progress */
   isLeadColumn?: boolean;
-}
-
-function gradeTagColor(grade: string): string {
-  switch (grade) {
-    case 'A': return 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border-emerald-400/30';
-    case 'B': return 'bg-blue-500/20 text-blue-700 dark:text-blue-300 border-blue-400/30';
-    case 'C': return 'bg-amber-500/20 text-amber-700 dark:text-amber-300 border-amber-400/30';
-    case 'D': return 'bg-orange-500/20 text-orange-700 dark:text-orange-300 border-orange-400/30';
-    case 'F': return 'bg-red-500/20 text-red-700 dark:text-red-300 border-red-400/30';
-    default: return 'bg-gray-500/20 text-gray-600 dark:text-gray-400 border-gray-400/30';
-  }
-}
-
-const INSIGHT_TAG_STYLES: Record<string, string> = {
-  upsell: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-400/30',
-  testimonial: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-400/30',
-  referral: 'bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-400/30',
-  conversion: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-400/30',
-  win_back: 'bg-rose-500/15 text-rose-700 dark:text-rose-300 border-rose-400/30',
-  revive: 'bg-rose-600/15 text-rose-800 dark:text-rose-200 border-rose-500/35',
-  deal_follow_up: 'bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-400/30',
-};
-
-function insightChipClass(tag: string): string {
-  return INSIGHT_TAG_STYLES[tag] || 'bg-gray-500/15 text-gray-600 dark:text-gray-400 border-gray-400/30';
 }
 
 function ClientCard({
@@ -61,22 +33,12 @@ function ClientCard({
   onDelete,
   isMergeTarget = false,
   showSlotLineAbove = false,
-  healthGrade = null,
-  healthScore = null,
   insightTags = undefined,
   isLeadColumn = false,
 }: ClientCardProps) {
   const sortableId = client.id;
 
-  const numericHealthScore =
-    healthScore != null && !Number.isNaN(Number(healthScore)) ? Number(healthScore) : null;
-  const gradeForTag =
-    healthGrade != null && String(healthGrade).trim() !== ''
-      ? String(healthGrade).trim()
-      : numericHealthScore != null
-        ? gradeFromHealthScore(numericHealthScore)
-        : null;
-  const showHealthTag = numericHealthScore != null || gradeForTag != null;
+  const offerBalanceDue = useMemo(() => hasOutstandingOfferBalance(client), [client]);
 
   const followUpBar = useMemo(() => (isLeadColumn ? computeLeadFollowUpBar(client) : null), [isLeadColumn, client]);
 
@@ -194,13 +156,12 @@ function ClientCard({
                   {t.replace(/_/g, ' ')}
                 </span>
               ))}
-            {showHealthTag && gradeForTag && (
+            {offerBalanceDue && (
               <span
-                className={`inline-block text-[9px] font-medium px-1 py-0.5 rounded border opacity-90 ${gradeTagColor(gradeForTag)}`}
-                title="Engagement (health score)"
+                className={`inline-block text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded border ${BALANCE_DUE_CHIP_CLASS}`}
+                title="Recorded payments are below the full offer amount"
               >
-                {numericHealthScore != null ? `${Math.round(numericHealthScore)}% ` : ''}
-                {gradeForTag}
+                Balance due
               </span>
             )}
           </div>

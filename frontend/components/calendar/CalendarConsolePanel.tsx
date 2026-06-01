@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import Cookies from 'js-cookie';
 import { apiClient, type CalendarSyncedBookingRow } from '@/lib/api';
 import { clearCalendarIntegrationStatusCache } from '@/lib/cache';
@@ -10,6 +10,12 @@ import type { Client } from '@/types/client';
 import EventDetailsModal from './EventDetailsModal';
 import { useLoading } from '@/contexts/LoadingContext';
 import { ShowUpVsCloseRateChart } from '@/components/owner/OwnerHealthTrendCharts';
+import {
+  type DashboardTimeRange,
+  dashboardPeriodLabel,
+  computeCalendarTrendSummaryFromRows,
+  filterMonthlyCoachingPeriodsForDashboardRange,
+} from '@/lib/dashboardTimeRange';
 
 type BookingsTab = 'upcoming' | 'past';
 type CalendarProvider = 'calcom' | 'calendly' | null;
@@ -51,7 +57,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   
   // Connection state
   const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [selectedProvider, setSelectedProvider] = useState<CalendarProvider>(null);
   
@@ -85,10 +90,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
 
   // Calendar data summary (close rate from API)
   const [closeRateData, setCloseRateData] = useState<{ all_time: CloseRateSection; last_30d: CloseRateSection } | null>(null);
-  // Show up rate from calendar upcoming summary (for Calendar data summary box)
-  const [showUpRateSummary, setShowUpRateSummary] = useState<{ show_up_rate: number | null; last_month_count?: number } | null>(null);
-  const [showUpRateLoading, setShowUpRateLoading] = useState(false);
-
+  const [closeRateRefreshing, setCloseRateRefreshing] = useState(false);
+  const [bookingsJustRefreshedAt, setBookingsJustRefreshedAt] = useState<number | null>(null);
   type MonthlyCoachingRow = {
     period_label: string;
     period_start: string;
@@ -98,6 +101,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   };
   const [monthlyCoachingPeriods, setMonthlyCoachingPeriods] = useState<MonthlyCoachingRow[]>([]);
   const [monthlyCoachingLoading, setMonthlyCoachingLoading] = useState(false);
+  const [calendarTrendsTimeRange, setCalendarTrendsTimeRange] = useState<DashboardTimeRange>('mtd');
 
   // Manual booking modal (same as client detail drawer: create manual check-in)
   const [showManualBookingModal, setShowManualBookingModal] = useState(false);
@@ -257,6 +261,41 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     await next;
   };
 
+  /**
+   * Single-flight refresh for the bookings table card: provider sync + close-rate fetch in parallel.
+   * Drives the table's loading + error UI from one place so the spinner, retry, and "just refreshed"
+   * indicator stay consistent.
+   */
+  const handleRefreshBookings = async () => {
+    if (bookingsLoading) return;
+    setCloseRateRefreshing(true);
+    const closeRatePromise = apiClient
+      .getCalendarSalesCloseRate()
+      .then((d) => {
+        setCloseRateData(d);
+      })
+      .catch(() => {
+        // Don't surface as a hard error — close-rate is a secondary signal; null it out so stale numbers don't linger.
+        setCloseRateData(null);
+      })
+      .finally(() => setCloseRateRefreshing(false));
+    try {
+      await refreshSyncedCalendar();
+      // refreshSyncedCalendar clears bookingsError on a recovered DB read; show the toast only when the
+      // primary sync didn't surface a new error.
+      setBookingsJustRefreshedAt(Date.now());
+    } finally {
+      await closeRatePromise;
+    }
+  };
+
+  // Auto-clear the "just refreshed" toast after a short window so it doesn't sit forever.
+  useEffect(() => {
+    if (bookingsJustRefreshedAt == null) return;
+    const t = setTimeout(() => setBookingsJustRefreshedAt(null), 4000);
+    return () => clearTimeout(t);
+  }, [bookingsJustRefreshedAt]);
+
   // Load data when a provider is connected: sync from provider APIs into DB, then show canonical rows
   useEffect(() => {
     setSyncedUpcoming([]);
@@ -355,24 +394,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     loadCloseRate();
     const interval = setInterval(loadCloseRate, 2 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [connectedProvider]);
-
-  // Load show up rate when connected (for Show up rate section)
-  useEffect(() => {
-    if (!connectedProvider) {
-      setShowUpRateSummary(null);
-      return;
-    }
-    setShowUpRateLoading(true);
-    apiClient.getCalendarUpcomingSummary()
-      .then((data: any) => {
-        setShowUpRateSummary({
-          show_up_rate: data?.show_up_rate ?? null,
-          last_month_count: data?.last_month_count,
-        });
-      })
-      .catch(() => setShowUpRateSummary(null))
-      .finally(() => setShowUpRateLoading(false));
   }, [connectedProvider]);
 
   // Turn off global loading when all data is loaded
@@ -503,7 +524,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         await loadStatuses();
         errorMessage =
           `${detail}\n\n` +
-          'Connection status was just refreshed. If a provider still appears connected above, disconnect it first, then try again. ' +
+          'Connection status was just refreshed. If a provider still appears connected above, disconnect it in Integrations first, then try again. ' +
           'If you now see Not connected, submit your API key again.';
       }
 
@@ -511,34 +532,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     } finally {
       setConnecting(false);
       setGlobalLoading(false);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    if (!connectedProvider) return;
-    
-    const providerName = connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly';
-    if (!confirm(`Are you sure you want to disconnect your ${providerName} account?`)) {
-      return;
-    }
-    
-    setDisconnecting(true);
-    try {
-      if (connectedProvider === 'calcom') {
-        await apiClient.disconnectCalCom();
-      } else {
-        await apiClient.disconnectCalendly();
-      }
-      await loadStatuses();
-      setSyncedUpcoming([]);
-      setSyncedPast([]);
-      setCalcomEventTypes([]);
-      setCalendlyEventTypes([]);
-    } catch (error) {
-      console.error(`Failed to disconnect ${providerName}:`, error);
-      alert(`Failed to disconnect ${providerName} account.`);
-    } finally {
-      setDisconnecting(false);
     }
   };
 
@@ -604,9 +597,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const currentStatus = connectedProvider === 'calcom' ? calcomStatus : calendlyStatus;
   const currentEventTypes = connectedProvider === 'calcom' ? calcomEventTypes : calendlyEventTypes;
 
-  // Count upcoming vs past from full list for "all calendar data" summary
-  const upcomingCount = syncedUpcoming.length;
-  const pastCount = syncedPast.length;
+  const calendarTrendSummary = useMemo(() => {
+    if (!connectedProvider) return null;
+    return computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, calendarTrendsTimeRange);
+  }, [connectedProvider, syncedUpcoming, syncedPast, calendarTrendsTimeRange]);
+
+  const filteredMonthlyCoachingPeriods = useMemo(
+    () => filterMonthlyCoachingPeriodsForDashboardRange(monthlyCoachingPeriods, calendarTrendsTimeRange),
+    [monthlyCoachingPeriods, calendarTrendsTimeRange]
+  );
 
   if (loading) {
     return (
@@ -625,16 +624,46 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           {connectedProvider && (
             <div className="flex gap-3">
               <button
+                type="button"
                 onClick={() => {
-                  void refreshSyncedCalendar();
+                  void handleRefreshBookings();
                   if (connectedProvider === 'calcom') loadCalcomEventTypes();
                   else loadCalendlyEventTypes();
-                  apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
                 }}
                 disabled={bookingsLoading || eventTypesLoading}
-                className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
+                aria-busy={bookingsLoading || eventTypesLoading}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
-                Refresh All
+                {bookingsLoading || eventTypesLoading ? (
+                  <>
+                    <svg
+                      className="animate-spin h-3.5 w-3.5 text-current"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    <span>Refreshing…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="h-3.5 w-3.5"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh All</span>
+                  </>
+                )}
               </button>
               <a
                 href={connectedProvider === 'calcom' ? 'https://app.cal.com' : 'https://calendly.com'}
@@ -644,15 +673,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               >
                 Open {connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} Dashboard
               </a>
-              {canManageIntegrations ? (
-                <button
-                  onClick={handleDisconnect}
-                  disabled={disconnecting}
-                  className="inline-flex items-center px-4 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
-                >
-                  {disconnecting ? 'Disconnecting...' : 'Disconnect'}
-                </button>
-              ) : null}
             </div>
           )}
         </div>
@@ -672,6 +692,11 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                 )}
                 {currentStatus?.account_name && currentStatus.account_name !== currentStatus.account_email && (
                   <p className="text-sm text-gray-500 dark:text-gray-400">{currentStatus.account_name}</p>
+                )}
+                {canManageIntegrations && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    To disconnect or switch providers, use <span className="font-medium">Integrations</span> in the sidebar.
+                  </p>
                 )}
               </div>
             </div>
@@ -776,7 +801,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               {!canManageIntegrations && (
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
                   <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    Only administrators and owners can connect or disconnect integrations. Please contact an admin to manage calendar settings.
+                    Only administrators and owners can connect integrations. Please contact an admin to manage calendar settings.
                   </p>
                 </div>
               )}
@@ -798,7 +823,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                     <strong>Note:</strong> You can only connect one calendar provider at a time. 
                     {calcomStatus?.connected && ' Cal.com is currently connected.'}
                     {calendlyStatus?.connected && ' Calendly is currently connected.'}
-                    {' '}Disconnect the current provider before connecting a different one.
+                    {' '}Use Integrations in the sidebar to disconnect the current provider before connecting a different one.
                   </p>
                 </div>
               )}
@@ -807,16 +832,42 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         )}
       </div>
 
-      {/* Monthly coaching trends — visible to all roles on Calendar tab */}
+      {/* Calendar trends + activity summary — same time-range control as Finances dashboard */}
       <div className="glass-card p-6">
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">Calendar trends</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Calendar trends</h2>
+          <select
+            value={
+              calendarTrendsTimeRange === 'all'
+                ? 'all'
+                : calendarTrendsTimeRange === 'mtd'
+                  ? 'mtd'
+                  : String(calendarTrendsTimeRange)
+            }
+            onChange={(e) => {
+              const v = e.target.value;
+              setCalendarTrendsTimeRange(v === 'all' ? 'all' : v === 'mtd' ? 'mtd' : Number(v));
+            }}
+            className="text-sm glass-input rounded-md px-3 py-1"
+            aria-label="Calendar trends time range"
+          >
+            <option value="mtd">Month to Date</option>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+            <option value={365}>Last year</option>
+            <option value="all">All Time</option>
+          </select>
+        </div>
+
         <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 p-4">
           <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
-            Show-up vs close rate by month
+            Show-up vs close rate by month ({dashboardPeriodLabel(calendarTrendsTimeRange)})
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-            Past Cal.com / Calendly check-ins in your workspace. Close rate uses the same definition as elsewhere (sales
-            calls where the client has a succeeded Stripe payment).
+            Monthly buckets that overlap your selected period. Close rate in the chart follows workspace rules (Stripe
+            succeeded payments); summary cards below use synced bookings in range (includes &quot;Sale closed&quot; when
+            set).
           </p>
           {monthlyCoachingLoading ? (
             <p className="text-sm text-gray-500 py-8 text-center">Loading trends…</p>
@@ -824,63 +875,75 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
             <p className="text-sm text-gray-500 py-6 text-center">
               No monthly data yet — connect a calendar and sync check-ins to build history.
             </p>
+          ) : filteredMonthlyCoachingPeriods.length === 0 ? (
+            <p className="text-sm text-gray-500 py-6 text-center">
+              No monthly buckets overlap {dashboardPeriodLabel(calendarTrendsTimeRange)}. Choose a wider range or All
+              Time.
+            </p>
           ) : (
             <ShowUpVsCloseRateChart
-              data={monthlyCoachingPeriods}
+              data={filteredMonthlyCoachingPeriods}
               xAxisMode="tilted"
               title=""
               description=""
             />
           )}
         </div>
-      </div>
 
-      {/* All calendar data summary */}
-      {connectedProvider && (
-        <div className="glass-card p-6">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-            Calendar data
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{upcomingCount}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">Upcoming</div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">{pastCount}</div>
-              <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">Past</div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {closeRateData?.all_time?.close_rate_pct != null ? `${closeRateData.all_time.close_rate_pct}%` : '—'}
+        {connectedProvider && calendarTrendSummary && (
+          <div className="mt-6 pt-6 border-t border-white/10">
+            <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+              Calendar activity ({dashboardPeriodLabel(calendarTrendsTimeRange)})
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {calendarTrendSummary.upcomingCount}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">Upcoming in range</div>
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
-                Sales close rate
-                {closeRateData && closeRateData.all_time.total_sales_calls > 0 && (
-                  <span className="block text-xs text-gray-500 dark:text-gray-500">
-                    All time: {closeRateData.all_time.closed_count} / {closeRateData.all_time.total_sales_calls} closed
-                  </span>
-                )}
-                {closeRateData && closeRateData.last_30d && (
-                  <span className="block text-xs text-gray-500 dark:text-gray-500 mt-0.5">
-                    Last 30 days: {closeRateData.last_30d.close_rate_pct}%
-                  </span>
-                )}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {calendarTrendSummary.pastCount}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">Past in range</div>
               </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
-              <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                {showUpRateSummary?.show_up_rate != null ? `${showUpRateSummary.show_up_rate}%` : '—'}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {calendarTrendSummary.closeRatePct != null ? `${calendarTrendSummary.closeRatePct}%` : '—'}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                  Sales close rate
+                  {calendarTrendSummary.salesCallsInRange > 0 && (
+                    <span className="block text-xs text-gray-500 dark:text-gray-500">
+                      {calendarTrendSummary.closedSalesCount} / {calendarTrendSummary.salesCallsInRange} sales calls
+                      closed
+                    </span>
+                  )}
+                </div>
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">Show up rate</div>
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4">
+                <div className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                  {calendarTrendSummary.showUpRatePct != null ? `${calendarTrendSummary.showUpRatePct}%` : '—'}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                  Show up rate
+                  {calendarTrendSummary.attendanceEligiblePast > 0 && (
+                    <span className="block text-xs text-gray-500 dark:text-gray-500">
+                      {calendarTrendSummary.showedUpCount} / {calendarTrendSummary.attendanceEligiblePast} past meetings
+                      (excl. cancelled)
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Bookings/Events Section */}
       {connectedProvider && (
-        <div className="glass-card p-6">
+        <div className="glass-card p-6" aria-busy={bookingsLoading}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               {connectedProvider === 'calcom' ? 'Bookings' : 'Scheduled Events'}
@@ -897,28 +960,92 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                 Add manual booking
               </button>
               <button
+                type="button"
                 onClick={() => {
-                  void refreshSyncedCalendar();
-                  apiClient.getCalendarSalesCloseRate().then(setCloseRateData).catch(() => setCloseRateData(null));
+                  void handleRefreshBookings();
                 }}
                 disabled={bookingsLoading}
-                className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
+                aria-busy={bookingsLoading}
+                aria-label={bookingsLoading ? 'Refreshing bookings' : 'Refresh bookings'}
+                className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
-                {bookingsLoading ? 'Syncing…' : 'Refresh'}
+                {bookingsLoading ? (
+                  <>
+                    <svg
+                      className="animate-spin h-3.5 w-3.5 text-current"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      aria-hidden="true"
+                    >
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                    </svg>
+                    <span>Refreshing…</span>
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      className="h-3.5 w-3.5"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      aria-hidden="true"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    <span>Refresh</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
-          {lastSyncedAt && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-              Last synced: {new Date(lastSyncedAt).toLocaleString()} · Data is pulled from {connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} into your workspace, then shown here.
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 min-h-[1rem]" aria-live="polite">
+            {lastSyncedAt && (
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Last synced: {new Date(lastSyncedAt).toLocaleString()} · Data is pulled from {connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} into your workspace, then shown here.
+              </p>
+            )}
+            {bookingsJustRefreshedAt != null && !bookingsError && !bookingsLoading && (
+              <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                <svg className="h-3 w-3" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                  <path fillRule="evenodd" d="M16.704 5.29a1 1 0 010 1.42l-7.5 7.5a1 1 0 01-1.42 0l-3.5-3.5a1 1 0 011.42-1.42L8.5 12.08l6.79-6.79a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                Refreshed just now
+              </span>
+            )}
+            {closeRateRefreshing && !bookingsLoading && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">Updating close rate…</span>
+            )}
+          </div>
 
           {bookingsError && (
-            <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-md">
-              <p className="text-sm text-red-800 dark:text-red-200">
-                <strong>Error loading {connectedProvider === 'calcom' ? 'bookings' : 'events'}:</strong> {bookingsError}
-              </p>
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-md flex items-start gap-3"
+            >
+              <svg className="h-4 w-4 mt-0.5 text-red-700 dark:text-red-300 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                <path fillRule="evenodd" d="M18 10A8 8 0 11 2 10a8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-red-800 dark:text-red-200">
+                  <strong>Could not refresh {connectedProvider === 'calcom' ? 'bookings' : 'events'}:</strong> {bookingsError}
+                </p>
+                <p className="text-xs text-red-700/80 dark:text-red-300/80 mt-0.5">
+                  Showing the most recent data from your workspace. Try again, or check your {connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} connection.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRefreshBookings()}
+                disabled={bookingsLoading}
+                className="text-xs font-medium px-2.5 py-1 rounded-md border border-red-400/60 text-red-800 hover:bg-red-200/60 dark:text-red-200 dark:border-red-600/60 dark:hover:bg-red-800/40 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              >
+                {bookingsLoading ? 'Retrying…' : 'Try again'}
+              </button>
             </div>
           )}
 
@@ -972,8 +1099,22 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           )}
 
           {bookingsLoading && filteredBookings.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              Loading {connectedProvider === 'calcom' ? 'bookings' : 'events'}...
+            <div
+              className="flex flex-col items-center justify-center gap-3 py-10 text-gray-500 dark:text-gray-400"
+              role="status"
+              aria-live="polite"
+            >
+              <svg
+                className="animate-spin h-6 w-6 text-current"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+              >
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+              </svg>
+              <span className="text-sm">Loading {connectedProvider === 'calcom' ? 'bookings' : 'events'}…</span>
             </div>
           ) : filteredBookings.length === 0 ? (
             <div className="text-center py-8 text-gray-500 dark:text-gray-400">
@@ -981,8 +1122,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                 No {bookingsTab === 'upcoming' ? 'upcoming' : 'past'} {connectedProvider === 'calcom' ? 'bookings' : 'events'} found
               </p>
               <p className="text-sm">
-                {bookingsError 
-                  ? `Error: ${bookingsError}` 
+                {bookingsError
+                  ? `Error: ${bookingsError}`
                   : bookingsTab === 'upcoming'
                   ? `You don't have any upcoming ${connectedProvider === 'calcom' ? 'bookings' : 'events'}. ${connectedProvider === 'calcom' ? 'Bookings' : 'Events'} will appear here once someone schedules a meeting through your ${connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} links.`
                   : `You don't have any past ${connectedProvider === 'calcom' ? 'bookings' : 'events'} yet.`}
@@ -1173,7 +1314,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                   );
                   setShowManualBookingModal(false);
                   setManualBookingForm({ clientId: '', title: 'Manual Check-In', date: '', time: '12:00', duration: 60, status: 'scheduled' });
-                  apiClient.getCalendarUpcomingSummary().then((data: any) => setShowUpRateSummary({ show_up_rate: data?.show_up_rate ?? null, last_month_count: data?.last_month_count })).catch(() => {});
                   void refetchSyncedBookings();
                   window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
                 } catch (err: any) {
@@ -1455,18 +1595,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               .getCalendarSalesCloseRate()
               .then(setCloseRateData)
               .catch(() => setCloseRateData(null));
-
-            setShowUpRateLoading(true);
-            apiClient
-              .getCalendarUpcomingSummary()
-              .then((data: any) => {
-                setShowUpRateSummary({
-                  show_up_rate: data?.show_up_rate ?? null,
-                  last_month_count: data?.last_month_count,
-                });
-              })
-              .catch(() => setShowUpRateSummary(null))
-              .finally(() => setShowUpRateLoading(false));
 
             window.dispatchEvent(new CustomEvent('calendarSalesFlagsUpdated'));
             window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));

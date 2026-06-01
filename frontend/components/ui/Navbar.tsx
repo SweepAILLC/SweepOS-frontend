@@ -1,19 +1,9 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
+import type { TabId } from '@/lib/tabs';
+import { canAccessBottomNavTab, canAccessTab } from '@/lib/tabAccess';
 import { APP_SIDEBAR_WIDTH } from '@/components/ui/layoutConstants';
 
-export type TabId =
-  | 'terminal'
-  | 'finances'
-  | 'funnels'
-  | 'content_studio'
-  | 'call_library'
-  | 'integrations'
-  | 'users'
-  | 'owner'
-  | 'calcom'
-  | 'intelligence'
-  | 'settings';
+export type { TabId };
 
 interface NavbarProps {
   activeTab: TabId;
@@ -21,8 +11,8 @@ interface NavbarProps {
   isOwner?: boolean;
   tabPermissions?: Record<string, boolean>;
   userRole?: string;
-  /** Current organization name (shown under the logo). */
   organizationName?: string | null;
+  automationsAwaitingApproval?: number;
 }
 
 const navBtnBase =
@@ -38,39 +28,19 @@ export default function Navbar({
   tabPermissions = {},
   userRole = 'member',
   organizationName = null,
+  automationsAwaitingApproval = 0,
 }: NavbarProps) {
   const [mounted, setMounted] = useState(false);
-  const perfDrawer = usePerformanceDrawer();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const shouldShowTab = (tab: string): boolean => {
-    const roleLower = String(userRole || 'member').toLowerCase().trim();
-    if (tab === 'owner') {
-      return isOwner;
-    }
-    // Members: never show restricted product tabs
-    if (roleLower === 'member' && (tab === 'integrations' || tab === 'intelligence')) {
-      return false;
-    }
-    if (tab === 'users') {
-      if (roleLower === 'member') {
-        return false;
-      }
-      if (roleLower === 'admin' || roleLower === 'owner') {
-        return tabPermissions[tab] !== false;
-      }
-      return false;
-    }
-    if (tab === 'finances') {
-      const v =
-        tabPermissions.finances !== undefined ? tabPermissions.finances : tabPermissions.stripe;
-      return v !== false;
-    }
-    return tabPermissions[tab] !== false;
-  };
+  const shouldShowTab = (tab: string): boolean =>
+    canAccessTab(tab, { isOwner, userRole, tabPermissions });
+
+  const shouldShowBottomNavTab = (tab: TabId): boolean =>
+    canAccessBottomNavTab(tab, { userRole, tabPermissions });
 
   const tabBtn = (tab: TabId, label: string) => {
     const active = activeTab === tab;
@@ -144,35 +114,41 @@ export default function Navbar({
 
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-2 px-2 space-y-1">
         {shouldShowTab('terminal') && tabBtn('terminal', 'Terminal')}
-        {shouldShowTab('finances') && tabBtn('finances', 'Finances')}
-        {shouldShowTab('calcom') && tabBtn('calcom', 'Calendar')}
+        {shouldShowTab('pipeline') && tabBtn('pipeline', 'Pipeline')}
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
-        {shouldShowTab('integrations') && tabBtn('integrations', 'Integrations')}
-        {shouldShowTab('users') && tabBtn('users', 'Users')}
         {shouldShowTab('owner') && tabBtn('owner', 'Owner')}
       </div>
 
       <div className="flex-shrink-0 p-2 border-t border-gray-200/50 dark:border-white/10 space-y-1">
-        {shouldShowTab('performance') && perfDrawer &&
-          iconBtn(
-            () => perfDrawer.open(),
-            'Performance',
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>,
-            {
-              extraClass: perfDrawer.isOpen ? 'ring-2 ring-emerald-500/50' : '',
-              title: 'Performance priorities & ROI',
-            }
-          )}
-        {shouldShowTab('intelligence') &&
+        {shouldShowBottomNavTab('automations') && (
+          <button
+            type="button"
+            onClick={() => onTabChange('automations')}
+            className={`${navBtnBase} ${navBtnInactive} ${activeTab === 'automations' ? 'ring-2 ring-violet-500/50' : ''}`}
+            aria-label="Automations"
+            title="Automated email playbooks & worker health"
+          >
+            <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
+              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className="w-5 h-5">
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </span>
+            <span className="truncate flex-1">Automations</span>
+            {automationsAwaitingApproval > 0 ? (
+              <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
+                {automationsAwaitingApproval > 99 ? '99+' : automationsAwaitingApproval}
+              </span>
+            ) : null}
+          </button>
+        )}
+        {shouldShowBottomNavTab('intelligence') &&
           iconBtn(
             () => onTabChange('intelligence'),
             'Intelligence',
@@ -190,7 +166,42 @@ export default function Navbar({
               title: 'AI Intelligence profile',
             }
           )}
-        {iconBtn(
+        {shouldShowBottomNavTab('integrations') &&
+          iconBtn(
+            () => onTabChange('integrations'),
+            'Integrations',
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"
+              />
+            </svg>,
+            {
+              extraClass: activeTab === 'integrations' ? 'ring-2 ring-violet-500/50' : '',
+              title: 'Connect Stripe, Brevo, Whop, and more',
+            }
+          )}
+        {shouldShowBottomNavTab('users') &&
+          iconBtn(
+            () => onTabChange('users'),
+            'Users',
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+              />
+            </svg>,
+            {
+              extraClass: activeTab === 'users' ? 'ring-2 ring-violet-500/50' : '',
+              title: 'Team members and invitations',
+            }
+          )}
+        {shouldShowBottomNavTab('settings') &&
+          iconBtn(
           () => onTabChange('settings'),
           'Settings',
           <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>

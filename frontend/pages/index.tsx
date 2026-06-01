@@ -1,16 +1,13 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
-import Navbar from '@/components/ui/Navbar';
+import Navbar, { type TabId } from '@/components/ui/Navbar';
 import {
   APP_MAIN_PL_OFFSET,
-  APP_MAIN_PL_WITH_PERF_OPEN,
   APP_MAIN_PL_WITH_CALL_LIBRARY,
-  APP_MAIN_PL_WITH_CALL_LIBRARY_AND_PERF_OPEN,
 } from '@/components/ui/layoutConstants';
-import TerminalDashboard from '@/components/TerminalDashboard';
-import FinancesDashboardPanel from '@/components/finances/FinancesDashboardPanel';
-import CalendarConsolePanel from '@/components/calendar/CalendarConsolePanel';
+import TerminalDashboard from '@/components/terminal/TerminalDashboard';
+import PipelineDashboard from '@/components/pipeline/PipelineDashboard';
 import FunnelListPanel from '@/components/FunnelListPanel';
 import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
 import AdminPanel from '@/components/AdminPanel';
@@ -21,7 +18,19 @@ import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
 import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
-import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
+import AutomationsTab from '@/components/automations/AutomationsTab';
+import {
+  resolveLegacyTab,
+  legacyTabOpensTerminal,
+  legacyTabOpensPipeline,
+  VALID_TAB_IDS,
+} from '@/lib/tabs';
+import {
+  canAccessTab,
+  canAccessTerminalPriorities,
+  defaultTabPermissions,
+  BOTTOM_NAV_TAB_IDS,
+} from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
 
@@ -29,68 +38,51 @@ export default function Dashboard() {
   const router = useRouter();
   const { setLoading: setGlobalLoading } = useLoading();
   
-  // New session (after login) starts on terminal; refresh keeps current tab via localStorage
-  type TabId =
-    | 'terminal'
-    | 'finances'
-    | 'funnels'
-    | 'content_studio'
-    | 'call_library'
-    | 'integrations'
-    | 'users'
-    | 'owner'
-    | 'calcom'
-    | 'intelligence'
-    | 'settings';
+  // Tab ids are centralized in lib/tabs.ts (Navbar imports the same type).
+  type DashboardTabId = TabId;
 
-  const getInitialTab = (): TabId => {
+  const getInitialTab = (): DashboardTabId => {
     if (typeof window === 'undefined') return 'terminal';
     if (sessionStorage.getItem('newSession') === '1') {
       sessionStorage.removeItem('newSession');
+      sessionStorage.setItem('terminalSyncOnLoad', '1');
       return 'terminal';
     }
     let savedTab = localStorage.getItem('activeTab');
-    if (savedTab === 'stripe') {
-      savedTab = 'finances';
-      localStorage.setItem('activeTab', 'finances');
-    }
-    if (savedTab === 'performance') {
-      sessionStorage.setItem('openPerfDrawer', '1');
+    if (savedTab === 'stripe' || savedTab === 'finances' || savedTab === 'calcom') {
+      localStorage.setItem('activeTab', 'terminal');
       return 'terminal';
+    }
+    if (savedTab && legacyTabOpensTerminal(savedTab)) {
+      return 'terminal';
+    }
+    if (savedTab && legacyTabOpensPipeline(savedTab)) {
+      return 'pipeline';
     }
     if (savedTab === 'brevo') {
       localStorage.setItem('activeTab', 'integrations');
       return 'integrations';
     }
-    const validTabs: string[] = [
-      'terminal',
-      'finances',
-      'funnels',
-      'content_studio',
-      'call_library',
-      'integrations',
-      'users',
-      'owner',
-      'calcom',
-      'intelligence',
-      'settings',
-    ];
-    if (savedTab && validTabs.includes(savedTab)) {
-      return savedTab as TabId;
-    }
+    const resolved = resolveLegacyTab(savedTab);
+    if (resolved) return resolved;
     return 'terminal';
   };
 
-  const [activeTab, setActiveTab] = useState<TabId>(() => getInitialTab());
+  const [activeTab, setActiveTab] = useState<DashboardTabId>(() => getInitialTab());
+  /** Pipeline board mounts on first visit and stays mounted for instant return. */
+  const [pipelineMounted, setPipelineMounted] = useState(
+    () => getInitialTab() === 'pipeline',
+  );
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
   const [userRole, setUserRole] = useState<string>('member'); // Track user role for permission checks
-  const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>({});
+  const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>(() =>
+    defaultTabPermissions()
+  );
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [organizationName, setOrganizationName] = useState<string | null>(null);
-  const perfDrawer = usePerformanceDrawer();
-  const prevActiveTabForPerfRef = useRef<TabId | null>(null);
+  const [automationsAwaitingApproval, setAutomationsAwaitingApproval] = useState(0);
 
   // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
   useEffect(() => {
@@ -99,32 +91,35 @@ export default function Dashboard() {
     }
   }, [activeTab]);
 
-  // Navbar sets global loading on tab change ("Switching tabs..."); clear it once the new tab is active so the overlay cannot stick.
+  // Navbar clears global loading on tab change; no blocking overlay on switch.
   useEffect(() => {
     setGlobalLoading(false);
   }, [activeTab, setGlobalLoading]);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !perfDrawer) return;
-    if (sessionStorage.getItem('openPerfDrawer') === '1') {
-      sessionStorage.removeItem('openPerfDrawer');
-      perfDrawer.open();
-    }
-  }, [perfDrawer]);
+    if (activeTab === 'pipeline') setPipelineMounted(true);
+  }, [activeTab]);
 
-  // Close Performance drawer only when the main *tab* changes — not when drawer open/close updates context.
+  // Lightweight poll for awaiting-approval automation jobs so the navbar badge stays fresh
   useEffect(() => {
-    if (!perfDrawer) return;
-    if (prevActiveTabForPerfRef.current === null) {
-      prevActiveTabForPerfRef.current = activeTab;
-      return;
-    }
-    if (prevActiveTabForPerfRef.current === activeTab) {
-      return;
-    }
-    prevActiveTabForPerfRef.current = activeTab;
-    perfDrawer.close();
-  }, [activeTab, perfDrawer]);
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const health = await apiClient.getAutomationDispatcherHealth();
+        if (!cancelled) {
+          setAutomationsAwaitingApproval(health?.awaiting_approval || 0);
+        }
+      } catch {
+        if (!cancelled) setAutomationsAwaitingApproval(0);
+      }
+    };
+    refresh();
+    const id = setInterval(refresh, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -133,77 +128,48 @@ export default function Dashboard() {
     const checkAuth = async () => {
       try {
         const user = await apiClient.getCurrentUser();
-        const u = user as { org_id?: string; org_name?: string | null; email?: string };
-        let resolvedOrgName: string | null = u.org_name ?? null;
-        if (!resolvedOrgName && u.email && u.org_id) {
-          try {
-            const orgs = await apiClient.getUserOrganizations(u.email);
-            const match = Array.isArray(orgs)
-              ? orgs.find((o: { id: string }) => String(o.id) === String(u.org_id))
-              : null;
-            resolvedOrgName = match?.name ?? null;
-          } catch {
-            resolvedOrgName = null;
-          }
-        }
-        if (isMounted) {
-          setOrganizationName(resolvedOrgName);
-        }
-
         if (!isMounted) return;
-        
-        // Check if user is owner (only 'owner' role)
+
         const userIsOwner = user.role === 'owner';
         setIsOwner(userIsOwner);
-        
-        // Store user role for permission checks (normalize to lowercase)
         const normalizedRole = String(user.role || 'member').toLowerCase().trim();
         setUserRole(normalizedRole);
-        
-        // Check if user is in main org (Sweep Internal)
-        // Main org ID is: 00000000-0000-0000-0000-000000000001
+
         const MAIN_ORG_ID = '00000000-0000-0000-0000-000000000001';
-        const userIsMainOrg = user.org_id === MAIN_ORG_ID;
-        setIsMainOrg(userIsMainOrg);
-        
-        // Load tab permissions (with timeout to prevent hanging)
-        try {
-          const permissionsPromise = apiClient.getMyTabPermissions();
-          const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Timeout')), 5000)
-          );
-          
-          const permissions = await Promise.race([permissionsPromise, timeoutPromise]) as Record<string, boolean>;
-          
-          if (isMounted) {
-            setTabPermissions(permissions);
+        setIsMainOrg(user.org_id === MAIN_ORG_ID);
+
+        // Show the shell immediately; permissions and org name can hydrate after.
+        setLoadingState(false);
+
+        const u = user as { org_id?: string; org_name?: string | null; email?: string };
+        if (u.org_name) {
+          setOrganizationName(u.org_name);
+        } else if (u.email && u.org_id) {
+          apiClient
+            .getUserOrganizations(u.email)
+            .then((orgs) => {
+              if (!isMounted) return;
+              const match = Array.isArray(orgs)
+                ? orgs.find((o: { id: string }) => String(o.id) === String(u.org_id))
+                : null;
+              setOrganizationName(match?.name ?? null);
+            })
+            .catch(() => {
+              if (isMounted) setOrganizationName(null);
+            });
+        }
+
+        apiClient.getMyTabPermissions().then(
+          (permissions) => {
+            if (isMounted) setTabPermissions(permissions as Record<string, boolean>);
+          },
+          (permError) => {
+            console.warn('Failed to load tab permissions, using defaults:', permError);
+            if (isMounted) setTabPermissions(defaultTabPermissions());
           }
-        } catch (permError: any) {
-          // If permissions endpoint fails (e.g., endpoint doesn't exist yet or migration not run), default to all enabled
-          console.warn('Failed to load tab permissions, using defaults:', permError);
-          const defaultPermissions = {
-            terminal: true,
-            stripe: true,
-            finances: true,
-            performance: true,
-            funnels: true,
-            users: true,
-            calcom: true,
-            integrations: true,
-          };
-          if (isMounted) {
-            setTabPermissions(defaultPermissions);
-          }
-        }
-        
-        // Prefetch terminal summary so Cash & MRR / Top Revenue load instantly when user opens Terminal tab
-        if (isMounted) {
-          apiClient.getTerminalSummary().catch(() => {});
-        }
-        
-        if (isMounted) {
-          setLoadingState(false);
-        }
+        );
+
+        apiClient.getTerminalSummary().catch(() => {});
       } catch (error: any) {
         // Suppress console errors for auth failures - they're handled gracefully
         const isAuthError = error.response?.status === 401 || error.code === 'ERR_NETWORK' || error.response?.status === 403;
@@ -225,14 +191,7 @@ export default function Dashboard() {
             return; // Don't update state, just redirect
           } else {
             // For other errors, still show the UI but with defaults
-            const defaultPermissions = {
-              terminal: true,
-              stripe: true,
-              finances: true,
-              funnels: true,
-              users: true,
-              calcom: true
-            };
+            const defaultPermissions = defaultTabPermissions();
             setTabPermissions(defaultPermissions);
             setLoadingState(false);
           }
@@ -257,7 +216,7 @@ export default function Dashboard() {
     // Handle OAuth callback parameters first (they may also set the tab)
     if (stripe_connected === 'true') {
       setNotification({ type: 'success', message: 'Stripe connected successfully! Syncing customers...' });
-      setActiveTab('finances');
+      setActiveTab('terminal');
       // Clear query params
       router.replace('/', undefined, { shallow: true });
       // Dispatch event to refresh clients list
@@ -271,7 +230,7 @@ export default function Dashboard() {
     } else if (stripe_error) {
       const errorMsg = error_description || 'Failed to connect Stripe';
       setNotification({ type: 'error', message: `Stripe connection error: ${errorMsg}` });
-      setActiveTab('finances');
+      setActiveTab('terminal');
       router.replace('/', undefined, { shallow: true });
       setTimeout(() => setNotification(null), 5000);
       return;
@@ -301,26 +260,22 @@ export default function Dashboard() {
     // Handle standalone tab navigation (only if no OAuth params)
     if (tab && typeof tab === 'string') {
       if (tab === 'performance') {
-        perfDrawer?.open();
+        setActiveTab('terminal');
         router.replace('/', undefined, { shallow: true });
         return;
       }
-      const normalizedTab = tab === 'stripe' ? 'finances' : tab === 'brevo' ? 'integrations' : tab;
-      if (
-        [
-          'terminal',
-          'finances',
-          'funnels',
-          'content_studio',
-          'call_library',
-          'integrations',
-          'users',
-          'owner',
-          'calcom',
-          'intelligence',
-          'settings',
-        ].includes(normalizedTab)
-      ) {
+      if (tab === 'clients') {
+        setActiveTab('pipeline');
+        router.replace('/', undefined, { shallow: true });
+        return;
+      }
+      if (tab === 'stripe' || tab === 'finances' || tab === 'calcom') {
+        setActiveTab('terminal');
+        router.replace('/', undefined, { shallow: true });
+        return;
+      }
+      const normalizedTab = tab === 'brevo' ? 'integrations' : tab;
+      if (VALID_TAB_IDS.includes(normalizedTab as TabId)) {
         const tabValue = normalizedTab as TabId;
         setActiveTab(tabValue);
         const rawFid = router.query.funnelId;
@@ -331,7 +286,7 @@ export default function Dashboard() {
         }
       }
     }
-  }, [router.isReady, router.query, perfDrawer]);
+  }, [router.isReady, router.query]);
 
   useEffect(() => {
     if (!router.isReady) return;
@@ -341,12 +296,12 @@ export default function Dashboard() {
     }
   }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
-  // Members must not stay on integrations/intelligence (URL/localStorage). Must run before any early return (Rules of Hooks).
+  // Members must not stay on admin-only footer tabs (URL/localStorage). Must run before any early return (Rules of Hooks).
   useEffect(() => {
     if (loading) return;
     const roleLower = String(userRole || 'member').toLowerCase().trim();
     if (roleLower !== 'member') return;
-    if (activeTab === 'integrations' || activeTab === 'intelligence') {
+    if (BOTTOM_NAV_TAB_IDS.includes(activeTab)) {
       setActiveTab('terminal');
       setGlobalLoading(false);
     }
@@ -361,51 +316,23 @@ export default function Dashboard() {
   }
 
   // Check if current tab is accessible
-  const hasTabAccess = (tab: string): boolean => {
-    const roleLower = String(userRole || 'member').toLowerCase().trim();
-    // Owner tab only for owners
-    if (tab === 'owner') {
-      return isOwner;
-    }
-    // Member users cannot access Intelligence or Integrations
-    if (roleLower === 'member' && (tab === 'integrations' || tab === 'intelligence')) {
-      return false;
-    }
-    // Users tab: not accessible to members (check role directly)
-    if (tab === 'users') {
-      // Explicitly hide for members - check multiple possible formats
-      if (roleLower === 'member' || roleLower === 'MEMBER' || roleLower === 'Member') {
-        return false;
-      }
-      // Only show if user is admin or owner
-      if (roleLower !== 'admin' && roleLower !== 'owner') {
-        return false;
-      }
-      return tabPermissions[tab] !== false;
-    }
-    if (tab === 'finances') {
-      const v =
-        tabPermissions.finances !== undefined ? tabPermissions.finances : tabPermissions.stripe;
-      return v !== false;
-    }
-    // Check permissions for other tabs
-    return tabPermissions[tab] !== false; // Default to true if not set
-  };
+  const hasTabAccess = (tab: string): boolean =>
+    canAccessTab(tab, { isOwner, userRole, tabPermissions });
+
+  const showTerminalPriorities = canAccessTerminalPriorities(tabPermissions);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar 
         activeTab={activeTab} 
         onTabChange={(tab) => {
-          if (tab !== activeTab) {
-            setActiveTab(tab);
-            setGlobalLoading(true, 'Switching tabs...');
-          }
+          if (tab !== activeTab) setActiveTab(tab);
         }} 
         isOwner={isOwner}
         tabPermissions={tabPermissions}
         userRole={userRole || 'member'}
         organizationName={organizationName}
+        automationsAwaitingApproval={automationsAwaitingApproval}
       />
 
       {notification && (
@@ -427,37 +354,33 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Full-width shell so left padding lines up with the fixed sidebar + Performance panel; inner main stays max-w-7xl centered in the remaining width. */}
       <div
         className={`min-w-0 w-full min-h-screen transition-[padding-left] duration-300 ease-out ${
-          activeTab === 'call_library'
-            ? perfDrawer?.isOpen
-              ? APP_MAIN_PL_WITH_CALL_LIBRARY_AND_PERF_OPEN
-              : APP_MAIN_PL_WITH_CALL_LIBRARY
-            : perfDrawer?.isOpen
-              ? APP_MAIN_PL_WITH_PERF_OPEN
-              : APP_MAIN_PL_OFFSET
+          activeTab === 'call_library' ? APP_MAIN_PL_WITH_CALL_LIBRARY : APP_MAIN_PL_OFFSET
         }`}
       >
-        <main className="min-w-0 max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 overflow-x-hidden">
+        <main
+          className={`min-w-0 mx-auto px-2 sm:px-4 lg:px-5 py-3 sm:py-6 ${
+            activeTab === 'pipeline' || activeTab === 'terminal'
+              ? 'max-w-none w-full'
+              : 'max-w-7xl overflow-x-hidden'
+          }`}
+        >
         {activeTab === 'terminal' && (
           hasTabAccess('terminal') ? (
-            <TerminalDashboard />
+            <TerminalDashboard showPriorities={showTerminalPriorities} />
           ) : (
             <RestrictedTabView tabName="terminal" />
           )
         )}
 
-        {activeTab === 'finances' && (
-          hasTabAccess('finances') ? (
-            <div className="max-w-4xl mx-auto w-full">
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 text-center">Finances</h2>
-              <FinancesDashboardPanel userRole={userRole} />
-            </div>
-          ) : (
-            <RestrictedTabView tabName="finances" />
-          )
-        )}
+        {hasTabAccess('pipeline') && pipelineMounted ? (
+          <div className={activeTab === 'pipeline' ? undefined : 'hidden'} aria-hidden={activeTab !== 'pipeline'}>
+            <PipelineDashboard isActive={activeTab === 'pipeline'} />
+          </div>
+        ) : activeTab === 'pipeline' ? (
+          <RestrictedTabView tabName="pipeline" />
+        ) : null}
 
         {activeTab === 'funnels' && (
           hasTabAccess('funnels') ? (
@@ -519,31 +442,35 @@ export default function Dashboard() {
           </div>
         )}
 
-        {activeTab === 'calcom' && (
-          hasTabAccess('calcom') ? (
-            <div className="w-full">
-              <CalendarConsolePanel userRole={userRole} />
-            </div>
-          ) : (
-            <RestrictedTabView tabName="calcom" />
-          )
-        )}
-
         {activeTab === 'intelligence' && (
           hasTabAccess('intelligence') ? (
             <div className="w-full">
-              <IntelligencePanel />
+              <IntelligencePanel onOpenAutomations={() => setActiveTab('automations')} />
             </div>
           ) : (
             <RestrictedTabView tabName="intelligence" />
           )
         )}
 
+        {activeTab === 'automations' && (
+          hasTabAccess('automations') ? (
+            <div className="w-full">
+              <AutomationsTab />
+            </div>
+          ) : (
+            <RestrictedTabView tabName="automations" />
+          )
+        )}
+
         {activeTab === 'settings' && (
-          <div className="w-full">
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
-            <SettingsPanel />
-          </div>
+          hasTabAccess('settings') ? (
+            <div className="w-full">
+              <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
+              <SettingsPanel />
+            </div>
+          ) : (
+            <RestrictedTabView tabName="settings" />
+          )
         )}
         </main>
       </div>

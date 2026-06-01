@@ -5,6 +5,8 @@ import Link from 'next/link';
 import type { Client } from '@/types/client';
 import type { ClientCallInsightsResponse, CallInsightsRollup, LeadPipelineSnapshot } from '@/types/callInsights';
 import { apiClient } from '@/lib/api';
+import { LEAD_PIPELINE_COLUMNS } from '@/lib/leadFollowUp';
+import { formatApiError } from '@/lib/apiError';
 import {
   buildClipQueueView,
   clipStableKey,
@@ -14,6 +16,7 @@ import {
   readDismissedClipIds,
 } from '@/lib/intelligenceQueue';
 import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
+import ConfirmDialog from '../ui/ConfirmDialog';
 
 const TAG_STYLES: Record<string, string> = {
   upsell: 'bg-violet-500/15 text-violet-800 dark:text-violet-200 border-violet-500/30',
@@ -90,6 +93,8 @@ interface IntelligenceSectionProps {
   showChecklist?: boolean;
   /** After persisting clip dismissals (meta patch), refetch client in parent. */
   onClientUpdated?: () => void;
+  /** Prefer PATCH response merged into drawer/Kanban (instant persisted meta); optional. */
+  onClientPatched?: (client: Client) => void;
   onOpenEmailComposerWithDraft?: (draft: { subject: string; bodyHtml: string; bodyText: string }) => void;
 }
 
@@ -115,6 +120,7 @@ export default function IntelligenceSection({
   refreshToken = 0,
   showChecklist = true,
   onClientUpdated,
+  onClientPatched,
   onOpenEmailComposerWithDraft,
 }: IntelligenceSectionProps) {
   const [insightData, setInsightData] = useState<ClientCallInsightsResponse | null>(null);
@@ -125,6 +131,8 @@ export default function IntelligenceSection({
   const [recRefresh, setRecRefresh] = useState(0);
   const [synthesisExpanded, setSynthesisExpanded] = useState(false);
   const [clipDismissing, setClipDismissing] = useState<Set<string>>(() => new Set());
+  const [clipConfirmClip, setClipConfirmClip] = useState<Record<string, unknown> | null>(null);
+  const [clipConfirmBusy, setClipConfirmBusy] = useState(false);
 
   const loadInsights = useCallback(() => {
     if (!client?.id) return;
@@ -189,7 +197,7 @@ export default function IntelligenceSection({
             : 'Too many re-analyze requests — try again in up to an hour.'
         );
       } else {
-        setInsightError(typeof detail === 'string' ? detail : (err as Error)?.message || 'Re-analyze failed');
+        setInsightError(formatApiError(err, 'Re-analyze failed. Try again in a moment.'));
       }
     } finally {
       setReanalyzeBusy(false);
@@ -243,14 +251,22 @@ export default function IntelligenceSection({
 
   const synthesis = (rollup.client_state_synthesis || '').trim();
 
-  const handleClipDismissed = async (clip: Record<string, unknown>) => {
+  const handleClipDismissConfirmed = async () => {
+    const clip = clipConfirmClip;
+    if (!clip || !client?.id) return;
     const key = clipStableKey(clip);
     if (clipDismissing.has(key)) return;
+    setClipConfirmBusy(true);
     setClipDismissing((s) => new Set(s).add(key));
     try {
       const nextMeta = mergeMetaWithDismissedClip(client.meta as Record<string, unknown> | undefined, key);
-      await apiClient.updateClient(client.id, { meta: nextMeta });
-      onClientUpdated?.();
+      const updated = await apiClient.updateClient(client.id, { meta: nextMeta });
+      setClipConfirmClip(null);
+      if (onClientPatched) {
+        onClientPatched(updated);
+      } else {
+        onClientUpdated?.();
+      }
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
@@ -258,6 +274,7 @@ export default function IntelligenceSection({
         'Could not save';
       setInsightError(msg);
     } finally {
+      setClipConfirmBusy(false);
       setClipDismissing((s) => {
         const n = new Set(s);
         n.delete(key);
@@ -280,7 +297,7 @@ export default function IntelligenceSection({
   const frameworkReview = rollup.latest_framework_review || null;
   const lc = client.lifecycle_state;
   const isClientRoi = lc === 'active' || lc === 'offboarding';
-  const isLead = lc === 'cold_lead' || lc === 'warm_lead';
+  const isLead = (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(lc);
   const isDead = lc === 'dead';
   const summaryTags = insightData?.summary?.tags || [];
 
@@ -330,6 +347,7 @@ export default function IntelligenceSection({
           type="button"
           onClick={() => void handleReanalyzeRoi()}
           disabled={reanalyzeBusy || insightLoading || !client?.id}
+          aria-busy={reanalyzeBusy}
           title="Re-run AI on the latest Fathom call for this client (rate limited: 8 per hour per client)."
           className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-lg border border-gray-200 dark:border-white/15 bg-white/70 dark:bg-white/5 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
         >
@@ -729,16 +747,25 @@ export default function IntelligenceSection({
                           {quote ? (
                             <p className="mt-0.5 text-gray-600 dark:text-gray-400 italic line-clamp-3">{quote}</p>
                           ) : null}
-                          <label className="flex items-center gap-2 mt-1.5 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={false}
-                              disabled={busy}
-                              onChange={() => handleClipDismissed(clip)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 text-violet-600"
-                            />
-                            <span className="text-[10px] text-gray-500">{busy ? 'Saving…' : 'Done — hide & show next'}</span>
-                          </label>
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={busy || clipConfirmBusy}
+                              onClick={() => setClipConfirmClip(clip)}
+                              className="inline-flex items-center gap-1.5 text-[10px] font-medium rounded-md px-2 py-1 border border-gray-200 dark:border-gray-600 bg-white/70 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200 hover:bg-violet-500/10 hover:border-violet-400/40 dark:hover:border-violet-500/35 disabled:opacity-50 transition-colors"
+                            >
+                              <svg
+                                className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                                aria-hidden
+                              >
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                              {busy ? 'Saving…' : 'Done — hide & show next'}
+                            </button>
+                          </div>
                         </li>
                       );
                     })}
@@ -778,6 +805,24 @@ export default function IntelligenceSection({
           )}
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={clipConfirmClip !== null}
+        onClose={() => {
+          if (!clipConfirmBusy) setClipConfirmClip(null);
+        }}
+        title="Mark clip as done?"
+        description={
+          <>
+            Remove this clip from your prioritized queue. The dismissal is saved on this client&apos;s profile so it
+            stays cleared when you reopen the drawer; new call analyses can surface fresh clips later.
+          </>
+        }
+        confirmLabel="Mark done"
+        cancelLabel="Cancel"
+        busy={clipConfirmBusy}
+        onConfirm={handleClipDismissConfirmed}
+      />
 
       {showChecklist ? (
         <AIRecommendationsSection

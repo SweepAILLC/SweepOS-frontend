@@ -7,12 +7,22 @@ export interface Client {
   emails?: string[];
   phone?: string;
   instagram?: string;
-  lifecycle_state: 'cold_lead' | 'warm_lead' | 'active' | 'offboarding' | 'dead';
+  lifecycle_state: 'cold_lead' | 'nurturing' | 'qualified' | 'booked' | 'active' | 'offboarding' | 'dead';
   last_activity_at?: string;
   stripe_customer_id?: string;
   estimated_mrr: number;
   lifetime_revenue_cents?: number;
   notes?: string;
+  /** Intelligence ladder slot + manual payment-plan tracking (from PATCH client). */
+  offer_enrollment?: {
+    slot: string;
+    name_snapshot?: string | null;
+    total_cents?: number;
+    paid_cents?: number;
+    currency?: string;
+    notes?: string | null;
+    balance_cents?: number;
+  } | null;
   meta?: Record<string, any>;
   // Program tracking fields
   program_start_date?: string;

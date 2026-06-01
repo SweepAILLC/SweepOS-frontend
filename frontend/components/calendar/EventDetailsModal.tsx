@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
 import { CalComBooking, CalendlyScheduledEvent } from '@/types/integration';
 
@@ -55,6 +56,11 @@ export default function EventDetailsModal({
   const [rescheduleDraft, setRescheduleDraft] = useState<{ start?: string; end?: string }>({});
   const [rescheduleUpdating, setRescheduleUpdating] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     if (isOpen && (checkInId || eventId)) {
@@ -602,8 +608,10 @@ export default function EventDetailsModal({
   const effectiveEvent =
     checkInId && manualCheckIn ? manualCheckIn : provider === 'manual' ? manualCheckIn : currentEvent;
 
-  return (
-    <div className="fixed inset-0 z-50 overflow-y-auto" onClick={onClose}>
+  if (!isOpen || !portalReady) return null;
+
+  const modal = (
+    <div className="fixed inset-0 z-[200] overflow-y-auto" onClick={onClose}>
       <div className="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:block sm:p-0">
         {/* Background overlay */}
         <div className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" onClick={onClose}></div>
@@ -978,5 +986,7 @@ export default function EventDetailsModal({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 

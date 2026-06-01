@@ -1,6 +1,16 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
-import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS, TERMINAL_SESSION_TTL_MS, clearSessionCaches, clearCalendarIntegrationStatusCache } from './cache';
+import type { Client } from '@/types/client';
+import {
+  cache,
+  CACHE_KEYS,
+  TERMINAL_CACHE_TTL_MS,
+  TERMINAL_SESSION_TTL_MS,
+  TERMINAL_CLIENTS_UPDATED_EVENT,
+  clearSessionCaches,
+  clearCalendarIntegrationStatusCache,
+  invalidateCachesAfterManualPayment,
+} from './cache';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
 
@@ -29,7 +39,29 @@ function clientsListCacheKey(lifecycleState?: string): string {
 }
 
 function invalidateClientsListCache(): void {
-  cache.deleteByPrefix('clients');
+  cache.deleteByPrefix(CACHE_KEYS.CLIENTS);
+}
+
+/** Bust cached GET /clients (e.g. after create/update/delete). */
+export function invalidateClientsListCachePublic(): void {
+  invalidateClientsListCache();
+}
+
+/** Drop malformed cache rows so board effects never throw on undefined.id. */
+function sanitizeClientsList(rows: unknown): Client[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.filter(
+    (c): c is Client =>
+      c != null && typeof c === 'object' && typeof (c as Client).id === 'string',
+  );
+}
+
+/** Read cached client list without a network call (for instant pipeline paint). */
+export function peekCachedClientsList(): Client[] | null {
+  const cached = cache.get<unknown[]>(clientsListCacheKey());
+  if (cached == null) return null;
+  const clean = sanitizeClientsList(cached);
+  return clean.length > 0 ? clean : null;
 }
 
 /** In-memory cache key for calendar status — must match JWT org or switching orgs shows the wrong connected state. */
@@ -172,27 +204,27 @@ export interface PerformanceEmailDraftsResponse {
   source: string;
 }
 
-/** Marketing Intel tab (content_studio) — matches backend content_studio schemas (v2 bundle). */
-export interface ContentStudioSectionIdea {
-  id: string;
-  stage: 'TOF' | 'MOF' | 'BOF';
-  hook: string;
-  concept: string;
-  why_it_works: string;
-  format: string;
-}
+/**
+ * Marketing Intel tab (content_studio) — matches backend content_studio schemas (v3 bundle).
+ * v3 replaces the legacy 4-section + voice_marketing shape with a TOF/MOF/BOF concept generator
+ * grounded purely in Fathom data + ICP from Intelligence.
+ */
+export type ContentStudioStageId = 'TOF' | 'MOF' | 'BOF';
 
-export interface ContentStudioSection {
+export interface ContentStudioStageConcept {
   id: string;
+  format: 'long' | 'short';
   title: string;
-  body: string;
-  ideas: ContentStudioSectionIdea[];
-}
-
-export interface ContentStudioVoiceMarketing {
-  title: string;
-  body: string;
   bullets: string[];
+  why_for_icp: string;
+  funnel_path_to_sale: string;
+}
+
+export interface ContentStudioStage {
+  id: ContentStudioStageId;
+  title: string;
+  intro: string;
+  concepts: ContentStudioStageConcept[];
 }
 
 export interface ContentStudioBundle {
@@ -201,8 +233,7 @@ export interface ContentStudioBundle {
   batch_id: string;
   generated_at?: string | null;
   source: 'llm' | 'default' | 'fathom';
-  sections: ContentStudioSection[];
-  voice_marketing: ContentStudioVoiceMarketing;
+  stages: ContentStudioStage[];
 }
 
 export interface ContentStudioBootstrap {
@@ -224,6 +255,12 @@ export interface CallLibraryAttendee {
   is_team_member?: boolean;
 }
 
+export type CallLibraryDealBilling =
+  | 'one_time'
+  | 'recurring_monthly'
+  | 'recurring_annual'
+  | null;
+
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -233,6 +270,12 @@ export interface CallLibraryItem {
   failure_reason?: string | null;
   client_name: string | null;
   call_score: number | null;
+  /** True only when the LLM is confident the sale was closed on this call. */
+  deal_closed?: boolean;
+  /** Closed deal value in minor units (cents). null if no figure was stated. */
+  deal_value_cents?: number | null;
+  deal_currency?: string | null;
+  deal_billing?: CallLibraryDealBilling;
   recording_url: string | null;
   share_url?: string | null;
   video_url?: string | null;
@@ -281,6 +324,168 @@ export function gradeFromHealthScore(score: number): string {
 
 // For cross-origin (e.g. frontend on Vercel, API on Render): set to 'none' so cookies are sent
 const COOKIE_SAME_SITE = (process.env.NEXT_PUBLIC_COOKIE_SAME_SITE as 'lax' | 'strict' | 'none') || 'lax';
+
+// ----- Automation engine types ------------------------------------------------
+export type AutomationPlaybook =
+  | 'pre_sale_post_booking'
+  | 'first_payment_onboarding'
+  | 'first_payment_referral'
+  | 'win_combined_ask'
+  | 'offboarding_recap_ask';
+
+export type AutomationContentMode = 'ai_generated' | 'html_template';
+
+export type AutomationJobState =
+  | 'scheduled'
+  | 'awaiting_approval'
+  | 'ready'
+  | 'sending'
+  | 'sent'
+  | 'skipped'
+  | 'failed'
+  | 'canceled';
+
+export interface AutomationHtmlTemplateRef {
+  kind: 'writing_samples_by_title' | 'writing_samples_by_kind';
+  title?: string | null;
+  sample_kind?: string | null;
+}
+
+export interface AutomationAudienceFilter {
+  lifecycle_in?: string[] | null;
+  min_lifetime_revenue_cents?: number | null;
+  program_progress_min_percent?: number | null;
+  program_progress_max_percent?: number | null;
+}
+
+/** Per-rule trigger options. Today only the pre_sale_post_booking playbook reads this;
+ *  shape mirrors backend BookingTriggerConfig. event_type_ids hold provider-native ids
+ *  (Cal.com eventType.id as string, Calendly event_type URI). */
+export interface AutomationTriggerConfig {
+  provider?: 'calcom' | 'calendly' | 'any' | null;
+  event_type_ids?: string[] | null;
+  match_all_events?: boolean | null;
+}
+
+export interface AutomationRule {
+  id: string;
+  org_id: string;
+  playbook: AutomationPlaybook;
+  enabled: boolean;
+  delay_seconds: number;
+  content_mode: AutomationContentMode;
+  subject_template?: string | null;
+  html_template_ref?: AutomationHtmlTemplateRef | null;
+  /** When content_mode is ai_generated — extra instructions merged into the LLM system prompt. */
+  ai_content_system_prompt?: string | null;
+  audience_filter?: AutomationAudienceFilter | null;
+  trigger_config?: AutomationTriggerConfig | null;
+  opportunity_priority?: string[] | null;
+  combine_top_n: number;
+  require_approval: boolean;
+  approval_ttl_hours?: number | null;
+  last_modified_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationRuleUpdate {
+  enabled: boolean;
+  delay_seconds: number;
+  content_mode: AutomationContentMode;
+  subject_template?: string | null;
+  html_template_ref?: AutomationHtmlTemplateRef | null;
+  ai_content_system_prompt?: string | null;
+  audience_filter?: AutomationAudienceFilter | null;
+  trigger_config?: AutomationTriggerConfig | null;
+  opportunity_priority?: string[] | null;
+  combine_top_n: number;
+  require_approval: boolean;
+  approval_ttl_hours?: number | null;
+}
+
+export interface AutomationEmailJob {
+  id: string;
+  org_id: string;
+  rule_id?: string | null;
+  client_id: string;
+  playbook: AutomationPlaybook;
+  trigger_event?: string | null;
+  idempotency_key: string;
+  scheduled_at: string;
+  state: AutomationJobState;
+  payload_json?: Record<string, unknown> | null;
+  attempts: number;
+  last_attempt_at?: string | null;
+  dispatched_at?: string | null;
+  brevo_message_id?: string | null;
+  error_text?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AutomationEmailJobListResponse {
+  items: AutomationEmailJob[];
+  total: number;
+}
+
+export interface AutomationDispatcherHealth {
+  healthy: boolean;
+  last_tick_at?: string | null;
+  seconds_since_tick?: number | null;
+  worker_pid?: number | null;
+  worker_host?: string | null;
+  queue_depth: number;
+  in_flight: number;
+  awaiting_approval: number;
+  rq_enabled: boolean;
+  notes?: string | null;
+}
+
+export interface AutomationPreviewRequest {
+  playbook: AutomationPlaybook;
+  client_id: string;
+  content_mode?: AutomationContentMode;
+  subject_template?: string | null;
+  html_template_ref?: AutomationHtmlTemplateRef | null;
+  ai_content_system_prompt?: string | null;
+}
+
+export interface AutomationPreviewResponse {
+  subject: string;
+  body_plain: string;
+  html: string;
+  chosen_opportunities: string[];
+  merge_tags_resolved: Record<string, string>;
+  notes: string[];
+}
+
+export interface OutreachInboxItem {
+  id: string;
+  source: 'performance_task' | 'automation_job';
+  client_id?: string | null;
+  client_name?: string | null;
+  playbook?: AutomationPlaybook | null;
+  title: string;
+  summary?: string | null;
+  state?: AutomationJobState | null;
+  scheduled_at?: string | null;
+  created_at: string;
+  requires_approval: boolean;
+  /** Performance-task detail (null for automation jobs). */
+  category?: string | null;
+  prescription?: string | null;
+  next_step?: string | null;
+  recommended_actions?: string[] | null;
+  impact_score?: number | null;
+  has_email_draft?: boolean | null;
+}
+
+export interface OutreachInboxResponse {
+  items: OutreachInboxItem[];
+  awaiting_approval_count: number;
+  performance_task_count: number;
+}
 
 class ApiClient {
   private client: AxiosInstance;
@@ -463,7 +668,7 @@ class ApiClient {
     const cacheKey = clientsListCacheKey(lifecycleState);
     if (!forceRefresh && !lifecycleState) {
       const cached = cache.get<unknown[]>(cacheKey);
-      if (cached != null) return cached;
+      if (cached != null) return sanitizeClientsList(cached);
     }
     const params: any = lifecycleState ? { lifecycle_state: lifecycleState } : {};
     // Cap client list size for performance; backend also enforces an upper bound
@@ -476,8 +681,9 @@ class ApiClient {
       3,
       1000
     );
-    if (!lifecycleState) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
-    return data;
+    const clean = sanitizeClientsList(data);
+    if (!lifecycleState) cache.set(cacheKey, clean, TERMINAL_CACHE_TTL_MS);
+    return clean;
   }
 
   async getClient(id: string) {
@@ -491,21 +697,64 @@ class ApiClient {
       const cached = cache.get<unknown>(CACHE_KEYS.TERMINAL_SUMMARY);
       if (cached != null) return cached;
     }
-    const response = await this.client.get('/clients/terminal-summary');
-    const data = response.data;
-    cache.set(CACHE_KEYS.TERMINAL_SUMMARY, data, TERMINAL_SESSION_TTL_MS);
-    return data;
+    try {
+      const response = await this.client.get('/clients/terminal-summary');
+      const data = response.data;
+      cache.set(CACHE_KEYS.TERMINAL_SUMMARY, data, TERMINAL_SESSION_TTL_MS);
+      return data;
+    } catch (err: unknown) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (status === 500 || status === 503) {
+        console.warn('[terminal-summary] backend unavailable, using empty fallback', status);
+        return ApiClient.emptyTerminalSummary();
+      }
+      throw err;
+    }
+  }
+
+  /** Safe fallback when GET /clients/terminal-summary fails (keeps Terminal tab usable). */
+  static emptyTerminalSummary() {
+    const zeroSource = { today: 0, last_7_days: 0, last_30_days: 0, last_mtd: 0 };
+    return {
+      cash_collected: { today: 0, last_7_days: 0, last_30_days: 0, last_mtd: 0 },
+      mrr: { current_mrr: 0, arr: 0 },
+      top_contributors_30d: [],
+      top_contributors_90d: [],
+      cash_by_source: { stripe: zeroSource, whop: zeroSource, manual: zeroSource },
+    };
   }
 
   async createClient(data: any) {
     const response = await this.client.post('/clients', data);
-    invalidateClientsListCache();
+    const created = response.data as Client | undefined;
+    const cacheKey = clientsListCacheKey();
+    const cached = cache.get<unknown[]>(cacheKey);
+    if (cached != null && created?.id) {
+      cache.set(cacheKey, [created, ...sanitizeClientsList(cached)], TERMINAL_CACHE_TTL_MS);
+    } else {
+      invalidateClientsListCache();
+    }
     return response.data;
   }
 
   async updateClient(id: string, data: any) {
     const response = await this.client.patch(`/clients/${id}`, data);
-    invalidateClientsListCache();
+    const cacheKey = clientsListCacheKey();
+    const cached = cache.get<unknown[]>(cacheKey);
+    const updated = response.data as Client | undefined;
+    if (cached != null && updated?.id) {
+      const list = sanitizeClientsList(cached);
+      cache.set(
+        cacheKey,
+        list.map((c) => (c.id === id ? updated : c)),
+        TERMINAL_CACHE_TTL_MS,
+      );
+    } else {
+      invalidateClientsListCache();
+    }
+    if (typeof window !== 'undefined' && updated?.id) {
+      window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+    }
     return response.data;
   }
 
@@ -518,7 +767,17 @@ class ApiClient {
   async deleteClient(id: string, deleteMerged: boolean = false) {
     const params = deleteMerged ? { delete_merged: 'true' } : {};
     await this.client.delete(`/clients/${id}`, { params });
-    invalidateClientsListCache();
+    const cacheKey = clientsListCacheKey();
+    const cached = cache.get<unknown[]>(cacheKey);
+    if (cached != null) {
+      cache.set(
+        cacheKey,
+        sanitizeClientsList(cached).filter((c) => c.id !== id),
+        TERMINAL_CACHE_TTL_MS,
+      );
+    } else {
+      invalidateClientsListCache();
+    }
   }
 
   async getClientPayments(clientId: string, mergedClientIds?: string[]) {
@@ -551,20 +810,23 @@ class ApiClient {
     if (receiptUrl) params.receipt_url = receiptUrl;
     const response = await this.client.post(`/clients/${clientId}/manual-payment`, null, { params });
     cache.deleteByPrefix(`client_payments_${clientId}_`);
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    invalidateCachesAfterManualPayment();
     return response.data;
   }
 
   async deleteManualPayment(clientId: string, paymentId: string) {
     await this.client.delete(`/clients/${clientId}/manual-payment/${paymentId}`);
     cache.deleteByPrefix(`client_payments_${clientId}_`);
-    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    invalidateCachesAfterManualPayment();
   }
 
   // Check-ins
-  async syncCheckIns() {
+  async syncCheckIns(opts?: { applyPipelineRules?: boolean }) {
+    const params =
+      opts?.applyPipelineRules === false ? { apply_pipeline_rules: false } : undefined;
     const response = await this.client.post('/clients/check-ins/sync', null, {
       timeout: 180000,
+      params,
     });
     return response.data;
   }
@@ -976,6 +1238,21 @@ class ApiClient {
         close_rate_pct: number | null;
       }>;
     };
+  }
+
+  /** Monthly combined cash + calendar rates for unified Terminal dashboard. */
+  async getTerminalMonthlyTrends(forceRefresh?: boolean) {
+    type MonthlyTrends = { periods: import('@/types/admin').HealthTrendPeriod[] };
+    if (!forceRefresh) {
+      const cached = cache.get<MonthlyTrends>(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+      if (cached != null) return cached;
+    }
+    const response = await this.client.get('/clients/terminal/monthly-trends');
+    const data = response.data as MonthlyTrends;
+    if (!forceRefresh) {
+      cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+    }
+    return data;
   }
 
   /** Manual check-ins for the calendar grid (date range YYYY-MM-DD). */
@@ -1424,16 +1701,25 @@ class ApiClient {
     return response.data;
   }
 
-  async getStripeFailedPayments(page?: number, pageSize?: number, excludeResolved?: boolean, bypassCache?: boolean) {
-    const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}`;
+  async getStripeFailedPayments(
+    page?: number,
+    pageSize?: number,
+    excludeResolved?: boolean,
+    bypassCache?: boolean,
+    range?: number,
+    scope?: 'mtd' | 'all'
+  ) {
+    const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}_${range ?? ''}_${scope ?? ''}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: any = {};
+    const params: Record<string, string | number | boolean> = {};
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
     if (excludeResolved !== undefined) params.exclude_resolved = excludeResolved;
+    if (range != null) params.range = range;
+    if (scope) params.scope = scope;
     const response = await this.client.get('/integrations/stripe/failed-payments', { params });
     const data = response.data;
     if (!bypassCache) cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
@@ -1465,6 +1751,7 @@ class ApiClient {
 
   async resolveFailedPaymentAlert(paymentId: string) {
     const response = await this.client.post(`/integrations/stripe/failed-payments/${paymentId}/resolve`);
+    cache.deleteByPrefix(CACHE_KEYS.STRIPE_FAILED_PAYMENTS);
     return response.data;
   }
 
@@ -1901,6 +2188,61 @@ class ApiClient {
   async deleteUserTabPermission(userId: string, tabName: string) {
     const response = await this.client.delete(`/users/${userId}/tabs/${tabName}`);
     return response.data;
+  }
+
+  // ----- Automation engine ----------------------------------------------------
+
+  async listAutomationRules(): Promise<AutomationRule[]> {
+    const response = await this.client.get('/automations/rules');
+    return response.data as AutomationRule[];
+  }
+
+  async updateAutomationRule(
+    playbook: AutomationPlaybook,
+    body: AutomationRuleUpdate
+  ): Promise<AutomationRule> {
+    const response = await this.client.put(`/automations/rules/${playbook}`, body);
+    return response.data as AutomationRule;
+  }
+
+  async listAutomationJobs(params?: {
+    state?: AutomationJobState;
+    playbook?: AutomationPlaybook;
+    client_id?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<AutomationEmailJobListResponse> {
+    const response = await this.client.get('/automations/jobs', { params });
+    return response.data as AutomationEmailJobListResponse;
+  }
+
+  async updateAutomationJobState(
+    jobId: string,
+    state: AutomationJobState
+  ): Promise<AutomationEmailJob> {
+    const response = await this.client.patch(`/automations/jobs/${jobId}/state`, { state });
+    return response.data as AutomationEmailJob;
+  }
+
+  async getAutomationDispatcherHealth(): Promise<AutomationDispatcherHealth> {
+    const response = await this.client.get('/automations/dispatcher/health');
+    return response.data as AutomationDispatcherHealth;
+  }
+
+  async previewAutomationDraft(
+    body: AutomationPreviewRequest
+  ): Promise<AutomationPreviewResponse> {
+    const response = await this.client.post('/automations/preview', body, { timeout: 60000 });
+    return response.data as AutomationPreviewResponse;
+  }
+
+  async getOutreachInbox(params?: {
+    include_performance?: boolean;
+    include_automations?: boolean;
+    limit?: number;
+  }): Promise<OutreachInboxResponse> {
+    const response = await this.client.get('/outreach/inbox', { params });
+    return response.data as OutreachInboxResponse;
   }
 }
 

@@ -1,17 +1,26 @@
-import { Fragment, useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Client, ClientPaymentsResponse } from '@/types/client';
 import { apiClient } from '@/lib/api';
+import { dispatchManualPaymentCreated } from '@/lib/cache';
 import {
   computeLeadFollowUpBar,
   followUpIsoToDateInput,
   dateInputToFollowUpIso,
+  LEAD_PIPELINE_COLUMNS,
 } from '@/lib/leadFollowUp';
+import {
+  getNextPipelineStage,
+  getPipelineStageTitle,
+  normalizeLifecycleColumn,
+  withNormalizedLifecycle,
+} from '@/lib/pipelineColumns';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
 import ClientHealthScoreContent from './ClientHealthScoreContent';
 import IntelligenceSection from './IntelligenceSection';
+import OfferEnrollmentSection from './OfferEnrollmentSection';
 import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
 
 interface ClientDetailDrawerProps {
@@ -35,8 +44,8 @@ export default function ClientDetailDrawer({
   healthRefreshToken = 0,
   onHealthScoreLoaded,
 }: ClientDetailDrawerProps) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [savingFields, setSavingFields] = useState(false);
+  const [advancingStage, setAdvancingStage] = useState(false);
   const [payments, setPayments] = useState<ClientPaymentsResponse | null>(null);
   const [paymentsLoading, setPaymentsLoading] = useState(false);
   const [brevoStatus, setBrevoStatus] = useState<BrevoStatus | null>(null);
@@ -77,6 +86,12 @@ export default function ClientDetailDrawer({
     program_end_date: '',
     follow_up_due_date: '',
   });
+  const formDataRef = useRef(formData);
+  formDataRef.current = formData;
+
+  const fieldBlurSave = () => {
+    void saveClientFields();
+  };
 
   useEffect(() => {
     if (!isOpen) setEngagementOpen(false);
@@ -104,7 +119,6 @@ export default function ClientDetailDrawer({
           typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
         ),
       });
-      setIsEditing(false);
       loadPayments();
       loadBrevoStatus();
       loadNextCheckIn();
@@ -113,10 +127,9 @@ export default function ClientDetailDrawer({
       // The get_client endpoint will update the state based on progress
       if (isOpen && client.program_start_date && client.program_end_date) {
         apiClient.getClient(client.id).then((updatedClient) => {
-          // If state changed, refresh the board to show updated column
-          if (updatedClient.lifecycle_state !== client.lifecycle_state) {
-            console.log('[ClientDetailDrawer] State changed, refreshing board...');
-            onUpdate();
+          const normalized = withNormalizedLifecycle(updatedClient);
+          if (normalized.lifecycle_state !== client.lifecycle_state) {
+            onClientSaved?.(normalized);
           }
         }).catch((error) => {
           console.error('[ClientDetailDrawer] Error fetching updated client:', error);
@@ -223,55 +236,63 @@ export default function ClientDetailDrawer({
   };
 
 
-  const handleSave = async () => {
-    if (!client) return;
-    setLoading(true);
+  const saveClientFields = async (data?: typeof formData) => {
+    if (!client || savingFields || advancingStage) return;
+    const snapshot = data ?? formDataRef.current;
+    setSavingFields(true);
     try {
-      // Prepare update data with program fields
-      const updateData: any = {
-        first_name: formData.first_name,
-        last_name: formData.last_name,
-        email: formData.email || null,
-        emails: formData.emails?.length ? formData.emails : null,
-        phone: formData.phone,
-        instagram: formData.instagram,
-        notes: formData.notes,
+      const updateData: Record<string, unknown> = {};
+
+      const setIfChanged = (key: keyof typeof snapshot, value: unknown, current: unknown) => {
+        const normalized = value === '' ? null : value;
+        const currentNorm = current === '' || current === undefined ? null : current;
+        if (JSON.stringify(normalized) !== JSON.stringify(currentNorm)) {
+          updateData[key as string] = normalized;
+        }
       };
-      
-      // Include program fields only if they're being changed
-      // Compare with current client values to determine if we need to update
-      const currentStartDate = client.program_start_date 
-        ? new Date(client.program_start_date).toISOString().split('T')[0] 
+
+      setIfChanged('first_name', snapshot.first_name, client.first_name ?? '');
+      setIfChanged('last_name', snapshot.last_name, client.last_name ?? '');
+      setIfChanged('email', snapshot.email || null, client.email ?? null);
+      setIfChanged(
+        'emails',
+        snapshot.emails?.length ? snapshot.emails : null,
+        client.emails?.length ? client.emails : null,
+      );
+      setIfChanged('phone', snapshot.phone, client.phone ?? '');
+      setIfChanged('instagram', snapshot.instagram, client.instagram ?? '');
+      setIfChanged('notes', snapshot.notes, client.notes ?? '');
+
+      const currentStartDate = client.program_start_date
+        ? new Date(client.program_start_date).toISOString().split('T')[0]
         : '';
-      const currentEndDate = client.program_end_date 
-        ? new Date(client.program_end_date).toISOString().split('T')[0] 
+      const currentEndDate = client.program_end_date
+        ? new Date(client.program_end_date).toISOString().split('T')[0]
         : '';
-      
-      // Only include program_start_date if it changed
-      if (formData.program_start_date !== currentStartDate) {
-        if (formData.program_start_date && formData.program_start_date.trim() !== '') {
-          updateData.program_start_date = new Date(formData.program_start_date + 'T00:00:00').toISOString();
+
+      if (snapshot.program_start_date !== currentStartDate) {
+        if (snapshot.program_start_date && snapshot.program_start_date.trim() !== '') {
+          updateData.program_start_date = new Date(snapshot.program_start_date + 'T00:00:00').toISOString();
         } else {
-          updateData.program_start_date = null; // Clear if removed
+          updateData.program_start_date = null;
         }
       }
-      
-      // Only include program_end_date if it changed
-      if (formData.program_end_date !== currentEndDate) {
-        if (formData.program_end_date && formData.program_end_date.trim() !== '') {
-          updateData.program_end_date = new Date(formData.program_end_date + 'T00:00:00').toISOString();
+
+      if (snapshot.program_end_date !== currentEndDate) {
+        if (snapshot.program_end_date && snapshot.program_end_date.trim() !== '') {
+          updateData.program_end_date = new Date(snapshot.program_end_date + 'T00:00:00').toISOString();
         } else {
-          updateData.program_end_date = null; // Clear if removed
+          updateData.program_end_date = null;
         }
       }
 
       const isLeadClient =
-        client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
+        (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(client.lifecycle_state);
       if (isLeadClient) {
         const currentInput = followUpIsoToDateInput(
           typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
         );
-        const nextInput = (formData.follow_up_due_date || '').trim();
+        const nextInput = (snapshot.follow_up_due_date || '').trim();
         if (currentInput !== nextInput) {
           const nextMeta: Record<string, unknown> = {
             ...(client.meta && typeof client.meta === 'object' ? { ...client.meta } : {}),
@@ -281,50 +302,66 @@ export default function ClientDetailDrawer({
               nextMeta.follow_up_due_at = dateInputToFollowUpIso(nextInput);
             } catch {
               alert('Invalid follow-up date');
-              setLoading(false);
+              setSavingFields(false);
               return;
             }
           } else {
             delete nextMeta.follow_up_due_at;
           }
-          updateData.meta = nextMeta as Client['meta'];
+          updateData.meta = nextMeta;
         }
       }
 
+      if (Object.keys(updateData).length === 0) {
+        return;
+      }
+
       const updated = await apiClient.updateClient(client.id, updateData);
-      setIsEditing(false);
-      onClientSaved?.(updated);
-      onUpdate();
+      onClientSaved?.(withNormalizedLifecycle(updated));
     } catch (error) {
       console.error('Failed to update client:', error);
       alert('Failed to update client. Please try again.');
     } finally {
-      setLoading(false);
+      setSavingFields(false);
     }
   };
 
-  const handleCancel = () => {
-    if (client) {
-      setFormData({
-        first_name: client.first_name || '',
-        last_name: client.last_name || '',
-        email: client.email || '',
-        emails: Array.isArray(client.emails) ? [...client.emails] : [],
-        phone: client.phone || '',
-        instagram: client.instagram || '',
-        notes: client.notes || '',
-        program_start_date: client.program_start_date 
-          ? new Date(client.program_start_date).toISOString().split('T')[0] 
-          : '',
-        program_end_date: client.program_end_date 
-          ? new Date(client.program_end_date).toISOString().split('T')[0] 
-          : '',
-        follow_up_due_date: followUpIsoToDateInput(
-          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
-        ),
-      });
+  const handleAdvanceStage = async () => {
+    if (!client || advancingStage) return;
+    const normalizedLifecycle =
+      normalizeLifecycleColumn(client.lifecycle_state) ?? client.lifecycle_state;
+    const nextStage = getNextPipelineStage(normalizedLifecycle);
+    if (!nextStage) return;
+
+    const previous = client;
+    const updateData: Record<string, unknown> = { lifecycle_state: nextStage.id };
+    if (normalizedLifecycle === 'offboarding' && nextStage.id !== 'offboarding') {
+      updateData.program_progress_percent = null;
+      updateData.program_duration_days = null;
+      updateData.program_start_date = null;
+      updateData.program_end_date = null;
     }
-    setIsEditing(false);
+
+    const optimistic = withNormalizedLifecycle({
+      ...client,
+      lifecycle_state: nextStage.id,
+    });
+    onClientSaved?.(optimistic);
+
+    setAdvancingStage(true);
+    try {
+      const updated = await apiClient.updateClient(client.id, updateData);
+      onClientSaved?.(withNormalizedLifecycle(updated));
+    } catch (error: unknown) {
+      onClientSaved?.(previous);
+      console.error('Failed to advance client stage:', error);
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ??
+        'Failed to move client to the next stage. Please try again.';
+      alert(typeof detail === 'string' ? detail : 'Failed to move client to the next stage. Please try again.');
+    } finally {
+      setAdvancingStage(false);
+    }
   };
 
   const handleAddToBrevo = async () => {
@@ -429,32 +466,35 @@ export default function ClientDetailDrawer({
   const followUpBar = useMemo(() => {
     if (!client) return null;
     const isLeadLocal =
-      client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
+      (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(client.lifecycle_state);
     if (!isLeadLocal) return null;
     let effective: Client = client;
-    if (isEditing) {
-      const baseMeta: Record<string, unknown> =
-        client.meta && typeof client.meta === 'object' ? { ...client.meta } : {};
-      const trimmed = formData.follow_up_due_date?.trim();
-      if (trimmed) {
-        try {
-          baseMeta.follow_up_due_at = dateInputToFollowUpIso(trimmed);
-          effective = { ...client, meta: baseMeta as Client['meta'] };
-        } catch {
-          effective = client;
-        }
-      } else {
-        delete baseMeta.follow_up_due_at;
+    const baseMeta: Record<string, unknown> =
+      client.meta && typeof client.meta === 'object' ? { ...client.meta } : {};
+    const trimmed = formData.follow_up_due_date?.trim();
+    if (trimmed) {
+      try {
+        baseMeta.follow_up_due_at = dateInputToFollowUpIso(trimmed);
         effective = { ...client, meta: baseMeta as Client['meta'] };
+      } catch {
+        effective = client;
       }
+    } else {
+      delete baseMeta.follow_up_due_at;
+      effective = { ...client, meta: baseMeta as Client['meta'] };
     }
     return computeLeadFollowUpBar(effective);
-  }, [client, isEditing, formData.follow_up_due_date]);
+  }, [client, formData.follow_up_due_date]);
 
   if (!client) return null;
 
   const isLead =
-    client.lifecycle_state === 'cold_lead' || client.lifecycle_state === 'warm_lead';
+    (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(client.lifecycle_state);
+
+  const normalizedLifecycle =
+    normalizeLifecycleColumn(client.lifecycle_state) ?? client.lifecycle_state;
+  const nextStage = getNextPipelineStage(normalizedLifecycle);
+  const currentStageTitle = getPipelineStageTitle(normalizedLifecycle);
 
   const formatDate = (date: string | null | undefined) => {
     if (!date) return 'Never';
@@ -469,6 +509,11 @@ export default function ClientDetailDrawer({
   };
 
   const totalPaid = payments?.total_amount_paid || (client?.lifetime_revenue_cents ?? 0) / 100;
+  const recordedPaidCents =
+    payments?.total_amount_paid_cents ?? client?.lifetime_revenue_cents ?? 0;
+  const planContractCents = client.offer_enrollment?.total_cents ?? 0;
+  const planOwedCents =
+    planContractCents > 0 ? Math.max(0, planContractCents - recordedPaidCents) : null;
 
   return (
     <>
@@ -510,27 +555,12 @@ export default function ClientDetailDrawer({
                         <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
                           Client Profile
                         </Dialog.Title>
-                        {isEditing ? (
                             <div className="flex items-center gap-2 flex-shrink-0">
-                              <button
-                                type="button"
-                                onClick={handleCancel}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 rounded-lg transition-colors border border-transparent"
-                                disabled={loading}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                onClick={handleSave}
-                                disabled={loading}
-                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 rounded-lg transition-colors shadow-sm disabled:opacity-50"
-                              >
-                                {loading ? 'Saving...' : 'Save'}
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {savingFields ? (
+                                <span className="text-xs text-gray-400 dark:text-gray-500" aria-live="polite">
+                                  Saving…
+                                </span>
+                              ) : null}
                               {client?.first_name && client?.last_name && brevoStatus?.connected && (
                                 clientInBrevo && getAllClientEmails(client).length > 0 ? (
                                   <button
@@ -571,17 +601,22 @@ export default function ClientDetailDrawer({
                                 </svg>
                                 Calendar
                               </button>
-                              <button
-                                type="button"
-                                onClick={() => setIsEditing(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors"
-                                title="Edit client details"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                </svg>
-                                Edit
-                              </button>
+                              {nextStage ? (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleAdvanceStage()}
+                                  disabled={advancingStage || savingFields}
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50"
+                                  title={`Move from ${currentStageTitle} to ${nextStage.title}`}
+                                >
+                                  <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                                  </svg>
+                                  <span className="truncate max-w-[10rem] sm:max-w-none">
+                                    {advancingStage ? 'Moving…' : `→ ${nextStage.title}`}
+                                  </span>
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 onClick={onClose}
@@ -593,7 +628,6 @@ export default function ClientDetailDrawer({
                                 </svg>
                               </button>
                             </div>
-                          )}
                         </div>
                     </div>
 
@@ -605,6 +639,7 @@ export default function ClientDetailDrawer({
                           refreshToken={healthRefreshToken}
                           showChecklist={false}
                           onClientUpdated={onUpdate}
+                          onClientPatched={onClientSaved}
                           onOpenEmailComposerWithDraft={(draft) => {
                             const emails = getAllClientEmails(client);
                             if (emails.length === 0) {
@@ -676,126 +711,106 @@ export default function ClientDetailDrawer({
                             <dl className="space-y-4">
                             <div>
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">First Name</dt>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={formData.first_name}
-                                  onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.first_name || 'N/A'}
-                                </dd>
-                              )}
+                              <input
+                                type="text"
+                                value={formData.first_name}
+                                onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
                             </div>
 
                             <div>
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Last Name</dt>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={formData.last_name}
-                                  onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.last_name || 'N/A'}
-                                </dd>
-                              )}
+                              <input
+                                type="text"
+                                value={formData.last_name}
+                                onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
                             </div>
 
                             <div>
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Primary email</dt>
-                              {isEditing ? (
-                                <input
-                                  type="email"
-                                  value={formData.email}
-                                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.email || 'N/A'}
-                                </dd>
-                              )}
+                              <input
+                                type="email"
+                                value={formData.email}
+                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
                             </div>
 
                             <div className="md:col-span-2">
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Additional emails</dt>
-                              {isEditing ? (
-                                <div className="space-y-2">
-                                  {formData.emails.map((e, i) => (
-                                    <div key={i} className="flex gap-2 items-center">
-                                      <input
-                                        type="email"
-                                        value={e}
-                                        onChange={(ev) => {
-                                          const next = [...formData.emails];
-                                          next[i] = ev.target.value;
-                                          setFormData({ ...formData, emails: next });
-                                        }}
-                                        className="flex-1 rounded-md glass-input focus:ring-blue-500 sm:text-sm"
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => setFormData({ ...formData, emails: formData.emails.filter((_, j) => j !== i) })}
-                                        className="text-red-400 hover:text-red-600 text-sm"
-                                      >
-                                        Remove
-                                      </button>
-                                    </div>
-                                  ))}
-                                  <button
-                                    type="button"
-                                    onClick={() => setFormData({ ...formData, emails: [...formData.emails, ''] })}
-                                    className="text-sm text-primary-500 hover:text-primary-600"
-                                  >
-                                    + Add email
-                                  </button>
-                                </div>
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {(client.emails && client.emails.length > 0) ? client.emails.join(', ') : 'None'}
-                                </dd>
-                              )}
+                              <div className="space-y-2">
+                                {formData.emails.map((e, i) => (
+                                  <div key={i} className="flex gap-2 items-center">
+                                    <input
+                                      type="email"
+                                      value={e}
+                                      onChange={(ev) => {
+                                        const next = [...formData.emails];
+                                        next[i] = ev.target.value;
+                                        setFormData({ ...formData, emails: next });
+                                      }}
+                                      onBlur={fieldBlurSave}
+                                      className="flex-1 rounded-md glass-input focus:ring-blue-500 sm:text-sm"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const next = {
+                                          ...formData,
+                                          emails: formData.emails.filter((_, j) => j !== i),
+                                        };
+                                        setFormData(next);
+                                        void saveClientFields(next);
+                                      }}
+                                      className="text-red-400 hover:text-red-600 text-sm"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ))}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = { ...formData, emails: [...formData.emails, ''] };
+                                    setFormData(next);
+                                  }}
+                                  className="text-sm text-primary-500 hover:text-primary-600"
+                                >
+                                  + Add email
+                                </button>
+                              </div>
                             </div>
 
                             <div>
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Phone / SMS</dt>
-                              {isEditing ? (
-                                <input
-                                  type="tel"
-                                  value={formData.phone}
-                                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                  placeholder="+1234567890"
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.phone || 'N/A'}
-                                </dd>
-                              )}
+                              <input
+                                type="tel"
+                                value={formData.phone}
+                                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                placeholder="+1234567890"
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
                             </div>
                           </dl>
                           
                           <dl className="space-y-4">
                             <div>
                               <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Instagram</dt>
-                              {isEditing ? (
-                                <input
-                                  type="text"
-                                  value={formData.instagram}
-                                  onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                                  placeholder="@username"
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                              ) : (
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.instagram ? (client.instagram.startsWith('@') ? client.instagram : `@${client.instagram}`) : 'N/A'}
-                                </dd>
-                              )}
+                              <input
+                                type="text"
+                                value={formData.instagram}
+                                onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                placeholder="@username"
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
                             </div>
                           </dl>
                           </div>
@@ -804,30 +819,73 @@ export default function ClientDetailDrawer({
                         {/* Financial Summary */}
                         <div className="border-t border-gray-200 dark:border-white/10 pt-6">
                           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Financial Summary</h3>
-                          <dl className="space-y-4">
+                          <dl className="space-y-3">
                             <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Total Amount Paid</dt>
-                              <dd className="mt-1 text-lg font-semibold text-gray-900 dark:text-gray-100">
+                              <dt className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                                Total amount paid
+                              </dt>
+                              <dd className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
                                 {formatCurrency(totalPaid)}
                               </dd>
+                              <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
+                                Plan “paid” matches this total.
+                              </p>
                             </div>
 
+                            {client.offer_enrollment?.slot && planContractCents > 0 && (
+                              <div className="rounded-lg bg-gray-50/80 dark:bg-white/[0.04] px-3 py-2 space-y-1">
+                                <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
+                                  Offer plan
+                                </dt>
+                                <dd className="text-sm text-gray-900 dark:text-gray-100">
+                                  {client.offer_enrollment.name_snapshot ||
+                                    client.offer_enrollment.slot.replace(/:/g, ' · ')}
+                                </dd>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums text-gray-700 dark:text-gray-300">
+                                  <span>
+                                    Contract{' '}
+                                    <strong>{formatCurrency(planContractCents / 100)}</strong>
+                                  </span>
+                                  <span>
+                                    Paid <strong>{formatCurrency(recordedPaidCents / 100)}</strong>
+                                  </span>
+                                  {planOwedCents != null && (
+                                    <span className="text-gray-900 dark:text-gray-100">
+                                      Owed <strong>{formatCurrency(planOwedCents / 100)}</strong>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+
                             <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Estimated MRR</dt>
-                              <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                              <dt className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                                Estimated MRR
+                              </dt>
+                              <dd className="mt-0.5 text-sm tabular-nums text-gray-900 dark:text-gray-100">
                                 {formatCurrency(client.estimated_mrr || 0)}
                               </dd>
                             </div>
 
                             {client.stripe_customer_id && (
                               <div>
-                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Stripe Customer ID</dt>
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100 font-mono">
+                                <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">Stripe Customer ID</dt>
+                                <dd className="mt-1 text-xs text-gray-900 dark:text-gray-100 font-mono break-all">
                                   {client.stripe_customer_id}
                                 </dd>
                               </div>
                             )}
                           </dl>
+
+                          <OfferEnrollmentSection
+                            client={client}
+                            recordedPaidCents={recordedPaidCents}
+                            minimal
+                            onSaved={(updated) => {
+                              if (updated) onClientSaved?.(updated);
+                              else void loadPayments();
+                            }}
+                          />
                         </div>
 
                         {/* Check-Ins Section */}
@@ -934,7 +992,7 @@ export default function ClientDetailDrawer({
                                     loadPayments();
                                     onUpdate();
                                     // Dispatch custom event to refresh cash collected
-                                    window.dispatchEvent(new CustomEvent('manualPaymentCreated'));
+                                    dispatchManualPaymentCreated();
                                   } catch (error: any) {
                                     console.error('Failed to create manual payment:', error);
                                     alert(error?.response?.data?.detail || 'Failed to create manual payment');
@@ -1123,132 +1181,103 @@ export default function ClientDetailDrawer({
                         <div className="border-t border-gray-200 dark:border-white/10 pt-6">
                           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Program Timeline</h3>
                           <dl className="space-y-4">
-                            {isEditing ? (
-                              <>
-                                <div>
-                                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Program Start Date</dt>
-                                  <input
-                                    type="date"
-                                    value={formData.program_start_date}
-                                    onChange={(e) => setFormData({ ...formData, program_start_date: e.target.value })}
-                                    className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                  />
-                                </div>
-                                <div>
-                                  <dt className="text-sm font-medium text-gray-500 mb-1">Program End Date</dt>
-                                  <input
-                                    type="date"
-                                    value={formData.program_end_date}
-                                    onChange={(e) => setFormData({ 
-                                      ...formData, 
-                                      program_end_date: e.target.value 
-                                    })}
-                                    min={formData.program_start_date || undefined}
-                                    className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                  />
-                                  <p className="mt-1 text-xs text-gray-500">
-                                    Client will automatically move to offboarding at 75% and dead when expired
-                                  </p>
-                                </div>
-                                {isLead && (
-                                  <div>
-                                    <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">
-                                      Follow-up due date
-                                    </dt>
-                                    <input
-                                      type="date"
-                                      value={formData.follow_up_due_date}
-                                      onChange={(e) =>
-                                        setFormData({ ...formData, follow_up_due_date: e.target.value })
-                                      }
-                                      className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                    />
-                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                      Optional. Clear the field to use a 14-day window from last activity (see
-                                      timer below). Dates use your local calendar day.
-                                    </p>
-                                  </div>
-                                )}
-                              </>
-                            ) : (
-                              <>
-                                {client.program_start_date && client.program_end_date ? (
-                                  <>
-                                    <div>
-                                      <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Program Start Date</dt>
-                                      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                        {formatDate(client.program_start_date)}
-                                      </dd>
-                                    </div>
-                                    <div>
-                                      <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Program End Date</dt>
-                                      <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                        {formatDate(client.program_end_date)}
-                                      </dd>
-                                    </div>
-                                    {client.program_duration_days && (
-                                      <div>
-                                        <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Program Duration</dt>
-                                        <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                          {client.program_duration_days} days
-                                        </dd>
-                                      </div>
-                                    )}
-                                    {!isLead &&
-                                      client.program_progress_percent !== undefined &&
-                                      client.program_progress_percent !== null && (
-                                        <div>
-                                          <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
-                                          <dd className="mt-1">
-                                            <div className="space-y-1">
-                                              <div className="flex items-center justify-between text-sm">
-                                                <span className="text-gray-900 dark:text-gray-100">
-                                                  {client.program_progress_percent.toFixed(1)}% Complete
-                                                </span>
-                                                <span className="text-gray-500 dark:text-gray-100">
-                                                  {client.program_progress_percent >= 100
-                                                    ? 'Expired'
-                                                    : client.program_progress_percent >= 75
-                                                      ? 'Offboarding'
-                                                      : 'Active'}
-                                                </span>
-                                              </div>
-                                              <div className="w-full bg-gray-200 rounded-full h-3">
-                                                <div
-                                                  className={`h-3 rounded-full transition-all ${
-                                                    client.program_progress_percent >= 100
-                                                      ? 'bg-red-500'
-                                                      : client.program_progress_percent >= 75
-                                                        ? 'bg-yellow-500'
-                                                        : 'bg-blue-500'
-                                                  }`}
-                                                  style={{
-                                                    width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%`,
-                                                  }}
-                                                />
-                                              </div>
-                                            </div>
-                                          </dd>
-                                        </div>
-                                      )}
-                                  </>
-                                ) : !isLead ? (
-                                  <div className="text-sm text-gray-500 dark:text-gray-100">
-                                    No program timeline set. Client will remain in current state unless manually moved.
-                                  </div>
-                                ) : null}
-                              </>
-                            )}
-                            {isLead && followUpBar && (
+                            <div>
+                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Program Start Date</dt>
+                              <input
+                                type="date"
+                                value={formData.program_start_date}
+                                onChange={(e) => setFormData({ ...formData, program_start_date: e.target.value })}
+                                onBlur={fieldBlurSave}
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
+                            </div>
+                            <div>
+                              <dt className="text-sm font-medium text-gray-500 mb-1">Program End Date</dt>
+                              <input
+                                type="date"
+                                value={formData.program_end_date}
+                                onChange={(e) =>
+                                  setFormData({
+                                    ...formData,
+                                    program_end_date: e.target.value,
+                                  })
+                                }
+                                onBlur={fieldBlurSave}
+                                min={formData.program_start_date || undefined}
+                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                              />
+                              <p className="mt-1 text-xs text-gray-500">
+                                Client will automatically move to offboarding at 75% and dead when expired
+                              </p>
+                            </div>
+                            {client.program_duration_days ? (
                               <div>
-                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">
-                                  Follow-up
-                                  {isEditing && (
-                                    <span className="ml-2 font-normal text-gray-400 dark:text-gray-500">
-                                      (live preview)
-                                    </span>
-                                  )}
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Program Duration</dt>
+                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
+                                  {client.program_duration_days} days
+                                </dd>
+                              </div>
+                            ) : null}
+                            {!isLead &&
+                              client.program_progress_percent !== undefined &&
+                              client.program_progress_percent !== null && (
+                                <div>
+                                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
+                                  <dd className="mt-1">
+                                    <div className="space-y-1">
+                                      <div className="flex items-center justify-between text-sm">
+                                        <span className="text-gray-900 dark:text-gray-100">
+                                          {client.program_progress_percent.toFixed(1)}% Complete
+                                        </span>
+                                        <span className="text-gray-500 dark:text-gray-100">
+                                          {client.program_progress_percent >= 100
+                                            ? 'Expired'
+                                            : client.program_progress_percent >= 75
+                                              ? 'Offboarding'
+                                              : 'Active'}
+                                        </span>
+                                      </div>
+                                      <div className="w-full bg-gray-200 rounded-full h-3">
+                                        <div
+                                          className={`h-3 rounded-full transition-all ${
+                                            client.program_progress_percent >= 100
+                                              ? 'bg-red-500'
+                                              : client.program_progress_percent >= 75
+                                                ? 'bg-yellow-500'
+                                                : 'bg-blue-500'
+                                          }`}
+                                          style={{
+                                            width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%`,
+                                          }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </dd>
+                                </div>
+                              )}
+                            {isLead ? (
+                              <div>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">
+                                  Follow-up due date
                                 </dt>
+                                <input
+                                  type="date"
+                                  value={formData.follow_up_due_date}
+                                  onChange={(e) =>
+                                    setFormData({ ...formData, follow_up_due_date: e.target.value })
+                                  }
+                                  onBlur={fieldBlurSave}
+                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                />
+                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                  Optional. Clear the field to use a 14-day window from last activity (see timer
+                                  below). Dates use your local calendar day.
+                                </p>
+                              </div>
+                            ) : null}
+                            {isLead && followUpBar ? (
+                              <div>
+                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Follow-up</dt>
                                 <dd className="mt-1">
                                   <div
                                     className="space-y-1"
@@ -1286,26 +1315,21 @@ export default function ClientDetailDrawer({
                                   </div>
                                 </dd>
                               </div>
-                            )}
+                            ) : null}
                           </dl>
                         </div>
 
                         {/* Notes */}
                         <div className="border-t border-gray-200 dark:border-white/10 pt-6">
                           <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Notes</h3>
-                          {isEditing ? (
-                            <textarea
-                              value={formData.notes}
-                              onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                              rows={6}
-                              className="block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              placeholder="Add notes about this client..."
-                            />
-                          ) : (
-                            <div className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap">
-                              {client.notes || 'No notes'}
-                            </div>
-                          )}
+                          <textarea
+                            value={formData.notes}
+                            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                            onBlur={fieldBlurSave}
+                            rows={6}
+                            className="block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                            placeholder="Add notes about this client..."
+                          />
                         </div>
 
                         {/* Metadata */}

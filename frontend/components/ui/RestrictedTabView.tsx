@@ -1,23 +1,11 @@
+import { TAB_DISPLAY_NAMES } from '@/lib/tabs';
+
 interface RestrictedTabViewProps {
   tabName: string;
 }
 
 export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
-  const tabDisplayNames: Record<string, string> = {
-    terminal: 'Terminal',
-    clients: 'Clients',
-    stripe: 'Stripe',
-    finances: 'Finances',
-    funnels: 'Funnels',
-    performance: 'Performance',
-    content_studio: 'Marketing Intel',
-    call_library: 'Call Library',
-    integrations: 'Integrations',
-    users: 'Users',
-    intelligence: 'Intelligence',
-  };
-
-  const displayName = tabDisplayNames[tabName] || tabName;
+  const displayName = TAB_DISPLAY_NAMES[tabName] || tabName;
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -65,4 +53,3 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
     </div>
   );
 }
-

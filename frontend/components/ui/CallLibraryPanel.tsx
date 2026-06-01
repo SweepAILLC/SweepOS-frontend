@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiClient, CallLibraryItem } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import { useLoading } from '@/contexts/LoadingContext';
 import { APP_CALL_LIBRARY_SIDEBAR_WIDTH } from '@/components/ui/layoutConstants';
-import { usePerformanceDrawer } from '@/components/ui/PerformanceDrawer';
 
 // Local keyframes for shimmer (Tailwind arbitrary animations need a defined keyframe name)
 // Kept here to avoid touching global CSS.
@@ -43,9 +43,64 @@ function formatCtx(ctx: Record<string, unknown> | undefined): string {
   return parts.join(' ');
 }
 
+const BILLING_SUFFIX: Record<string, string> = {
+  recurring_monthly: '/mo',
+  recurring_annual: '/yr',
+};
+
+function formatClosedAmount(item: Pick<CallLibraryItem, 'deal_value_cents' | 'deal_currency' | 'deal_billing'>): string {
+  const cents = item.deal_value_cents;
+  if (typeof cents !== 'number' || !Number.isFinite(cents) || cents <= 0) {
+    return 'Closed';
+  }
+  const amount = cents / 100;
+  const currency = (item.deal_currency || 'USD').toUpperCase();
+  let body: string;
+  try {
+    body = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: amount >= 1000 ? 0 : 2,
+    }).format(amount);
+  } catch {
+    body = `${currency} ${amount.toLocaleString()}`;
+  }
+  const suffix = item.deal_billing ? BILLING_SUFFIX[item.deal_billing] || '' : '';
+  return `${body}${suffix}`;
+}
+
+function ClosedDealBadge({
+  item,
+  size = 'sm',
+}: {
+  item: Pick<CallLibraryItem, 'deal_closed' | 'deal_value_cents' | 'deal_currency' | 'deal_billing'>;
+  size?: 'xs' | 'sm';
+}) {
+  if (!item.deal_closed) return null;
+  const label = formatClosedAmount(item);
+  const cls =
+    size === 'xs'
+      ? 'text-[10px] px-1.5 py-0.5'
+      : 'text-xs px-2 py-0.5';
+  return (
+    <span
+      title={label === 'Closed' ? 'Sale closed on this call (amount not stated)' : `Sale closed on this call: ${label}`}
+      className={[
+        'inline-flex items-center gap-1 rounded-full font-semibold tabular-nums',
+        'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/30',
+        cls,
+      ].join(' ')}
+    >
+      <svg viewBox="0 0 16 16" className="w-3 h-3" fill="currentColor" aria-hidden>
+        <path d="M6.173 11.59 3.36 8.778a.75.75 0 1 1 1.06-1.06l2.282 2.281 4.878-4.878a.75.75 0 1 1 1.06 1.06l-5.408 5.41a.75.75 0 0 1-1.06 0Z" />
+      </svg>
+      <span>{label}</span>
+    </span>
+  );
+}
+
 export default function CallLibraryPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
-  const perfDrawer = usePerformanceDrawer();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,10 +108,12 @@ export default function CallLibraryPanel() {
   const [data, setData] = useState<{ items: CallLibraryItem[]; total: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [refreshPulse, setRefreshPulse] = useState(0);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [postSyncPollUntilMs, setPostSyncPollUntilMs] = useState<number | null>(null);
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const itemsSorted = (data?.items ?? []).slice().sort((a, b) => {
     const da = a.meeting_at || a.computed_at || '';
@@ -106,6 +163,7 @@ export default function CallLibraryPanel() {
     setRefreshing(true);
     setRefreshPulse((x) => x + 1);
     setRefreshNote(null);
+    setRefreshError(null);
     try {
       // Refresh should *sync* from Fathom first, then reload the library.
       // The backend only ingests meetings associated to client emails for this org.
@@ -168,6 +226,10 @@ export default function CallLibraryPanel() {
       }
       note += llmNote;
       setRefreshNote(note.trim());
+    } catch (e: unknown) {
+      setRefreshError(
+        formatApiError(e, 'Could not refresh Call Library. Check your connection, confirm Fathom is connected, and try again.')
+      );
     } finally {
       setRefreshing(false);
     }
@@ -206,16 +268,13 @@ export default function CallLibraryPanel() {
     const t = renameDraft.trim();
     if (!t) return;
     setRenameSaving(true);
+    setRenameError(null);
     try {
       await apiClient.patchCallLibraryReport(selectedItem.id, t);
       setRenaming(false);
       await load();
     } catch (e: unknown) {
-      const msg =
-        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e as Error)?.message ||
-        'Could not rename';
-      alert(String(msg));
+      setRenameError(formatApiError(e, 'Could not save this name.'));
     } finally {
       setRenameSaving(false);
     }
@@ -253,6 +312,18 @@ export default function CallLibraryPanel() {
             {error}
           </div>
         )}
+        {refreshError ? (
+          <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm mb-4 flex flex-wrap items-start justify-between gap-2">
+            <span>{refreshError}</span>
+            <button
+              type="button"
+              className="text-xs font-medium underline underline-offset-2 shrink-0"
+              onClick={() => setRefreshError(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
         {refreshNote && !error ? (
           <div className="glass-card border border-violet-500/20 text-gray-700 dark:text-gray-200 px-4 py-3 rounded-xl text-sm mb-4">
             {refreshNote}
@@ -269,7 +340,7 @@ export default function CallLibraryPanel() {
             <aside
               className={`hidden lg:flex fixed top-0 bottom-0 z-[44] ${APP_CALL_LIBRARY_SIDEBAR_WIDTH} flex-col glass-panel border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-[left] duration-300 ease-out`}
               aria-label="Call Library list"
-              style={{ left: perfDrawer?.isOpen ? 'calc(14rem + 24rem)' : '14rem' }}
+              style={{ left: '14rem' }}
             >
               <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10 flex items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -281,6 +352,7 @@ export default function CallLibraryPanel() {
                   className="glass-button-secondary px-3 py-1.5 rounded-md text-xs disabled:opacity-60"
                   onClick={() => void refresh()}
                   disabled={refreshing}
+                  aria-busy={refreshing}
                   aria-label="Refresh calls"
                 >
                   <span
@@ -357,6 +429,9 @@ export default function CallLibraryPanel() {
                                 {Math.round(item.call_score)}
                               </span>
                             ) : null}
+                            {item.status === 'complete' ? (
+                              <ClosedDealBadge item={item} size="xs" />
+                            ) : null}
                             {isPending ? (
                               <span className="text-[10px] text-amber-700 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full">
                                 Analyzing…
@@ -378,10 +453,25 @@ export default function CallLibraryPanel() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Calls</p>
                 <button
                   type="button"
-                  className="glass-button-secondary px-3 py-1.5 rounded-md text-xs disabled:opacity-60"
+                  className="glass-button-secondary inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs disabled:opacity-60"
                   onClick={() => void refresh()}
                   disabled={refreshing}
+                  aria-busy={refreshing}
                 >
+                  <svg
+                    className={['w-4 h-4', refreshing ? 'animate-spin' : ''].join(' ')}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    aria-hidden
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.34 6.34M4 15a8 8 0 0013.66 2.66"
+                    />
+                  </svg>
                   {refreshing ? 'Refreshing…' : 'Refresh'}
                 </button>
               </div>
@@ -400,7 +490,12 @@ export default function CallLibraryPanel() {
                         ].join(' ')}
                         onClick={() => setSelectedId(item.id)}
                       >
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{item.call_title}</p>
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{item.call_title}</p>
+                          {item.status === 'complete' ? (
+                            <ClosedDealBadge item={item} size="xs" />
+                          ) : null}
+                        </div>
                         <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                           {item.meeting_at ? new Date(item.meeting_at).toLocaleString() : '—'}
                           {item.client_name ? ` · ${item.client_name}` : ''}
@@ -453,6 +548,7 @@ export default function CallLibraryPanel() {
                               onClick={() => {
                                 setRenaming(false);
                                 setRenameDraft(selectedItem.call_title);
+                                setRenameError(null);
                               }}
                               disabled={renameSaving}
                               className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
@@ -460,6 +556,9 @@ export default function CallLibraryPanel() {
                               Cancel
                             </button>
                           </div>
+                          {renameError ? (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-2">{renameError}</p>
+                          ) : null}
                         </div>
                       ) : (
                         <div className="flex items-start gap-2 group">
@@ -523,8 +622,14 @@ export default function CallLibraryPanel() {
                           Open recording
                         </a>
                       ) : null}
+                      {selectedItem.status === 'complete' ? (
+                        <ClosedDealBadge item={selectedItem} size="sm" />
+                      ) : null}
                       {selectedItem.call_score != null && selectedItem.status === 'complete' ? (
-                        <span className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400">
+                        <span
+                          title="Sales call quality score (0-100)"
+                          className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400"
+                        >
                           {Math.round(selectedItem.call_score)}
                         </span>
                       ) : null}
@@ -586,6 +691,40 @@ export default function CallLibraryPanel() {
                           {formatCtx(selectedItem.report.call_context as Record<string, unknown>)}
                         </p>
                       </section>
+
+                      {selectedItem.deal_closed ? (
+                        <section className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+                              Deal closed on this call
+                            </h4>
+                            <ClosedDealBadge item={selectedItem} size="sm" />
+                          </div>
+                          {(() => {
+                            const outcome =
+                              (selectedItem.report?.deal_outcome as
+                                | { evidence?: unknown; confidence?: unknown }
+                                | undefined) || undefined;
+                            const evidence = outcome?.evidence ? String(outcome.evidence) : '';
+                            const confidence = outcome?.confidence ? String(outcome.confidence) : '';
+                            if (!evidence && !confidence) return null;
+                            return (
+                              <div className="mt-2 space-y-1">
+                                {evidence ? (
+                                  <p className="text-xs italic text-gray-600 dark:text-gray-300 border-l-2 border-emerald-500/40 pl-2 leading-relaxed">
+                                    “{evidence}”
+                                  </p>
+                                ) : null}
+                                {confidence ? (
+                                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                    Confidence: {confidence}
+                                  </p>
+                                ) : null}
+                              </div>
+                            );
+                          })()}
+                        </section>
+                      ) : null}
 
                       <section>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400 mb-2">

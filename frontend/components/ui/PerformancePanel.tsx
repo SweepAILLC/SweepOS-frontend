@@ -1,7 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { apiClient, PerformanceSnapshot, PerformanceTask, PerformanceTaskEmailDraft } from '@/lib/api';
+import {
+  apiClient,
+  AutomationPlaybook,
+  OutreachInboxItem,
+  PerformanceSnapshot,
+  PerformanceTask,
+  PerformanceTaskEmailDraft,
+} from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import { useLoading } from '@/contexts/LoadingContext';
 import PerformancePipelineMini from '@/components/ui/PerformancePipelineMini';
 import EmailComposer from '@/components/brevo/EmailComposer';
@@ -18,6 +26,49 @@ type ComposerPayload = {
 const AUTO_EMAIL_DRAFT_CAP = 6;
 /** How long a just-completed priority stays in the open list with a checked visual before moving to Completed. */
 const COMPLETE_VISUAL_GRACE_MS = 850;
+
+/**
+ * Each automation playbook maps to one or more focus tags that overlap with Performance
+ * task ROI tags. Used both for the focus chips on approval rows and to dedupe Performance
+ * tasks that recommend the same outreach for the same client (no double to-dos).
+ */
+const PLAYBOOK_FOCUS_TAGS: Record<AutomationPlaybook, string[]> = {
+  pre_sale_post_booking: ['onboarding', 'sales_call_prep'],
+  first_payment_onboarding: ['onboarding'],
+  first_payment_referral: ['referral'],
+  win_combined_ask: ['referral', 'upsell', 'testimonial'],
+  offboarding_recap_ask: ['offboarding', 'win_back', 're_sign'],
+};
+
+const PLAYBOOK_LABEL: Record<AutomationPlaybook, string> = {
+  pre_sale_post_booking: 'Post-booking · pre-sale primer',
+  first_payment_onboarding: 'Onboarding email',
+  first_payment_referral: 'Referral ask · first payment',
+  win_combined_ask: 'Win-detected combined ask',
+  offboarding_recap_ask: 'Offboarding recap & ask',
+};
+
+const FOCUS_TAG_LABEL: Record<string, string> = {
+  referral: 'Referral',
+  upsell: 'Upsell',
+  testimonial: 'Testimonial',
+  onboarding: 'Onboarding',
+  offboarding: 'Offboarding',
+  win_back: 'Win back',
+  re_sign: 'Re-sign',
+  conversion: 'Conversion',
+  deal_follow_up: 'Deal follow-up',
+  revive: 'Revive',
+};
+
+function focusTagsForPlaybook(playbook?: AutomationPlaybook | null): string[] {
+  if (!playbook) return [];
+  return PLAYBOOK_FOCUS_TAGS[playbook] ?? [];
+}
+
+function focusChipLabel(tag: string): string {
+  return FOCUS_TAG_LABEL[tag] ?? tag.replace(/_/g, ' ');
+}
 
 function recipientsForTask(
   task: PerformanceTask,
@@ -61,11 +112,11 @@ function formatPct(n: number | undefined | null): string {
 }
 
 interface PerformancePanelProps {
-  /** In the global drawer, hide the large title (drawer chrome already shows "Performance"). */
-  variant?: 'default' | 'drawer';
+  /** `embedded` — inline in Terminal tab; `standalone` — full-width page (legacy). */
+  variant?: 'embedded' | 'standalone' | 'drawer';
 }
 
-export default function PerformancePanel({ variant = 'default' }: PerformancePanelProps) {
+export default function PerformancePanel({ variant = 'standalone' }: PerformancePanelProps) {
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,6 +145,12 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
   /** Task ids that are persisted as completed but still shown under open priorities until grace elapses. */
   const [completingGraceIds, setCompletingGraceIds] = useState<Set<string>>(() => new Set());
   const completingGraceTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  /** Automation jobs awaiting human approval — rendered at the top of the priority list. */
+  const [approvals, setApprovals] = useState<OutreachInboxItem[]>([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState<Record<string, 'approve' | 'decline' | undefined>>({});
+  const [approvalError, setApprovalError] = useState<string | null>(null);
 
   const clearAllCompletingGrace = useCallback(() => {
     completingGraceTimersRef.current.forEach((t) => clearTimeout(t));
@@ -260,11 +317,7 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
         }
         return data;
       } catch (e: unknown) {
-        const msg =
-          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-          (e as Error)?.message ||
-          'Failed to load performance data';
-        setError(String(msg));
+        setError(formatApiError(e, 'Failed to load performance data'));
         if (!hasSnapshotDataRef.current) {
           setSnap(null);
           setTasks([]);
@@ -277,14 +330,96 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
     [clearAllCompletingGrace, requestPrescriptionsAndDrafts, setGlobalLoading]
   );
 
+  /** Pull only the awaiting-approval portion of the unified inbox; performance tasks come from the snapshot. */
+  const loadApprovals = useCallback(async () => {
+    setApprovalsLoading(true);
+    setApprovalError(null);
+    try {
+      const res = await apiClient.getOutreachInbox({
+        include_performance: false,
+        include_automations: true,
+        limit: 100,
+      });
+      const pending = (res.items || []).filter(
+        (it) => it.source === 'automation_job' && it.requires_approval,
+      );
+      setApprovals(pending);
+    } catch (e: unknown) {
+      const msg =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (e as Error)?.message ||
+        'Could not load automation approvals';
+      setApprovalError(String(msg));
+    } finally {
+      setApprovalsLoading(false);
+    }
+  }, []);
+
+  const onApproveAutomation = useCallback(
+    async (item: OutreachInboxItem) => {
+      const jobId = item.id.replace(/^automation:/, '');
+      setApprovalBusy((m) => ({ ...m, [item.id]: 'approve' }));
+      setApprovalError(null);
+      try {
+        await apiClient.updateAutomationJobState(jobId, 'ready');
+        setApprovals((curr) => curr.filter((i) => i.id !== item.id));
+      } catch (e: unknown) {
+        const msg =
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          (e as Error)?.message ||
+          'Could not approve';
+        setApprovalError(String(msg));
+        await loadApprovals();
+      } finally {
+        setApprovalBusy((m) => {
+          const next = { ...m };
+          delete next[item.id];
+          return next;
+        });
+      }
+    },
+    [loadApprovals],
+  );
+
+  const onDeclineAutomation = useCallback(
+    async (item: OutreachInboxItem) => {
+      const jobId = item.id.replace(/^automation:/, '');
+      setApprovalBusy((m) => ({ ...m, [item.id]: 'decline' }));
+      setApprovalError(null);
+      try {
+        await apiClient.updateAutomationJobState(jobId, 'canceled');
+        setApprovals((curr) => curr.filter((i) => i.id !== item.id));
+      } catch (e: unknown) {
+        const msg =
+          (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+          (e as Error)?.message ||
+          'Could not decline';
+        setApprovalError(String(msg));
+        await loadApprovals();
+      } finally {
+        setApprovalBusy((m) => {
+          const next = { ...m };
+          delete next[item.id];
+          return next;
+        });
+      }
+    },
+    [loadApprovals],
+  );
+
   const handleReanalyze = useCallback(async () => {
     if (reanalyzing) return;
     setReanalyzing(true);
     setReanalyzeNotice(null);
+    void loadApprovals();
+    const notices: string[] = [];
     try {
+      // loadSnapshot swallows API errors and returns null (it also sets panel `error` state).
       const data = await loadSnapshot({ runFollowups: false });
       if (!data) {
-        setReanalyzeNotice('Could not refresh — try again in a moment.');
+        notices.push(
+          'Could not refresh pipeline snapshot. Check your connection, reload if needed, and try Re-analyze again.'
+        );
         return;
       }
       // Force a fresh prescription pass.
@@ -304,7 +439,9 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       } catch (e: unknown) {
         const status = (e as { response?: { status?: number } })?.response?.status;
         if (status === 429) {
-          setReanalyzeNotice('Rate limit reached for AI re-analysis — try again shortly.');
+          notices.push('Rate limit reached for AI re-analysis — try again shortly.');
+        } else {
+          notices.push(formatApiError(e, 'AI prescriptions could not be refreshed.'));
         }
         setRxStatus('skipped');
       }
@@ -323,14 +460,19 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
         } catch (e: unknown) {
           const status = (e as { response?: { status?: number } })?.response?.status;
           if (status === 429) {
-            setReanalyzeNotice('Rate limit reached for email drafts — try again shortly.');
+            notices.push('Rate limit reached for email drafts — try again shortly.');
+          } else {
+            notices.push(formatApiError(e, 'Email drafts could not be regenerated.'));
           }
         }
       }
     } finally {
       setReanalyzing(false);
+      if (notices.length) {
+        setReanalyzeNotice(notices.filter(Boolean).join(' — '));
+      }
     }
-  }, [generateDraftsBatch, loadSnapshot, reanalyzing]);
+  }, [generateDraftsBatch, loadApprovals, loadSnapshot, reanalyzing]);
 
   const generateDraftForTask = useCallback(
     async (taskId: string, { force = false }: { force?: boolean } = {}) => {
@@ -409,9 +551,51 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
     loadSnapshot();
   }, [loadSnapshot]);
 
+  useEffect(() => {
+    void loadApprovals();
+  }, [loadApprovals]);
+
+  /**
+   * For each pending automation approval, build a (client_id → focus_tag set) map.
+   * A Performance task is suppressed from the open list when the same client already
+   * has an awaiting-approval automation whose focus tags intersect the task's roi_tags.
+   * This prevents the same to-do appearing twice (e.g. "Ask Jane for a referral" perf
+   * task while a `first_payment_referral` automation is queued for Jane).
+   */
+  const approvalDedupeMap = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const it of approvals) {
+      if (!it.client_id) continue;
+      const tags = focusTagsForPlaybook(it.playbook ?? null);
+      if (tags.length === 0) continue;
+      const existing = map.get(it.client_id) ?? new Set<string>();
+      for (const t of tags) existing.add(t);
+      map.set(it.client_id, existing);
+    }
+    return map;
+  }, [approvals]);
+
+  const isPerfTaskSupersededByApproval = useCallback(
+    (task: PerformanceTask): boolean => {
+      const ev = (task.evidence || {}) as Record<string, unknown>;
+      const cid = typeof ev.client_id === 'string' ? ev.client_id : null;
+      if (!cid) return false;
+      const tagSet = approvalDedupeMap.get(cid);
+      if (!tagSet || tagSet.size === 0) return false;
+      const taskTags = Array.isArray(ev.roi_tags) ? (ev.roi_tags as unknown[]) : [];
+      for (const raw of taskTags) {
+        if (typeof raw !== 'string') continue;
+        if (tagSet.has(raw.toLowerCase())) return true;
+      }
+      return false;
+    },
+    [approvalDedupeMap],
+  );
+
   const { topOpen, backlogOpen, completedTasks } = useMemo(() => {
     const open = tasks
       .filter((t) => !t.completed || completingGraceIds.has(t.id))
+      .filter((t) => !isPerfTaskSupersededByApproval(t))
       .sort((a, b) => b.impact_score - a.impact_score);
     const done = tasks
       .filter((t) => t.completed && !completingGraceIds.has(t.id))
@@ -421,7 +605,7 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       backlogOpen: open.slice(10, 40),
       completedTasks: done,
     };
-  }, [tasks, completingGraceIds]);
+  }, [tasks, completingGraceIds, isPerfTaskSupersededByApproval]);
 
   const flushCompleted = useCallback(
     async (nextTasks: PerformanceTask[]) => {
@@ -461,7 +645,11 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
 
   if (loading && !snap) {
     return (
-      <div className="w-full max-w-3xl mx-auto space-y-4 animate-pulse px-1">
+      <div
+        className={`w-full space-y-4 animate-pulse px-1 ${
+          variant === 'embedded' ? 'max-w-none' : 'max-w-3xl mx-auto'
+        }`}
+      >
         <div className="h-8 bg-gray-200 dark:bg-gray-700 rounded-lg w-1/3" />
         <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-xl" />
         <div className="h-24 bg-gray-200 dark:bg-gray-700 rounded-xl" />
@@ -486,6 +674,7 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       type="button"
       onClick={() => void handleReanalyze()}
       disabled={reanalyzing}
+      aria-busy={reanalyzing}
       title="Re-pull pipeline signals, re-run AI prescriptions, and regenerate emails for top tasks (rate limited)."
       className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-200 dark:border-white/15 bg-white/70 dark:bg-white/5 text-gray-800 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
     >
@@ -515,8 +704,17 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
   );
 
   return (
-    <div className={`w-full mx-auto px-1 pb-8 ${variant === 'drawer' ? 'max-w-none' : 'max-w-3xl pb-12'}`}>
-      {variant === 'drawer' ? (
+    <div
+      className={`w-full mx-auto px-1 ${
+        variant === 'embedded' ? 'max-w-none pb-2' : variant === 'drawer' ? 'max-w-none pb-8' : 'max-w-3xl pb-12'
+      }`}
+    >
+      {variant === 'embedded' ? (
+        <div className="mb-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+          <div className="min-w-0 flex-1">{instructionLine}</div>
+          {reanalyzeButton}
+        </div>
+      ) : variant === 'drawer' ? (
         <div className="mb-4 space-y-2">
           <div className="flex items-center justify-end">{reanalyzeButton}</div>
           {instructionLine}
@@ -524,7 +722,7 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       ) : (
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
           <div className="min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Performance</h2>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100">Priorities</h2>
             <div className="mt-1">{instructionLine}</div>
           </div>
           {reanalyzeButton}
@@ -708,17 +906,32 @@ export default function PerformancePanel({ variant = 'default' }: PerformancePan
       <section className="mb-6">
         <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200 mb-1">Top priorities</h3>
         <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-3 leading-snug">
-          Each priority gets a send-ready email tailored to your voice, the client&apos;s ROI signals, and the next
-          rung on your offer ladder — click <span className="font-medium text-gray-600 dark:text-gray-300">Open email</span>{' '}
-          on a task to review and send via Brevo. Use Re-analyze to refresh after new calls or pipeline changes.
+          Automations awaiting your approval are pinned at the top of the queue, followed by the
+          highest-ROI Performance tasks — each tailored to your voice, the client&apos;s ROI signals, and the next
+          rung on your offer ladder. Click <span className="font-medium text-gray-600 dark:text-gray-300">Open email</span>{' '}
+          on a task to review and send via Brevo, or Approve / Decline an automation in place. Use Re-analyze to
+          refresh after new calls or pipeline changes.
           {draftBatchStatus === 'loading' ? ' Drafting emails…' : ''}
+          {approvalsLoading && approvals.length === 0 ? ' Checking approvals…' : ''}
         </p>
-        {topOpen.length === 0 ? (
+        {approvalError && (
+          <p className="text-xs text-amber-700 dark:text-amber-300 mb-2">{approvalError}</p>
+        )}
+        {topOpen.length === 0 && approvals.length === 0 ? (
           <p className="text-sm text-gray-500 dark:text-gray-400 glass-card p-4 rounded-xl">
-            No open tasks — great job. Refresh after new leads or funnel traffic.
+            No open tasks or pending approvals — great job. Refresh after new leads or funnel traffic.
           </p>
         ) : (
           <ul className="space-y-3">
+            {approvals.map((it) => (
+              <ApprovalRow
+                key={it.id}
+                item={it}
+                busy={approvalBusy[it.id]}
+                onApprove={() => void onApproveAutomation(it)}
+                onDecline={() => void onDeclineAutomation(it)}
+              />
+            ))}
             {topOpen.map((t) => (
               <TaskRow
                 key={t.id}
@@ -1037,6 +1250,144 @@ function TaskRow({
           </div>
         </details>
       </div>
+    </li>
+  );
+}
+
+/**
+ * Awaiting-approval automation drafts share the TaskRow card chrome so the priority
+ * stream feels like one unified queue. The amber accent + "Awaiting approval" chip
+ * make it visually obvious these need a yes/no rather than a "do it" decision, while
+ * the focus chips (Referral / Upsell / Testimonial / Onboarding / Offboarding) explain
+ * exactly what the email is asking for — same justification model as Performance tasks.
+ */
+function ApprovalRow({
+  item,
+  busy,
+  onApprove,
+  onDecline,
+}: {
+  item: OutreachInboxItem;
+  busy?: 'approve' | 'decline';
+  onApprove: () => void;
+  onDecline: () => void;
+}) {
+  const playbook = (item.playbook as AutomationPlaybook | null) ?? null;
+  const focusTags = focusTagsForPlaybook(playbook);
+  const playbookLabel = playbook ? PLAYBOOK_LABEL[playbook] : 'Performance automation';
+  const summary = (item.summary || '').trim();
+
+  return (
+    <li className="glass-card rounded-xl overflow-hidden ring-1 ring-amber-500/30 border border-amber-500/30 bg-amber-500/[0.05] dark:bg-amber-950/15">
+      <details className="group">
+        <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden p-4">
+          <div className="flex items-start gap-3">
+            <span
+              className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-700 dark:text-amber-200"
+              aria-hidden
+            >
+              <svg viewBox="0 0 20 20" fill="currentColor" className="h-3 w-3">
+                <path
+                  fillRule="evenodd"
+                  d="M8.485 2.495a1.75 1.75 0 0 1 3.03 0l6.28 10.875A1.75 1.75 0 0 1 16.28 16H3.72a1.75 1.75 0 0 1-1.515-2.63l6.28-10.875ZM10 7a.75.75 0 0 1 .75.75v3a.75.75 0 0 1-1.5 0v-3A.75.75 0 0 1 10 7Zm0 7a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="font-medium text-gray-900 dark:text-gray-100 truncate">{item.title}</span>
+                <span className="text-[10px] uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  Awaiting approval
+                </span>
+                <span className="text-[10px] text-gray-500 dark:text-gray-400">{playbookLabel}</span>
+                {focusTags.length > 0 && (
+                  <span className="flex flex-wrap gap-1">
+                    {focusTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-800 dark:text-emerald-200 ring-1 ring-emerald-500/25"
+                      >
+                        {focusChipLabel(tag)}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                {item.client_name && (
+                  <span className="text-[10px] text-gray-500 dark:text-gray-400 truncate max-w-[16rem]">
+                    {item.client_name}
+                  </span>
+                )}
+              </div>
+              {summary && (
+                <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 line-clamp-2 pr-6">{summary}</p>
+              )}
+              <span className="mt-1 block text-xs text-amber-700/90 dark:text-amber-300/90 group-open:hidden">
+                Expand to approve, decline, or read why this was queued
+              </span>
+            </div>
+            <span
+              className="mt-0.5 shrink-0 text-amber-500 transition-transform group-open:rotate-180"
+              aria-hidden
+            >
+              ▼
+            </span>
+          </div>
+        </summary>
+        <div className="border-t border-amber-500/20 px-4 py-3 space-y-3 bg-amber-500/[0.04] dark:bg-amber-950/10">
+          <div className="rounded-lg border border-amber-500/30 bg-white/60 dark:bg-white/[0.04] p-3 text-xs space-y-1">
+            <p className="font-medium text-amber-800 dark:text-amber-200">
+              Why this is queued for approval
+            </p>
+            <p className="text-gray-700 dark:text-gray-300 leading-relaxed">
+              The {playbookLabel.toLowerCase()} rule fired
+              {item.client_name ? ` for ${item.client_name}` : ''} based on{' '}
+              {summary || 'a recent trigger'}. The email is held until you approve so you can vet
+              wording before it sends — declining moves it to canceled and won&apos;t send.
+            </p>
+            {focusTags.length > 0 && (
+              <p className="text-gray-600 dark:text-gray-400 leading-relaxed">
+                <span className="font-medium text-gray-700 dark:text-gray-300">Focus: </span>
+                {focusTags.map((t) => focusChipLabel(t)).join(' · ')}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {item.client_id && (
+              <a
+                href={`/?tab=pipeline&client=${item.client_id}`}
+                className="rounded-md border border-gray-300 dark:border-gray-600 text-xs px-3 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                Open client
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDecline();
+              }}
+              disabled={busy != null}
+              className="rounded-md border border-gray-300 dark:border-gray-600 text-xs px-3 py-1.5 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {busy === 'decline' ? 'Declining…' : 'Decline'}
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onApprove();
+              }}
+              disabled={busy != null}
+              className="rounded-md bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5"
+            >
+              {busy === 'approve' ? 'Approving…' : 'Approve & send'}
+            </button>
+          </div>
+        </div>
+      </details>
     </li>
   );
 }

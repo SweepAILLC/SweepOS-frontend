@@ -1,13 +1,15 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   DndContext,
-  pointerWithin,
+  closestCorners,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
   DragEndEvent,
   DragOverEvent,
+  DragStartEvent,
+  DragOverlay,
   useDroppable,
 } from '@dnd-kit/core';
 import {
@@ -15,82 +17,213 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { apiClient, gradeFromHealthScore } from '@/lib/api';
-import { recipientsFromClients } from '@/lib/clientEmails';
+import { apiClient, peekCachedClientsList } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
+import { recipientsFromClients, getEmailsForClient } from '@/lib/clientEmails';
+import { compareClientsForBoardColumn, isLeadPipelineColumn, type BoardLifecycleColumn } from '@/lib/leadFollowUp';
+import {
+  PIPELINE_COLUMNS,
+  normalizeLifecycleColumn,
+  withNormalizedLifecycle,
+  type PipelineColumnId,
+} from '@/lib/pipelineColumns';
+import {
+  CALL_INSIGHT_BOARD_TAGS,
+  formatInsightTagLabel,
+} from '@/lib/callInsightChips';
+import { clientMatchesBoardSearch } from '@/lib/clientBoardSearch';
+import { hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import { Client } from '@/types/client';
 import type { BrevoStatus } from '@/types/integration';
 import { STRIPE_DATA_UPDATED_EVENT, TERMINAL_CLIENTS_UPDATED_EVENT, invalidateStripeAndTerminalAfterWebhook } from '@/lib/cache';
+import {
+  getPipelineClients,
+  patchPipelineClient,
+  setPipelineClients,
+  subscribePipelineClients,
+} from '@/lib/pipelineStore';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
 import { CALL_INSIGHTS_REANALYZED_EVENT, CLIENT_MERGED_EVENT } from './IntelligenceSection';
 import ShinyButton from '../ui/ShinyButton';
 import EmailComposer from '../brevo/EmailComposer';
 
-const COLUMNS = [
-  { id: 'cold_lead', title: 'Cold Lead' },
-  { id: 'warm_lead', title: 'Warm Lead' },
-  { id: 'active', title: 'Active' },
-  { id: 'offboarding', title: 'Offboarding' },
-  { id: 'dead', title: 'Dead' },
-] as const;
+const COLUMNS = PIPELINE_COLUMNS;
 
-type ColumnId = typeof COLUMNS[number]['id'];
+type ColumnId = PipelineColumnId;
+
+function hydratePipelineClients(): Client[] {
+  const fromStore = getPipelineClients();
+  if (fromStore.length > 0) return fromStore;
+  const cached = peekCachedClientsList();
+  if (!cached?.length) return [];
+  return cached.map((client) => {
+    const column = normalizeLifecycleColumn(client.lifecycle_state);
+    return column && column !== client.lifecycle_state
+      ? { ...client, lifecycle_state: column }
+      : client;
+  });
+}
 
 interface ClientKanbanBoardProps {
   filteredColumn?: string | null;
   onLoadComplete?: () => void;
+  /** False when pipeline tab is hidden but kept mounted. */
+  isActive?: boolean;
+  /** Clear snapshot column filter when a client leaves the active filter column. */
+  onClientLifecycleChanged?: (columnId: PipelineColumnId) => void;
 }
 
-export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplete }: ClientKanbanBoardProps = {}) {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
+export default function ClientKanbanBoard({
+  filteredColumn = null,
+  onLoadComplete,
+  isActive = true,
+  onClientLifecycleChanged,
+}: ClientKanbanBoardProps = {}) {
+  const [clients, setClients] = useState<Client[]>(() => hydratePipelineClients());
+  const [loading, setLoading] = useState(() => hydratePipelineClients().length === 0);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeColumn, setActiveColumn] = useState<ColumnId | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  /** Empty = no tag filter. Non-empty = show clients that have any selected insight tag (OR). */
+  const [selectedInsightTags, setSelectedInsightTags] = useState<Set<string>>(() => new Set());
+  /** When true, only clients with an outstanding offer balance (same rule as the card chip). */
+  const [balanceDueFilter, setBalanceDueFilter] = useState(false);
   const hasCalledOnLoadComplete = useRef(false);
+  const pipelineLoadStartedRef = useRef(false);
   const [createFormData, setCreateFormData] = useState({
     first_name: '',
     last_name: '',
     email: '',
     phone: '',
-    lifecycle_state: 'cold_lead' as ColumnId,
+    instagram: '',
+    lifecycle_state: 'nurturing' as ColumnId,
     notes: '',
-    program_start_date: '',
-    program_end_date: '',
   });
+
+  const resetCreateForm = () => {
+    setCreateFormData({
+      first_name: '',
+      last_name: '',
+      email: '',
+      phone: '',
+      instagram: '',
+      lifecycle_state: 'nurturing',
+      notes: '',
+    });
+  };
   const [syncingRefreshing, setSyncingRefreshing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
   const [mergingCards, setMergingCards] = useState(false);
-  const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
   const [callInsightTags, setCallInsightTags] = useState<Record<string, { tags: string[]; headline: string }>>({});
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
   const [brevoStatus, setBrevoStatus] = useState<BrevoStatus | null>(null);
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<Array<{ email: string; name?: string }>>([]);
   const [emailComposerKey, setEmailComposerKey] = useState(0);
+  const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
+  const [activeDragClient, setActiveDragClient] = useState<Client | null>(null);
+  const [filtersDropdownOpen, setFiltersDropdownOpen] = useState(false);
+  const filtersDropdownRef = useRef<HTMLDivElement>(null);
 
   // Refs to avoid re-creating poll intervals with stale state
   const clientsRef = useRef<Client[]>([]);
-  const healthScoresRef = useRef<Record<string, { score: number; grade: string }>>({});
   const selectedClientIdRef = useRef<string | null>(null);
-  const isDrawerOpenRef = useRef(false);
+  const loadInFlightRef = useRef<Promise<Client[] | undefined> | null>(null);
+  const tagsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!filtersDropdownOpen) return;
+    const onPointerDown = (e: MouseEvent | PointerEvent) => {
+      const el = filtersDropdownRef.current;
+      if (el && !el.contains(e.target as Node)) setFiltersDropdownOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFiltersDropdownOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [filtersDropdownOpen]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
 
-  // Load client list only on mount; no sync unless user clicks the refresh/sync button; skip pipeline notify on first load
+  const clientIdsKey = useMemo(
+    () => clients.map((c) => c.id).filter(Boolean).join(','),
+    [clients],
+  );
+
   useEffect(() => {
-    loadClients(false, true, false);
+    if (!isActive) return;
+    const ids = clientIdsKey ? clientIdsKey.split(',') : [];
+    if (ids.length === 0) {
+      setHealthScores({});
+      return;
+    }
+    let cancelled = false;
+    void apiClient
+      .getClientsHealthScores(ids)
+      .then((map) => {
+        if (cancelled) return;
+        const next: Record<string, { score: number; grade: string }> = {};
+        for (const id of ids) {
+          const row = map[id];
+          if (row && typeof row.score === 'number') {
+            next[id] = { score: row.score, grade: row.grade };
+          }
+        }
+        setHealthScores(next);
+      })
+      .catch(() => {
+        if (!cancelled) setHealthScores({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [clientIdsKey, isActive]);
+
+  // Load board when the pipeline tab is first opened (always fetch — do not skip due to stale cache/store).
+  useEffect(() => {
+    if (!isActive) return;
+    if (pipelineLoadStartedRef.current) return;
+    pipelineLoadStartedRef.current = true;
+    void loadClients(true, true, false, false).catch((err) => {
+      console.error('[KanbanBoard] Initial load failed:', err);
+    });
+  }, [isActive]);
+
+  useEffect(() => {
+    return subscribePipelineClients(() => {
+      const store = getPipelineClients();
+      if (store.length === 0) return;
+      clientsRef.current = store;
+      setClients([...store]);
+    });
   }, []);
 
   useEffect(() => {
+    if (!isActive) return;
+    if (clients.length === 0) return;
+    setPipelineClients(clients);
+  }, [clients, isActive]);
+
+  useEffect(() => {
+    if (!isActive) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -103,201 +236,201 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isActive]);
 
-  // When Stripe sync/webhook updates land, refetch clients so new customers appear on the board.
+  // When Stripe sync/webhook updates land, lightly refresh (no calendar sync).
   useEffect(() => {
     const onStripe = () => {
-      loadClients(true, true, true).catch(() => {});
+      if (!isActive) return;
+      void loadClients(false, true, true, true, false);
     };
     window.addEventListener(STRIPE_DATA_UPDATED_EVENT, onStripe as EventListener);
     return () => window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, onStripe as EventListener);
-  }, []);
+  }, [isActive]);
 
   // Keep refs in sync
   clientsRef.current = clients;
-  healthScoresRef.current = healthScores;
   selectedClientIdRef.current = selectedClient?.id ?? null;
-  isDrawerOpenRef.current = isDrawerOpen;
 
-  // Poll cached health scores (cache-only read — fast) + call-insight tags
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const tick = async () => {
-      if (cancelled || inFlight) return;
-      const ids = clientsRef.current.map((c) => c.id);
-      if (ids.length === 0) return;
-
-      inFlight = true;
-      try {
-        const updated = await apiClient.getClientsHealthScores(ids);
-        setHealthScores((prev) => ({ ...prev, ...updated }));
-
-        try {
-          const tagMap = await apiClient.getClientsCallInsightTags(ids);
-          setCallInsightTags((prev) => ({ ...prev, ...tagMap }));
-        } catch (tagErr) {
-          console.warn('[KanbanBoard] Failed to refresh call insight tags:', tagErr);
+  const refreshBoardTags = useCallback(async () => {
+    const ids = clientsRef.current.map((c) => c.id);
+    if (ids.length === 0) {
+      setCallInsightTags({});
+      return;
+    }
+    try {
+      const tagMap = await apiClient.getClientsCallInsightTags(ids);
+      setCallInsightTags((prev) => {
+        const next: Record<string, { tags: string[]; headline: string }> = {};
+        for (const c of clientsRef.current) {
+          next[c.id] = tagMap[c.id] ?? prev[c.id] ?? { tags: [], headline: '' };
         }
+        return next;
+      });
+    } catch (tagErr) {
+      console.warn('[KanbanBoard] Failed to refresh call insight tags:', tagErr);
+    }
+  }, []);
 
-        const selectedId = selectedClientIdRef.current;
-        if (selectedId && isDrawerOpenRef.current) {
-          const prevHealth = healthScoresRef.current[selectedId];
-          const nextHealth = updated[selectedId];
-          if (
-            nextHealth &&
-            (!prevHealth || prevHealth.score !== nextHealth.score || prevHealth.grade !== nextHealth.grade)
-          ) {
-            setHealthRefreshToken((t) => t + 1);
+  const scheduleBoardTagRefresh = useCallback(() => {
+    if (tagsDebounceRef.current) clearTimeout(tagsDebounceRef.current);
+    tagsDebounceRef.current = setTimeout(() => {
+      tagsDebounceRef.current = null;
+      void refreshBoardTags();
+    }, 500);
+  }, [refreshBoardTags]);
+
+  const loadClients = async (
+    forceRefresh = false,
+    skipSync = false,
+    notifyPipeline = true,
+    background = false,
+    fetchTags = true,
+    /** When true (manual refresh), calendar sync may auto-move pipeline stages. */
+    applyPipelineRules = false,
+  ): Promise<Client[] | undefined> => {
+    if (loadInFlightRef.current) {
+      return loadInFlightRef.current;
+    }
+
+    const run = async (): Promise<Client[] | undefined> => {
+      if (background) {
+        setRefreshing(true);
+      } else if (clientsRef.current.length === 0) {
+        setLoading(true);
+      }
+      try {
+        if (!skipSync) {
+          try {
+            await apiClient.syncCheckIns(
+              applyPipelineRules ? undefined : { applyPipelineRules: false },
+            );
+          } catch (syncErr) {
+            console.warn('[KanbanBoard] Check-in sync failed (board will still load):', syncErr);
           }
         }
-      } catch (err) {
-        console.warn('[KanbanBoard] Failed to refresh health scores:', err);
+        const data = await apiClient.getClients(undefined, forceRefresh);
+        const normalized = (data as Client[]).map((client) => {
+          const column = normalizeLifecycleColumn(client.lifecycle_state);
+          return column && column !== client.lifecycle_state
+            ? { ...client, lifecycle_state: column }
+            : client;
+        });
+
+        clientsRef.current = normalized;
+        setClients([...normalized]);
+        setPipelineClients(normalized);
+
+        if (notifyPipeline && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+        }
+
+        if (fetchTags && normalized.length > 0) {
+          await refreshBoardTags();
+        } else if (normalized.length === 0) {
+          setCallInsightTags({});
+        }
+
+        return normalized;
+      } catch (error) {
+        console.error('Failed to load clients:', error);
+        throw error;
       } finally {
-        inFlight = false;
+        setLoading(false);
+        setRefreshing(false);
+        if (!hasCalledOnLoadComplete.current && onLoadComplete) {
+          hasCalledOnLoadComplete.current = true;
+          onLoadComplete();
+        }
       }
     };
 
-    tick();
-    const interval = setInterval(tick, 15000);
-    window.addEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, tick as EventListener);
+    const promise = run().finally(() => {
+      loadInFlightRef.current = null;
+    });
+    loadInFlightRef.current = promise;
+    return promise;
+  };
+
+  const normalizeClient = useCallback(
+    (client: Client): Client => withNormalizedLifecycle(client),
+    [],
+  );
+
+  const applyClientUpdate = useCallback(
+    (updated: Client) => {
+      if (!updated?.id) return;
+      const normalized = normalizeClient(updated);
+      const column =
+        normalizeLifecycleColumn(normalized.lifecycle_state) ??
+        (normalized.lifecycle_state as PipelineColumnId);
+      setClients((prev) => {
+        const exists = prev.some((c) => c.id === normalized.id);
+        if (exists) {
+          return prev.map((c) => (c.id === normalized.id ? normalized : c));
+        }
+        return [normalized, ...prev];
+      });
+      setSelectedClient((sel) => (sel?.id === normalized.id ? normalized : sel));
+      patchPipelineClient(normalized);
+      if (column) onClientLifecycleChanged?.(column);
+    },
+    [normalizeClient, onClientLifecycleChanged],
+  );
+
+  const refreshSelectedClient = useCallback(async () => {
+    const id = selectedClientIdRef.current;
+    if (!id) return;
+    try {
+      const updated = await apiClient.getClient(id);
+      applyClientUpdate(withNormalizedLifecycle(updated));
+    } catch {
+      /* keep optimistic board state */
+    }
+  }, [applyClientUpdate]);
+
+  // Poll call-insight tags while pipeline tab is visible (debounced on bulk updates).
+  useEffect(() => {
+    if (!isActive) return;
+    void refreshBoardTags();
+    const interval = setInterval(() => void refreshBoardTags(), 60000);
+    const onClientsUpdated = () => scheduleBoardTagRefresh();
+    window.addEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, onClientsUpdated);
     return () => {
-      cancelled = true;
       clearInterval(interval);
-      window.removeEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, tick as EventListener);
+      window.removeEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, onClientsUpdated);
+      if (tagsDebounceRef.current) clearTimeout(tagsDebounceRef.current);
     };
-  }, []);
+  }, [isActive, refreshBoardTags, scheduleBoardTagRefresh]);
 
   useEffect(() => {
-    const onCallInsightsReanalyzed = () => {
-      void (async () => {
-        const ids = clientsRef.current.map((c) => c.id);
-        if (ids.length === 0) return;
-        try {
-          const tagMap = await apiClient.getClientsCallInsightTags(ids);
-          setCallInsightTags((prev) => ({ ...prev, ...tagMap }));
-        } catch (e) {
-          console.warn('[KanbanBoard] Call insight tags refresh after re-analyze failed:', e);
-        }
-      })();
-    };
+    const onCallInsightsReanalyzed = () => scheduleBoardTagRefresh();
     window.addEventListener(CALL_INSIGHTS_REANALYZED_EVENT, onCallInsightsReanalyzed);
     return () => window.removeEventListener(CALL_INSIGHTS_REANALYZED_EVENT, onCallInsightsReanalyzed);
-  }, []);
+  }, [scheduleBoardTagRefresh]);
 
-  // Listen for Stripe connection events to refetch client list (no sync)
   useEffect(() => {
     const handleStripeConnected = () => {
       setTimeout(() => {
-        loadClients(true, true);
+        void loadClients(false, true, true, true, false);
       }, 3000);
     };
-
-    // Listen for custom event when Stripe is connected
     window.addEventListener('stripe-connected', handleStripeConnected);
-    
-    // Also check on mount if we're coming from Stripe connection
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('stripe_connected') === 'true') {
       handleStripeConnected();
     }
-
-    return () => {
-      window.removeEventListener('stripe-connected', handleStripeConnected);
-    };
+    return () => window.removeEventListener('stripe-connected', handleStripeConnected);
   }, []);
 
-  const loadClients = async (forceRefresh = false, skipSync = false, notifyPipeline = true) => {
-    try {
-      if (forceRefresh) {
-        console.log('[KanbanBoard] Force refreshing clients...');
-      } else {
-        console.log('[KanbanBoard] Loading clients...');
-      }
-      // Sync calendar bookings so new attendees (Cal.com/Calendly) become warm leads on the board.
-      // Skip sync when refetching after a delete so we don't re-create the same client from their booking.
-      if (!skipSync) {
-        try {
-          await apiClient.syncCheckIns();
-        } catch (syncErr) {
-          console.warn('[KanbanBoard] Check-in sync failed (board will still load):', syncErr);
-        }
-      }
-      const data = await apiClient.getClients(undefined, forceRefresh);
-      const stateCounts = data.reduce((acc: Record<string, number>, client: Client) => {
-        acc[client.lifecycle_state] = (acc[client.lifecycle_state] || 0) + 1;
-        return acc;
-      }, {});
-      console.log('[KanbanBoard] Clients loaded:', {
-        count: data.length,
-        states: stateCounts
-      });
-      
-      // Log clients with programs at 75%+ to verify they're in the right state
-      const highProgressClients = data.filter((c: Client) =>
-        c.program_progress_percent && c.program_progress_percent >= 75
-      );
-      if (highProgressClients.length > 0) {
-        console.log('[KanbanBoard] Clients with 75%+ progress:', 
-          highProgressClients.map((c: Client) => {
-            const p = c.program_progress_percent ?? 0;
-            return {
-              id: c.id,
-              email: c.email,
-              progress: c.program_progress_percent,
-              state: c.lifecycle_state,
-              expectedState: p >= 100 ? 'dead' : 'offboarding',
-              inCorrectColumn: (p >= 100 && c.lifecycle_state === 'dead') ||
-                              (p >= 75 && p < 100 && c.lifecycle_state === 'offboarding')
-            };
-          })
-        );
-      }
-      
-      // Ref must see new ids before TERMINAL_CLIENTS_UPDATED_EVENT (poll handler reads clientsRef).
-      clientsRef.current = data;
-      // Force state update by creating a new array reference
-      setClients([...data]);
-      if (notifyPipeline && typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
-      }
-      // Batch fetch persisted health cache + call-insight tags (same sources as drawer / summary)
-      if (data.length > 0) {
-        const ids = data.map((c: Client) => c.id);
-        try {
-          const batch = await apiClient.getClientsHealthScores(ids);
-          setHealthScores(batch);
-        } catch (e) {
-          console.warn('[KanbanBoard] Batch health scores failed; keeping previous board tags:', e);
-        }
-        try {
-          const tagMap = await apiClient.getClientsCallInsightTags(ids);
-          const nextTags: Record<string, { tags: string[]; headline: string }> = {};
-          for (const c of data) {
-            nextTags[c.id] = tagMap[c.id] ?? { tags: [], headline: '' };
-          }
-          setCallInsightTags(nextTags);
-        } catch (e) {
-          console.warn('[KanbanBoard] Batch call-insight tags failed; keeping previous chips:', e);
-        }
-      } else {
-        setHealthScores({});
-        setCallInsightTags({});
-      }
-      // Return the data for use in onUpdate callback
-      return data;
-    } catch (error) {
-      console.error('Failed to load clients:', error);
-      throw error;
-    } finally {
-      setLoading(false);
-      if (!hasCalledOnLoadComplete.current && onLoadComplete) {
-        hasCalledOnLoadComplete.current = true;
-        onLoadComplete();
-      }
-    }
+  const handleDragStart = (event: DragStartEvent) => {
+    const id = event.active.id as string;
+    const c = clients.find((x) => x.id === id);
+    setActiveDragClient(c ?? null);
+  };
+
+  const handleDragCancel = () => {
+    setActiveDragClient(null);
   };
 
   const handleDragOver = (event: DragOverEvent) => {
@@ -362,7 +495,6 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                 new CustomEvent(CLIENT_MERGED_EVENT, { detail: { keptClientId: keptId } })
               );
             }
-            await loadClients(true);
           } catch (err: any) {
             alert(err?.response?.data?.detail || 'Failed to merge clients.');
           } finally {
@@ -373,18 +505,20 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       }
     }
 
-    // Drop on slot above a card = insert above (reorder or move)
+    // Drop on slot above a card = insert above (cross-column move) or merge slot in another column
     if (overId.startsWith('slot-')) {
       const insertAboveClientId = overId.replace(/^slot-/, '');
       const targetClient = findClientBySortableId(insertAboveClientId);
       if (targetClient) {
-        const newColumnId = targetClient.lifecycle_state as ColumnId;
-        const currentColumnId = draggedClient.lifecycle_state as ColumnId;
+        const newColumnId =
+          normalizeLifecycleColumn(targetClient.lifecycle_state) ??
+          (targetClient.lifecycle_state as ColumnId);
+        const currentColumnId = normalizeLifecycleColumn(draggedClient.lifecycle_state);
         if (newColumnId === currentColumnId) {
-          await reorderClientInColumn(draggedClient, targetClient, newColumnId);
-        } else {
-          await updateClientState(draggedClient.id, newColumnId, draggedClient);
+          // Column order is automatic (follow-up urgency + health); ignore same-column reorder.
+          return;
         }
+        await updateClientState(draggedClient.id, newColumnId, draggedClient);
       }
       return;
     }
@@ -396,88 +530,17 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       return;
     }
 
-    // Fallback: over is sortable id (card) – treat as reorder/move
+    // Fallback: over is sortable id (card) – cross-column move only (same-column order is automatic)
     const targetClient = findClientBySortableId(overId);
     if (targetClient) {
-      const newColumnId = targetClient.lifecycle_state as ColumnId;
-      const currentColumnId = draggedClient.lifecycle_state as ColumnId;
+      const newColumnId =
+        normalizeLifecycleColumn(targetClient.lifecycle_state) ??
+        (targetClient.lifecycle_state as ColumnId);
+      const currentColumnId = normalizeLifecycleColumn(draggedClient.lifecycle_state);
       if (newColumnId === currentColumnId) {
-        await reorderClientInColumn(draggedClient, targetClient, newColumnId);
-      } else {
-        await updateClientState(draggedClient.id, newColumnId, draggedClient);
+        return;
       }
-    }
-  };
-
-  const reorderClientInColumn = async (draggedClient: Client, targetClient: Client, columnId: ColumnId) => {
-    // Get all clients in this column, sorted by current sort_order
-    const columnClients = filteredClients
-      .filter(c => c.lifecycle_state === columnId)
-      .sort((a, b) => {
-        const aOrder = a.meta?.sort_orders?.[columnId] ?? 0;
-        const bOrder = b.meta?.sort_orders?.[columnId] ?? 0;
-        return aOrder - bOrder;
-      });
-
-    const draggedIndex = columnClients.findIndex((c) => c.id === draggedClient.id);
-    const targetIndex = columnClients.findIndex((c) => c.id === targetClient.id);
-
-    if (draggedIndex === -1 || targetIndex === -1 || draggedIndex === targetIndex) {
-      return; // No change needed
-    }
-
-    // Insert index: after removing dragged, target "slot above" means insert so dragged ends up above targetClient
-    const insertIndex = draggedIndex < targetIndex ? targetIndex - 1 : targetIndex;
-    const reorderedClients = [...columnClients];
-    const [removed] = reorderedClients.splice(draggedIndex, 1);
-    reorderedClients.splice(insertIndex, 0, removed);
-
-    const updates: Array<{ clientId: string; sortOrder: number }> = [];
-    reorderedClients.forEach((client, index) => {
-      updates.push({ clientId: client.id, sortOrder: index });
-    });
-
-    const originalClients = [...clients];
-    const updatedClients = clients.map((c) => {
-      const update = updates.find(u => u.clientId === c.id);
-      if (update) {
-        return {
-          ...c,
-          meta: {
-            ...c.meta,
-            sort_orders: {
-              ...(c.meta?.sort_orders || {}),
-              [columnId]: update.sortOrder,
-            },
-          },
-        };
-      }
-      return c;
-    });
-    setClients(updatedClients);
-
-    try {
-      await Promise.all(
-        updates.map(({ clientId, sortOrder }) => {
-          const client = clients.find(c => c.id === clientId);
-          if (!client) return Promise.resolve();
-          const currentMeta = client.meta || {};
-          return apiClient.updateClient(clientId, {
-            meta: {
-              ...currentMeta,
-              sort_orders: {
-                ...(currentMeta.sort_orders || {}),
-                [columnId]: sortOrder,
-              },
-            },
-          });
-        })
-      );
-      // No refresh: optimistic update already reordered; avoid full board reload for smooth UX.
-    } catch (error) {
-      setClients(originalClients);
-      console.error('Failed to reorder clients:', error);
-      alert('Failed to reorder clients. Please try again.');
+      await updateClientState(draggedClient.id, newColumnId, draggedClient);
     }
   };
 
@@ -494,20 +557,22 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       return;
     }
 
-    // Don't update if already in the target column
-    if (client.lifecycle_state === newColumnId) {
+    const targetColumn =
+      normalizeLifecycleColumn(newColumnId) ?? (newColumnId as PipelineColumnId);
+    const currentColumn = normalizeLifecycleColumn(client.lifecycle_state);
+
+    // Don't update if already in the target column (including legacy aliases e.g. warm_lead → booked)
+    if (currentColumn === targetColumn) {
       return;
     }
 
-    const clientIdsToUpdate = [clientId];
-
     // Check if moving FROM offboarding to another column
     // If so, reset program fields
-    const isMovingFromOffboarding = client.lifecycle_state === 'offboarding' && newColumnId !== 'offboarding';
+    const isMovingFromOffboarding = currentColumn === 'offboarding' && targetColumn !== 'offboarding';
     
     // Prepare update data
     const updateData: any = {
-      lifecycle_state: newColumnId,
+      lifecycle_state: targetColumn,
     };
     
     // If moving from offboarding, reset program fields
@@ -519,35 +584,25 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       console.log(`[KANBAN] Moving client from offboarding to ${newColumnId}, resetting program fields`);
     }
 
-    // Optimistic update - update both raw clients and merged clients display
-    const originalClients = [...clients];
-    const updatedClients = clients.map((c) => {
-      if (clientIdsToUpdate.includes(c.id)) {
-        const updated = { ...c, lifecycle_state: newColumnId };
-        if (isMovingFromOffboarding) {
-          updated.program_progress_percent = undefined;
-          updated.program_duration_days = undefined;
-          updated.program_start_date = undefined;
-          updated.program_end_date = undefined;
-        }
-        return updated;
+    const buildOptimistic = (base: Client): Client => {
+      const next: Client = { ...base, lifecycle_state: targetColumn };
+      if (isMovingFromOffboarding) {
+        next.program_progress_percent = undefined;
+        next.program_duration_days = undefined;
+        next.program_start_date = undefined;
+        next.program_end_date = undefined;
       }
-      return c;
-    });
-    setClients(updatedClients);
+      return next;
+    };
+
+    const previous = client;
+    applyClientUpdate(buildOptimistic(previous));
 
     try {
-      await Promise.all(
-        clientIdsToUpdate.map((id: string) =>
-          apiClient.updateClient(id, updateData)
-        )
-      );
-      // No board refresh: optimistic update already moved the card. Notify pipeline so it refetches counts.
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
-      }
+      const updated = await apiClient.updateClient(clientId, updateData);
+      applyClientUpdate(updated);
     } catch (error) {
-      setClients(originalClients);
+      applyClientUpdate(previous);
       console.error('Failed to update client:', error);
       alert('Failed to update client. Please try again.');
     }
@@ -613,7 +668,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           );
         }
       }
-      await loadClients(true);
+      await loadClients(true, true, false, true, false);
     } catch (err: any) {
       alert(err?.response?.data?.detail || 'Failed to merge duplicates.');
     } finally {
@@ -623,6 +678,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
   const handleRefreshSync = async () => {
     setSyncingRefreshing(true);
+    setSyncError(null);
     try {
       // 1) Stripe customers / payments → reconcile onto the board (new customers if not already present)
       await apiClient.syncStripeData(false, true);
@@ -650,7 +706,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       await apiClient.syncCheckIns();
 
       // Reload list once; skip embedded check-in sync (already ran above).
-      await loadClients(true, true);
+      await loadClients(true, true, true, false, true, true);
 
       // Drawer IntelligenceSection uses this to refetch AI insights / health.
       setHealthRefreshToken((t) => t + 1);
@@ -672,31 +728,70 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           }
         })();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('[KanbanBoard] Refresh sync failed:', err);
-      alert(err?.response?.data?.detail || 'Sync failed. Please try again.');
+      setSyncError(formatApiError(err, 'Sync could not finish. Check Stripe / calendar connections and try again.'));
     } finally {
       setSyncingRefreshing(false);
     }
   };
 
-  // Filter clients by search query (no in-memory merge; one client per record)
-  const filteredClients = useMemo(() => {
-    if (!searchQuery.trim()) return clients;
-    const query = searchQuery.toLowerCase().trim();
-    return clients.filter((client) => {
-      const fullName = [client.first_name, client.last_name].filter(Boolean).join(' ').toLowerCase();
-      if (fullName.includes(query)) return true;
-      if (client.email && client.email.toLowerCase().includes(query)) return true;
-      if (client.emails?.some((e) => e && String(e).toLowerCase().includes(query))) return true;
-      if (client.phone) {
-        const normalizedPhone = client.phone.replace(/\D/g, '');
-        const normalizedQuery = query.replace(/\D/g, '');
-        if (normalizedPhone.includes(normalizedQuery)) return true;
-      }
-      return false;
+  const toggleInsightTagFilter = useCallback((tag: string) => {
+    setSelectedInsightTags((prev) => {
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
     });
-  }, [clients, searchQuery]);
+  }, []);
+
+  const clearBoardFilters = useCallback(() => {
+    setSelectedInsightTags(new Set());
+    setBalanceDueFilter(false);
+  }, []);
+
+  const toggleBalanceDueFilter = useCallback(() => {
+    setBalanceDueFilter((v) => !v);
+  }, []);
+
+  const activeFilterCount = selectedInsightTags.size + (balanceDueFilter ? 1 : 0);
+
+  const balanceDueCount = useMemo(
+    () => clients.filter((c) => hasOutstandingOfferBalance(c)).length,
+    [clients],
+  );
+
+  const insightTagCounts = useMemo(() => {
+    const counts: Partial<Record<string, number>> = {};
+    for (const tag of CALL_INSIGHT_BOARD_TAGS) counts[tag] = 0;
+    for (const c of clients) {
+      for (const t of callInsightTags[c.id]?.tags ?? []) {
+        if (typeof t === 'string' && t in counts) {
+          counts[t] = (counts[t] ?? 0) + 1;
+        }
+      }
+    }
+    return counts as Record<string, number>;
+  }, [clients, callInsightTags]);
+
+  // Filter clients by search query and optional insight tag chips (OR within tags)
+  const filteredClients = useMemo(() => {
+    let list = clients;
+    const query = searchQuery.toLowerCase().trim();
+    if (query) {
+      list = list.filter((client) => clientMatchesBoardSearch(client, searchQuery));
+    }
+    if (selectedInsightTags.size > 0) {
+      list = list.filter((client) => {
+        const tags = callInsightTags[client.id]?.tags ?? [];
+        return tags.some((t) => selectedInsightTags.has(t));
+      });
+    }
+    if (balanceDueFilter) {
+      list = list.filter((client) => hasOutstandingOfferBalance(client));
+    }
+    return list;
+  }, [clients, searchQuery, selectedInsightTags, balanceDueFilter, callInsightTags]);
 
   const getClientsForColumn = (columnId: ColumnId) => {
     // If a filter is active and this column doesn't match, return empty array
@@ -708,7 +803,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     // For merged clients, show them only in the column that matches their merged lifecycle_state
     // This ensures each merged client appears in exactly one column
     const columnClients = filteredClients.filter((client) => {
-      const matches = client.lifecycle_state === columnId;
+      const matches = normalizeLifecycleColumn(client.lifecycle_state) === columnId;
       
       // Debug logging for state mismatches (especially for offboarding column)
       if (columnId === 'offboarding') {
@@ -740,16 +835,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
       console.log(`[KanbanBoard] Offboarding column has ${columnClients.length} client(s)`);
     }
     
-    // Sort by sort_order for this column (stored in meta.sort_orders[columnId])
-    return columnClients.sort((a, b) => {
-      const aOrder = a.meta?.sort_orders?.[columnId] ?? 0;
-      const bOrder = b.meta?.sort_orders?.[columnId] ?? 0;
-      // If sort orders are equal, maintain original order (by created_at)
-      if (aOrder === bOrder) {
-        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      }
-      return aOrder - bOrder;
-    });
+    const scoreFor = (id: string) => healthScores[id]?.score;
+    return [...columnClients].sort((a, b) =>
+      compareClientsForBoardColumn(a, b, columnId as BoardLifecycleColumn, scoreFor),
+    );
   };
 
   const handleDeleteClient = async (client: Client) => {
@@ -758,14 +847,11 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
     try {
       await apiClient.deleteClient(client.id, false);
-      // Remove from local state immediately so the card disappears
       setClients((prev) => prev.filter((c) => c.id !== client.id));
       if (selectedClient?.id === client.id) {
         setIsDrawerOpen(false);
         setSelectedClient(null);
       }
-      // Refetch without running check-in sync so we don't re-create this client from their calendar booking
-      await loadClients(true, true);
     } catch (error: any) {
       console.error('Failed to delete client:', error);
       alert(error?.response?.data?.detail || 'Failed to delete client. Please try again.');
@@ -780,40 +866,27 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
     setCreating(true);
     try {
-      // Prepare data for API - convert date strings to ISO format
-      const clientData: any = {
+      const clientData = {
         first_name: createFormData.first_name || undefined,
         last_name: createFormData.last_name || undefined,
         email: createFormData.email || undefined,
         phone: createFormData.phone || undefined,
+        instagram: createFormData.instagram || undefined,
         lifecycle_state: createFormData.lifecycle_state,
         notes: createFormData.notes || undefined,
       };
-      
-      // Convert date strings to ISO format if provided
-      if (createFormData.program_start_date && createFormData.program_start_date.trim() !== '') {
-        clientData.program_start_date = new Date(createFormData.program_start_date + 'T00:00:00').toISOString();
-      }
-      
-      if (createFormData.program_end_date && createFormData.program_end_date.trim() !== '') {
-        clientData.program_end_date = new Date(createFormData.program_end_date + 'T00:00:00').toISOString();
-      }
-      
+
       const newClient = await apiClient.createClient(clientData);
-      await loadClients();
+      const created: Client = {
+        ...newClient,
+        lifecycle_state:
+          normalizeLifecycleColumn(newClient.lifecycle_state) ?? createFormData.lifecycle_state,
+      };
+
+      applyClientUpdate(created);
       setIsCreateModalOpen(false);
-      setCreateFormData({
-        first_name: '',
-        last_name: '',
-        email: '',
-        phone: '',
-        lifecycle_state: 'cold_lead',
-        notes: '',
-        program_start_date: '',
-        program_end_date: '',
-      });
-      // Optionally open the new client in the drawer
-      setSelectedClient(newClient);
+      resetCreateForm();
+      setSelectedClient(created);
       setIsDrawerOpen(true);
     } catch (error: any) {
       console.error('Failed to create client:', error);
@@ -823,7 +896,7 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     }
   };
 
-  if (loading) {
+  if (loading && clients.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-gray-500 dark:text-gray-400">Loading clients...</div>
@@ -835,7 +908,14 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
     <>
       <div className="mb-4 space-y-4 min-w-0">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-          <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <h2 className="text-lg sm:text-xl font-semibold text-gray-900 dark:text-gray-100">Client Management</h2>
+            {refreshing ? (
+              <span className="text-xs text-gray-400 dark:text-gray-500 shrink-0" aria-live="polite">
+                Updating…
+              </span>
+            ) : null}
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {duplicateGroups.length > 0 && (
               <button
@@ -872,13 +952,14 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
               type="button"
               onClick={handleRefreshSync}
               disabled={syncingRefreshing}
+              aria-busy={syncingRefreshing}
               className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50 flex items-center gap-2 min-h-[44px]"
               title="Sync Stripe customers, then calendar attendees, then Fathom calls and AI insights"
             >
               <svg className={`w-4 h-4 flex-shrink-0 ${syncingRefreshing ? 'animate-spin' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
               </svg>
-              {syncingRefreshing ? 'Syncing...' : 'Refresh'}
+              {syncingRefreshing ? 'Syncing…' : 'Refresh'}
             </button>
             <ShinyButton onClick={() => setIsCreateModalOpen(true)}>
             <svg className="w-5 h-5 mr-2 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -888,6 +969,18 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           </ShinyButton>
           </div>
         </div>
+        {syncError ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-800 dark:text-red-200 flex flex-wrap items-center justify-between gap-2">
+            <span className="min-w-0">{syncError}</span>
+            <button
+              type="button"
+              className="text-xs font-medium underline underline-offset-2 shrink-0"
+              onClick={() => setSyncError(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
         {duplicateGroups.length > 0 && (
           <p className="text-sm text-amber-600 dark:text-amber-400">
             You have duplicate client cards (same email). Click &quot;Merge duplicate group(s)&quot; to combine them into one profile per person.
@@ -905,8 +998,10 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search by name, email, or phone..."
-            className="block w-full pl-10 pr-3 py-2 glass-input rounded-md leading-5 focus:outline-none focus:placeholder-gray-400 focus:ring-1 focus:ring-primary-500 focus:border-primary-500 sm:text-sm"
+            autoComplete="off"
+            placeholder="Search name, email, phone, Instagram, notes…"
+            aria-label="Search clients on board"
+            className="block w-full pl-10 pr-3 py-2 rounded-md leading-5 sm:text-sm bg-white/10 dark:bg-white/5 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 border-2 border-gray-300 dark:border-gray-600 shadow-sm ring-1 ring-black/[0.06] dark:ring-white/[0.08] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
           />
           {searchQuery && (
             <button
@@ -919,18 +1014,162 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             </button>
           )}
         </div>
-        {searchQuery && (
+
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative" ref={filtersDropdownRef}>
+            <button
+              type="button"
+              id="board-filters-trigger"
+              aria-haspopup="dialog"
+              aria-controls="board-filters-panel"
+              aria-expanded={filtersDropdownOpen}
+              onClick={() => setFiltersDropdownOpen((o) => !o)}
+              className={`inline-flex items-center gap-2 min-h-[40px] px-3 py-2 text-sm font-medium rounded-md border transition-colors ${
+                activeFilterCount > 0
+                  ? 'border-primary-500/40 bg-primary-500/10 text-primary-900 dark:text-primary-100'
+                  : 'border-gray-200 dark:border-gray-600 bg-white/50 dark:bg-gray-900/40 text-gray-700 dark:text-gray-200 hover:bg-white/70 dark:hover:bg-gray-800/50'
+              }`}
+            >
+              <svg className="w-4 h-4 shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"
+                />
+              </svg>
+              <span>Filters</span>
+              {activeFilterCount > 0 ? (
+                <span className="tabular-nums rounded-full bg-primary-600/90 px-1.5 py-0.5 text-[11px] font-semibold text-white dark:bg-primary-500/90">
+                  {activeFilterCount}
+                </span>
+              ) : null}
+              <svg
+                className={`w-4 h-4 shrink-0 opacity-60 transition-transform ${filtersDropdownOpen ? 'rotate-180' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+                aria-hidden
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {filtersDropdownOpen ? (
+              <div
+                id="board-filters-panel"
+                role="dialog"
+                aria-modal="false"
+                aria-labelledby="board-filters-trigger"
+                className="absolute left-0 top-full z-50 mt-1 w-[min(100vw-2rem,280px)] rounded-lg border border-gray-200/80 bg-white/95 p-2 shadow-lg backdrop-blur-sm dark:border-gray-600 dark:bg-gray-900/95"
+              >
+                <p className="px-2 pb-1.5 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Board filters (multi-select)
+                </p>
+                <ul className="max-h-[min(60vh,320px)] space-y-0.5 overflow-y-auto py-0.5">
+                  {CALL_INSIGHT_BOARD_TAGS.map((tag) => {
+                    const checked = selectedInsightTags.has(tag);
+                    const n = insightTagCounts[tag] ?? 0;
+                    return (
+                      <li key={tag}>
+                        <label
+                          className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                            checked
+                              ? 'bg-primary-500/12 text-gray-900 dark:text-gray-100'
+                              : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/80'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800"
+                            checked={checked}
+                            onChange={() => toggleInsightTagFilter(tag)}
+                          />
+                          <span className="min-w-0 flex-1 capitalize">{formatInsightTagLabel(tag)}</span>
+                          <span className="shrink-0 tabular-nums text-xs text-gray-500 dark:text-gray-400">({n})</span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                  <li>
+                    <label
+                      className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                        balanceDueFilter
+                          ? 'bg-primary-500/12 text-gray-900 dark:text-gray-100'
+                          : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/80'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800"
+                        checked={balanceDueFilter}
+                        onChange={toggleBalanceDueFilter}
+                      />
+                      <span className="min-w-0 flex-1">Balance due</span>
+                      <span className="shrink-0 tabular-nums text-xs text-gray-500 dark:text-gray-400">
+                        ({balanceDueCount})
+                      </span>
+                    </label>
+                  </li>
+                </ul>
+                <div className="mt-1.5 border-t border-gray-200 pt-1.5 dark:border-gray-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      clearBoardFilters();
+                    }}
+                    disabled={activeFilterCount === 0}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40 dark:text-gray-400 dark:hover:bg-gray-800"
+                  >
+                    Clear all filters
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <p className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug max-w-xl">
+            Tags match <strong className="font-medium text-gray-600 dark:text-gray-300">any</strong> selection; balance
+            due adds clients with payments below offer total. Counts are for the full board.
+          </p>
+        </div>
+
+        {(searchQuery.trim() || selectedInsightTags.size > 0 || balanceDueFilter) && (
           <div className="text-sm text-gray-600 dark:text-gray-400 digitized-text">
-            Found {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''} matching &quot;{searchQuery}&quot;
+            Showing {filteredClients.length} client{filteredClients.length !== 1 ? 's' : ''}
+            {searchQuery.trim() ? (
+              <>
+                {' '}
+                matching &quot;{searchQuery.trim()}&quot;
+              </>
+            ) : null}
+            {selectedInsightTags.size > 0 ? (
+              <>
+                {' '}
+                with tag{selectedInsightTags.size !== 1 ? 's' : ''}{' '}
+                {Array.from(selectedInsightTags)
+                  .map((t) => formatInsightTagLabel(t))
+                  .join(', ')}
+              </>
+            ) : null}
+            {balanceDueFilter ? (
+              <>
+                {' '}
+                with balance due on offer
+              </>
+            ) : null}
           </div>
         )}
       </div>
 
       <DndContext
         sensors={sensors}
-        collisionDetection={pointerWithin}
+        collisionDetection={closestCorners}
+        onDragStart={handleDragStart}
+        onDragCancel={handleDragCancel}
         onDragOver={handleDragOver}
-        onDragEnd={handleDragEnd}
+        onDragEnd={async (e) => {
+          await handleDragEnd(e);
+          setActiveDragClient(null);
+        }}
       >
         <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-1 px-1 sm:mx-0 sm:px-0 scroll-smooth touch-pan-x min-w-0">
           {COLUMNS.map((column) => {
@@ -952,13 +1191,26 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                   setIsDrawerOpen(true);
                 }}
                 onClientDelete={handleDeleteClient}
-                healthScores={healthScores}
                 callInsightTags={callInsightTags}
                 onEmailColumn={handleEmailColumn}
               />
             );
           })}
         </div>
+        <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.25, 1, 0.5, 1)' }}>
+          {activeDragClient ? (
+            <div className="glass-card neon-glow p-3 rounded-lg shadow-2xl ring-2 ring-primary-500/40 cursor-grabbing max-w-[260px] rotate-1 scale-[1.02] transition-transform">
+              <div className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                {[activeDragClient.first_name, activeDragClient.last_name].filter(Boolean).join(' ') ||
+                  activeDragClient.email ||
+                  'Client'}
+              </div>
+              {activeDragClient.email && (
+                <div className="text-xs text-gray-500 dark:text-gray-400 truncate mt-1">{activeDragClient.email}</div>
+              )}
+            </div>
+          ) : null}
+        </DragOverlay>
       </DndContext>
 
       <ClientDetailDrawer
@@ -968,13 +1220,9 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
           setIsDrawerOpen(false);
           setSelectedClient(null);
         }}
-        onClientSaved={(updated) => {
-          setClients((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
-          setSelectedClient((sel) => (sel?.id === updated.id ? updated : sel));
-        }}
+        onClientSaved={applyClientUpdate}
         healthRefreshToken={healthRefreshToken}
-        onHealthScoreLoaded={(cid, score, grade) => {
-          setHealthScores((prev) => ({ ...prev, [cid]: { score, grade } }));
+        onHealthScoreLoaded={(cid) => {
           apiClient
             .getClientsCallInsightTags([cid])
             .then((tagMap) => {
@@ -983,55 +1231,8 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             })
             .catch(() => {});
         }}
-        onUpdate={async () => {
-          console.log('[KanbanBoard] onUpdate called, reloading clients...');
-          const previousSelectedId = selectedClient?.id;
-          const previousSelectedState = selectedClient?.lifecycle_state;
-          
-          // Reload all clients - this will get the updated states from the server
-          const updatedClients = await loadClients(true);
-          
-          // After clients are loaded, update the selectedClient if one was selected
-          if (previousSelectedId && updatedClients) {
-            const updatedClient = updatedClients.find((c: Client) => c.id === previousSelectedId);
-            if (updatedClient) {
-              console.log('[KanbanBoard] Updating selected client after refresh:', {
-                id: updatedClient.id,
-                oldState: previousSelectedState,
-                newState: updatedClient.lifecycle_state,
-                progress: updatedClient.program_progress_percent,
-                stateChanged: previousSelectedState !== updatedClient.lifecycle_state
-              });
-              setSelectedClient(updatedClient);
-              
-              // If state changed, the card should now be in a different column
-              if (previousSelectedState !== updatedClient.lifecycle_state) {
-                console.log('[KanbanBoard] ✅ Client state changed! Card should move to', updatedClient.lifecycle_state, 'column');
-              }
-            } else {
-              console.warn('[KanbanBoard] Could not find updated client with ID:', previousSelectedId);
-            }
-          }
-
-          // Keep card health tag in sync with the drawer (same GET + use_ai=true as ClientHealthScoreContent).
-          if (previousSelectedId) {
-            try {
-              const full = await apiClient.getClientHealthScore(previousSelectedId, { useAi: true });
-              const sc = full?.score != null ? Number(full.score) : NaN;
-              if (!Number.isNaN(sc)) {
-                const g =
-                  typeof full?.grade === 'string' && full.grade.trim() !== ''
-                    ? full.grade.trim()
-                    : gradeFromHealthScore(sc);
-                setHealthScores((prev) => ({
-                  ...prev,
-                  [previousSelectedId]: { score: sc, grade: g },
-                }));
-              }
-            } catch (err) {
-              console.warn('[KanbanBoard] Failed to refresh full health score for client', previousSelectedId, err);
-            }
-          }
+        onUpdate={() => {
+          void refreshSelectedClient();
         }}
       />
 
@@ -1096,11 +1297,29 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Initial Status
+                  Instagram
+                </label>
+                <input
+                  type="text"
+                  value={createFormData.instagram}
+                  onChange={(e) => setCreateFormData({ ...createFormData, instagram: e.target.value })}
+                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  placeholder="@username"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Pipeline column
                 </label>
                 <select
                   value={createFormData.lifecycle_state}
-                  onChange={(e) => setCreateFormData({ ...createFormData, lifecycle_state: e.target.value as ColumnId })}
+                  onChange={(e) =>
+                    setCreateFormData({
+                      ...createFormData,
+                      lifecycle_state: e.target.value as ColumnId,
+                    })
+                  }
                   className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   {COLUMNS.map((col) => (
@@ -1123,54 +1342,13 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
                   placeholder="Additional notes about this client..."
                 />
               </div>
-
-              <div className="border-t border-gray-200 dark:border-gray-700 pt-4 mt-4">
-                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Program Timeline (Optional)</h4>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Program Start Date
-                    </label>
-                    <input
-                      type="date"
-                      value={createFormData.program_start_date}
-                      onChange={(e) => setCreateFormData({ ...createFormData, program_start_date: e.target.value })}
-                      className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Program End Date
-                    </label>
-                    <input
-                      type="date"
-                      value={createFormData.program_end_date}
-                      onChange={(e) => setCreateFormData({ ...createFormData, program_end_date: e.target.value })}
-                      min={createFormData.program_start_date || undefined}
-                      className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                </div>
-                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-                  Client will automatically move to offboarding at 75% progress and dead when expired
-                </p>
-              </div>
             </div>
 
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => {
                   setIsCreateModalOpen(false);
-                  setCreateFormData({
-                    first_name: '',
-                    last_name: '',
-                    email: '',
-                    phone: '',
-                    lifecycle_state: 'cold_lead',
-                    notes: '',
-                    program_start_date: '',
-                    program_end_date: '',
-                  });
+                  resetCreateForm();
                 }}
                 className="glass-button-secondary px-4 py-2 text-sm font-medium rounded-md hover:bg-white/20"
                 disabled={creating}
@@ -1197,9 +1375,34 @@ export default function ClientKanbanBoard({ filteredColumn = null, onLoadComplet
             setEmailComposerOpen(false);
             setEmailRecipients([]);
           }}
-          onSuccess={() => {
+          onSuccess={async () => {
+            const recipients = [...emailRecipients];
             setEmailComposerOpen(false);
             setEmailRecipients([]);
+            const nowIso = new Date().toISOString();
+            const norm = (e: string) => e.replace(/\s+/g, '').toLowerCase();
+            const recipientKeys = new Set(recipients.map((r) => norm(r.email)));
+            const toTouch = clients.filter((c) =>
+              getEmailsForClient(c).some((em) => recipientKeys.has(norm(em))),
+            );
+            try {
+              const updatedRows = await Promise.all(
+                toTouch.map((c) => {
+                  const nextMeta =
+                    c.meta && typeof c.meta === 'object' ? { ...c.meta } : {};
+                  delete (nextMeta as Record<string, unknown>).follow_up_due_at;
+                  return apiClient.updateClient(c.id, {
+                    last_activity_at: nowIso,
+                    meta: nextMeta as Client['meta'],
+                  });
+                }),
+              );
+              for (const updated of updatedRows) {
+                applyClientUpdate(updated);
+              }
+            } catch (err) {
+              console.error('[KanbanBoard] Follow-up reset after email failed:', err);
+            }
           }}
         />
       )}
@@ -1217,7 +1420,6 @@ interface KanbanColumnProps {
   mergingCards: boolean;
   onClientClick: (client: Client) => void;
   onClientDelete?: (client: Client) => void;
-  healthScores?: Record<string, { score: number; grade: string }>;
   callInsightTags?: Record<string, { tags: string[]; headline: string }>;
   onEmailColumn?: (columnId: ColumnId) => void;
 }
@@ -1231,21 +1433,20 @@ function KanbanColumn({
   mergingCards,
   onClientClick,
   onClientDelete,
-  healthScores = {},
   callInsightTags = {},
   onEmailColumn,
 }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({
     id: id,
   });
-  const isLeadColumn = id === 'cold_lead' || id === 'warm_lead';
+  const isLeadColumn = isLeadPipelineColumn(id);
 
   return (
-    <div className="flex-shrink-0 w-[260px] min-w-[260px] sm:w-64 sm:min-w-64">
+    <div className="flex-shrink-0 w-[220px] min-w-[220px] sm:w-[240px] sm:min-w-[240px]">
       <div
         ref={setNodeRef}
-        className={`glass-card p-3 sm:p-4 min-h-[280px] sm:min-h-[400px] transition-shadow ${
-          isActive ? 'neon-glow' : ''
+        className={`glass-card p-3 sm:p-4 min-h-[280px] sm:min-h-[400px] transition-all duration-200 ease-out ${
+          isActive ? 'neon-glow ring-2 ring-primary-500/25' : ''
         }`}
       >
         <div className="flex items-start justify-between gap-2 mb-3">
@@ -1285,8 +1486,6 @@ function KanbanColumn({
                 onDelete={onClientDelete}
                 isMergeTarget={dragOverId === MERGE_DROP_ID(client.id)}
                 showSlotLineAbove={dragOverId === SLOT_DROP_ID(client.id)}
-                healthGrade={healthScores[client.id]?.grade}
-                healthScore={healthScores[client.id]?.score}
                 insightTags={callInsightTags[client.id]?.tags}
                 isLeadColumn={isLeadColumn}
               />
