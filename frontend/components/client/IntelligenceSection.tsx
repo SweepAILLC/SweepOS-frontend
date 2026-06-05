@@ -277,7 +277,7 @@ export default function IntelligenceSection({
       const nextMeta = mergeMetaWithDismissedClip(client.meta as Record<string, unknown> | undefined, key);
       const updated = await apiClient.updateClient(client.id, { meta: nextMeta });
       setClipConfirmClip(null);
-      if (onClientPatched) {
+      if (onClientPatched && updated) {
         onClientPatched(updated);
       } else {
         onClientUpdated?.();

@@ -651,7 +651,7 @@ export default function ClientKanbanBoard({
 
     try {
       const updated = await apiClient.updateClient(clientId, updateData);
-      applyClientUpdate(updated);
+      if (updated) applyClientUpdate(updated);
     } catch (error) {
       applyClientUpdate(previous);
       console.error('Failed to update client:', error);
@@ -1479,7 +1479,7 @@ export default function ClientKanbanBoard({
                 }),
               );
               for (const updated of updatedRows) {
-                applyClientUpdate(updated);
+                if (updated) applyClientUpdate(updated);
               }
             } catch (err) {
               console.error('[KanbanBoard] Follow-up reset after email failed:', err);

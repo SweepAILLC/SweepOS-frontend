@@ -96,7 +96,11 @@ export default function CalendarEventTypeNodes({
     try {
       if (next) {
         await apiClient.addSalesCallEventType(provider, node.id);
-        setSalesCallIds((prev) => new Set([...prev, node.id]));
+        setSalesCallIds((prev) => {
+          const n = new Set(prev);
+          n.add(node.id);
+          return n;
+        });
       } else {
         await apiClient.removeSalesCallEventType(provider, node.id);
         setSalesCallIds((prev) => {

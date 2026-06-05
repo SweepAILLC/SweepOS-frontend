@@ -313,7 +313,7 @@ export default function ClientDetailDrawer({
       }
 
       const updated = await apiClient.updateClient(client.id, updateData);
-      onClientSaved?.(withNormalizedLifecycle(updated));
+      if (updated) onClientSaved?.(withNormalizedLifecycle(updated));
     } catch (error) {
       console.error('Failed to update client:', error);
       alert('Failed to update client. Please try again.');
@@ -347,7 +347,7 @@ export default function ClientDetailDrawer({
     setAdvancingStage(true);
     try {
       const updated = await apiClient.updateClient(client.id, updateData);
-      onClientSaved?.(withNormalizedLifecycle(updated));
+      if (updated) onClientSaved?.(withNormalizedLifecycle(updated));
     } catch (error: unknown) {
       onClientSaved?.(previous);
       console.error('Failed to advance client stage:', error);
@@ -710,7 +710,7 @@ export default function ClientDetailDrawer({
                             }}
                             fieldBlurSave={fieldBlurSave}
                             saveClientFields={(data) =>
-                              void saveClientFields(
+                              saveClientFields(
                                 data ? { ...formDataRef.current, ...data } : undefined,
                               )
                             }

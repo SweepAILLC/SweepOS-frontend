@@ -208,7 +208,7 @@ function ClientCard({
             </div>
           ) : (
             !isLeadColumn &&
-            isProgramProgressVisible(client) && (
+            isProgramProgressVisible(client) && client.program_progress_percent != null && (
               <div className="mt-2">
                 <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
                   <span className="digitized-text">Program Progress</span>
@@ -223,7 +223,9 @@ function ClientCard({
                           ? 'bg-yellow-500'
                           : 'bg-blue-500'
                     }`}
-                    style={{ width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%` }}
+                    style={{
+                      width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%`,
+                    }}
                   />
                 </div>
                 {client.program_end_date && (
