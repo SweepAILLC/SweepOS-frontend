@@ -9,6 +9,7 @@ import {
   TERMINAL_CLIENTS_UPDATED_EVENT,
   clearSessionCaches,
   clearCalendarIntegrationStatusCache,
+  dispatchCalendarIntegrationChanged,
   invalidateCachesAfterManualPayment,
 } from './cache';
 
@@ -55,6 +56,18 @@ function sanitizeClientsList(rows: unknown): Client[] {
       c != null && typeof c === 'object' && typeof (c as Client).id === 'string',
   );
 }
+
+/** Read cached terminal monthly trends without a network call. */
+export function peekCachedTerminalMonthlyTrends(): import('@/types/admin').HealthTrendPeriod[] {
+  const cached = cache.get<{ periods?: import('@/types/admin').HealthTrendPeriod[] }>(
+    CACHE_KEYS.TERMINAL_MONTHLY_TRENDS
+  );
+  return Array.isArray(cached?.periods) ? cached.periods : [];
+}
+
+type TerminalMonthlyTrendsPayload = { periods: import('@/types/admin').HealthTrendPeriod[] };
+
+let terminalMonthlyTrendsInflight: Promise<TerminalMonthlyTrendsPayload> | null = null;
 
 /** Read cached client list without a network call (for instant pipeline paint). */
 export function peekCachedClientsList(): Client[] | null {
@@ -311,6 +324,18 @@ export interface CalendarSyncedBookingRow {
   sale_closed: boolean | null;
   display_status: string;
   calcom_uid: string | null;
+}
+
+/** Row from GET /integrations/calendar/trend-summary (scoped DB aggregates). */
+export interface CalendarTrendSummary {
+  upcoming_count: number;
+  past_count: number;
+  close_rate_pct: number | null;
+  sales_calls_in_range: number;
+  closed_sales_count: number;
+  show_up_rate_pct: number | null;
+  attendance_eligible_past: number;
+  showed_up_count: number;
 }
 
 /** Matches backend `client_health_score._grade_from_score` for batch responses missing `grade`. */
@@ -604,6 +629,7 @@ class ApiClient {
         path: '/'
       });
       clearCalendarIntegrationStatusCache();
+      clearSessionCaches();
     }
     return data;
   }
@@ -739,9 +765,17 @@ class ApiClient {
 
   async updateClient(id: string, data: any) {
     const response = await this.client.patch(`/clients/${id}`, data);
+    let updated = response.data as Client | undefined;
+    if (updated?.id && data && typeof data === 'object') {
+      if ('offer_enrollment' in data && updated.offer_enrollment === undefined) {
+        updated = { ...updated, offer_enrollment: data.offer_enrollment };
+      }
+      if ('meta' in data && updated.meta === undefined) {
+        updated = { ...updated, meta: data.meta };
+      }
+    }
     const cacheKey = clientsListCacheKey();
     const cached = cache.get<unknown[]>(cacheKey);
-    const updated = response.data as Client | undefined;
     if (cached != null && updated?.id) {
       const list = sanitizeClientsList(cached);
       cache.set(
@@ -755,7 +789,7 @@ class ApiClient {
     if (typeof window !== 'undefined' && updated?.id) {
       window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
     }
-    return response.data;
+    return updated;
   }
 
   async mergeClients(clientIds: string[]) {
@@ -777,6 +811,9 @@ class ApiClient {
       );
     } else {
       invalidateClientsListCache();
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
     }
   }
 
@@ -809,6 +846,30 @@ class ApiClient {
     if (paymentMethod) params.payment_method = paymentMethod;
     if (receiptUrl) params.receipt_url = receiptUrl;
     const response = await this.client.post(`/clients/${clientId}/manual-payment`, null, { params });
+    cache.deleteByPrefix(`client_payments_${clientId}_`);
+    invalidateCachesAfterManualPayment();
+    return response.data;
+  }
+
+  async updateManualPayment(
+    clientId: string,
+    paymentId: string,
+    amount: number,
+    paymentDate?: string,
+    description?: string,
+    paymentMethod?: string,
+    receiptUrl?: string
+  ) {
+    const params: Record<string, string | number> = { amount };
+    if (paymentDate) params.payment_date = paymentDate;
+    if (description !== undefined) params.description = description;
+    if (paymentMethod !== undefined) params.payment_method = paymentMethod;
+    if (receiptUrl !== undefined) params.receipt_url = receiptUrl;
+    const response = await this.client.patch(
+      `/clients/${clientId}/manual-payment/${paymentId}`,
+      null,
+      { params }
+    );
     cache.deleteByPrefix(`client_payments_${clientId}_`);
     invalidateCachesAfterManualPayment();
     return response.data;
@@ -1124,7 +1185,7 @@ class ApiClient {
     const response = await this.client.post('/oauth/calcom/connect-direct', {
       api_key: apiKey
     });
-    clearCalendarIntegrationStatusCache();
+    dispatchCalendarIntegrationChanged();
     return response.data;
   }
 
@@ -1140,7 +1201,7 @@ class ApiClient {
 
   async disconnectCalCom() {
     await this.client.delete('/oauth/calcom/disconnect');
-    clearCalendarIntegrationStatusCache();
+    dispatchCalendarIntegrationChanged();
   }
 
   async getCalComBookings(limit: number = 50, offset: number = 0) {
@@ -1172,7 +1233,7 @@ class ApiClient {
     const response = await this.client.post('/oauth/calendly/connect-direct', {
       api_key: apiKey
     });
-    clearCalendarIntegrationStatusCache();
+    dispatchCalendarIntegrationChanged();
     return response.data;
   }
 
@@ -1188,7 +1249,7 @@ class ApiClient {
 
   async disconnectCalendly() {
     await this.client.delete('/oauth/calendly/disconnect');
-    clearCalendarIntegrationStatusCache();
+    dispatchCalendarIntegrationChanged();
   }
 
   async getCalendlyScheduledEvents(params?: {
@@ -1242,17 +1303,25 @@ class ApiClient {
 
   /** Monthly combined cash + calendar rates for unified Terminal dashboard. */
   async getTerminalMonthlyTrends(forceRefresh?: boolean) {
-    type MonthlyTrends = { periods: import('@/types/admin').HealthTrendPeriod[] };
     if (!forceRefresh) {
-      const cached = cache.get<MonthlyTrends>(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+      const cached = cache.get<TerminalMonthlyTrendsPayload>(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
       if (cached != null) return cached;
     }
-    const response = await this.client.get('/clients/terminal/monthly-trends');
-    const data = response.data as MonthlyTrends;
-    if (!forceRefresh) {
-      cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+
+    if (!terminalMonthlyTrendsInflight) {
+      terminalMonthlyTrendsInflight = this.client
+        .get('/clients/terminal/monthly-trends', { timeout: 60000 })
+        .then((response) => {
+          const data = response.data as TerminalMonthlyTrendsPayload;
+          cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+          return data;
+        })
+        .finally(() => {
+          terminalMonthlyTrendsInflight = null;
+        });
     }
-    return data;
+
+    return terminalMonthlyTrendsInflight;
   }
 
   /** Manual check-ins for the calendar grid (date range YYYY-MM-DD). */
@@ -1263,23 +1332,57 @@ class ApiClient {
     return response.data;
   }
 
+  /** Lightweight: when Cal.com / Calendly check-ins last changed (webhook or sync). */
+  async getCalendarLastUpdated(): Promise<{ last_updated: string | null; last_updated_ms: number | null }> {
+    const response = await this.client.get('/integrations/calendar/last-updated');
+    return response.data;
+  }
+
+  /** Scoped show-up / close-rate KPIs from full synced check-in history (not capped like bookings list). */
+  async getCalendarTrendSummary(params?: { scope?: 'mtd' | 'all'; range_days?: number }) {
+    const cacheKey = `calendar_trend_summary_${orgIdFromAccessToken()}_${JSON.stringify(params || {})}`;
+    const cached = cache.get<CalendarTrendSummary>(cacheKey);
+    if (cached != null) return cached;
+
+    const data = await withRetry(
+      async () => {
+        const response = await this.client.get('/integrations/calendar/trend-summary', {
+          params: params || {},
+          timeout: 90000,
+        });
+        return response.data as CalendarTrendSummary;
+      },
+      3,
+      2000
+    );
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
+  }
+
   /** Canonical Cal.com / Calendly rows from synced `client_check_ins` (after `syncCheckIns`). */
   async getCalendarSyncedBookings(params?: {
     upcoming_limit?: number;
     past_limit?: number;
+    past_since?: string;
     provider?: 'calcom' | 'calendly';
   }) {
     // DB-backed read must stay under Postgres statement_timeout (see backend session); allow headroom
     // for pool wait + JSON when the API is busy right after check-in sync.
-    const response = await this.client.get('/integrations/calendar/synced-bookings', {
-      params: params || {},
-      timeout: 120000,
-    });
-    return response.data as {
-      server_time: string;
-      upcoming: CalendarSyncedBookingRow[];
-      past: CalendarSyncedBookingRow[];
-    };
+    return withRetry(
+      async () => {
+        const response = await this.client.get('/integrations/calendar/synced-bookings', {
+          params: params || {},
+          timeout: 120000,
+        });
+        return response.data as {
+          server_time: string;
+          upcoming: CalendarSyncedBookingRow[];
+          past: CalendarSyncedBookingRow[];
+        };
+      },
+      3,
+      2000
+    );
   }
 
   async getCalendlyEventTypes(params?: {
@@ -2041,9 +2144,23 @@ class ApiClient {
   }
 
   // Performance tab
-  async getPerformanceSnapshot(): Promise<PerformanceSnapshot> {
-    const response = await this.client.get('/performance/snapshot');
-    return response.data;
+  async getPerformanceSnapshot(forceRefresh = false): Promise<PerformanceSnapshot> {
+    const cacheKey = `performance_snapshot_${orgIdFromAccessToken()}`;
+    if (!forceRefresh) {
+      const cached = cache.get<PerformanceSnapshot>(cacheKey);
+      if (cached != null) return cached;
+    }
+
+    const data = await withRetry(
+      async () => {
+        const response = await this.client.get('/performance/snapshot', { timeout: 90000 });
+        return response.data as PerformanceSnapshot;
+      },
+      3,
+      2000
+    );
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   async patchPerformanceTasks(completed_task_ids: string[]) {
@@ -2236,13 +2353,33 @@ class ApiClient {
     return response.data as AutomationPreviewResponse;
   }
 
-  async getOutreachInbox(params?: {
-    include_performance?: boolean;
-    include_automations?: boolean;
-    limit?: number;
-  }): Promise<OutreachInboxResponse> {
-    const response = await this.client.get('/outreach/inbox', { params });
-    return response.data as OutreachInboxResponse;
+  async getOutreachInbox(
+    params?: {
+      include_performance?: boolean;
+      include_automations?: boolean;
+      limit?: number;
+    },
+    forceRefresh = false
+  ): Promise<OutreachInboxResponse> {
+    const cacheKey = `outreach_inbox_${orgIdFromAccessToken()}_${JSON.stringify(params || {})}`;
+    if (!forceRefresh) {
+      const cached = cache.get<OutreachInboxResponse>(cacheKey);
+      if (cached != null) return cached;
+    }
+
+    const data = await withRetry(
+      async () => {
+        const response = await this.client.get('/outreach/inbox', {
+          params: params || {},
+          timeout: 60000,
+        });
+        return response.data as OutreachInboxResponse;
+      },
+      3,
+      2000
+    );
+    cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 }
 

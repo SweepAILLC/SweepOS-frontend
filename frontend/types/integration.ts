@@ -219,6 +219,8 @@ export interface Payment {
   client_email?: string;
   subscription_id?: string;
   receipt_url?: string;
+  description?: string;
+  payment_method?: string;
 }
 
 export interface Subscription {
@@ -330,7 +332,7 @@ export interface CalendarNotificationsSummary {
   last_month_count: number;
   last_week_percentage_change?: number | null;
   last_month_percentage_change?: number | null;
-  show_up_rate?: number | null; // % of past appointments (last 30 days) that showed up; 0-100
+  show_up_rate?: number | null; // % of past sales calls (last 30 days) that showed up; cancellations excluded; no-shows reduce rate
   most_upcoming?: CalendarUpcomingAppointment | null;
   upcoming_appointments?: CalendarUpcomingAppointment[] | null; // Up to 3 upcoming appointments (including manual check-ins)
   provider?: string | null; // "calcom" or "calendly" or null
@@ -358,18 +360,25 @@ export interface TerminalSummaryForWidgets {
 }
 
 /** GET /integrations/finances/summary */
+export interface FinancesSourceSlice {
+  last_30_days_revenue: number;
+  last_mtd_revenue: number;
+}
+
 export interface FinancesCombinedSummary {
   stripe_connected: boolean;
   whop_connected: boolean;
-  combined: { last_30_days_revenue: number; last_mtd_revenue: number };
-  stripe: { last_30_days_revenue: number; last_mtd_revenue: number };
-  whop: { last_30_days_revenue: number; last_mtd_revenue: number };
+  combined: FinancesSourceSlice;
+  stripe: FinancesSourceSlice;
+  whop: FinancesSourceSlice;
+  manual?: FinancesSourceSlice;
 }
 
 export interface FinancesTimelinePoint {
   date: string;
   stripe_revenue: number;
   whop_revenue: number;
+  manual_revenue?: number;
   total_revenue: number;
 }
 

@@ -32,8 +32,8 @@ export default function GlobalLoadingOverlay() {
   if (!mounted || !isLoading) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-80 dark:bg-opacity-90 z-[9999] flex items-center justify-center">
-      <div className="bg-white dark:glass-card rounded-lg shadow-xl p-12 border border-gray-200 dark:border-white/10">
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center premium-overlay-backdrop bg-black/75 dark:bg-black/85 backdrop-blur-sm">
+      <div className="premium-reveal glass-card rounded-xl border border-gray-200 dark:border-white/10 p-12 shadow-2xl">
         <SweepLoadingSpinner size="lg" message={loadingMessage || 'Loading...'} />
       </div>
     </div>

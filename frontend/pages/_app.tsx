@@ -4,6 +4,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import '../styles/globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LoadingProvider } from '@/contexts/LoadingContext';
+import { SidebarProvider } from '@/contexts/SidebarContext';
 import GlobalLoadingOverlay from '@/components/ui/GlobalLoadingOverlay';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
@@ -115,10 +116,12 @@ export default function App({ Component, pageProps }: AppProps) {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <LoadingProvider>
-          <GlobalLoadingOverlay />
-          <Component {...pageProps} />
-        </LoadingProvider>
+        <SidebarProvider>
+          <LoadingProvider>
+            <GlobalLoadingOverlay />
+            <Component {...pageProps} />
+          </LoadingProvider>
+        </SidebarProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );

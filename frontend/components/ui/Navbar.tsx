@@ -1,7 +1,7 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import type { TabId } from '@/lib/tabs';
 import { canAccessBottomNavTab, canAccessTab } from '@/lib/tabAccess';
-import { APP_SIDEBAR_WIDTH } from '@/components/ui/layoutConstants';
+import { useSidebar } from '@/contexts/SidebarContext';
 
 export type { TabId };
 
@@ -21,6 +21,54 @@ const navBtnInactive = 'text-gray-600 dark:text-gray-400 hover:bg-white/10 hover
 const navBtnActive =
   'text-gray-900 dark:text-gray-100 bg-white/15 dark:bg-white/10 shadow-sm';
 
+const iconClass = 'w-5 h-5 flex-shrink-0';
+
+function NavIcon({ children }: { children: ReactNode }) {
+  return (
+    <span className={`flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5`}>
+      {children}
+    </span>
+  );
+}
+
+const TAB_ICONS: Partial<Record<TabId, ReactNode>> = {
+  terminal: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+    </svg>
+  ),
+  pipeline: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+    </svg>
+  ),
+  funnels: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+    </svg>
+  ),
+  content_studio: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+    </svg>
+  ),
+  call_library: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  ),
+  owner: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+    </svg>
+  ),
+  automations: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ),
+};
+
 export default function Navbar({
   activeTab,
   onTabChange,
@@ -31,6 +79,7 @@ export default function Navbar({
   automationsAwaitingApproval = 0,
 }: NavbarProps) {
   const [mounted, setMounted] = useState(false);
+  const { collapsed, toggleCollapsed } = useSidebar();
 
   useEffect(() => {
     setMounted(true);
@@ -42,50 +91,75 @@ export default function Navbar({
   const shouldShowBottomNavTab = (tab: TabId): boolean =>
     canAccessBottomNavTab(tab, { userRole, tabPermissions });
 
+  const navWidth = collapsed ? 'w-[5rem]' : 'w-56';
+  const btnLayout = collapsed ? 'justify-center px-2' : '';
+
   const tabBtn = (tab: TabId, label: string) => {
     const active = activeTab === tab;
+    const icon = TAB_ICONS[tab];
     return (
       <button
         key={tab}
         type="button"
         onClick={() => onTabChange(tab)}
-        className={`${navBtnBase} ${active ? navBtnActive : navBtnInactive}`}
+        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive}`}
+        title={label}
+        aria-label={label}
+        aria-current={active ? 'page' : undefined}
         style={
           active
             ? { textShadow: '0 0 8px rgba(139, 92, 246, 0.35), 0 0 10px rgba(59, 130, 246, 0.2)' }
             : undefined
         }
       >
-        {label}
+        {icon ? <NavIcon>{icon}</NavIcon> : null}
+        <span className={collapsed ? 'sr-only' : 'truncate'}>{label}</span>
       </button>
     );
   };
 
   const iconBtn = (
-    onClick: () => void,
+    tab: TabId,
     label: string,
     icon: ReactNode,
-    opts?: { ariaLabel?: string; title?: string; extraClass?: string }
-  ) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`${navBtnBase} ${navBtnInactive} ${opts?.extraClass ?? ''}`}
-      aria-label={opts?.ariaLabel ?? label}
-      title={opts?.title ?? label}
-    >
-      <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5">{icon}</span>
-      <span className="truncate">{label}</span>
-    </button>
-  );
+    opts?: { ariaLabel?: string; title?: string; extraClass?: string; badge?: number }
+  ) => {
+    const active = activeTab === tab;
+    return (
+      <button
+        key={tab}
+        type="button"
+        onClick={() => onTabChange(tab)}
+        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''}`}
+        aria-label={opts?.ariaLabel ?? label}
+        title={opts?.title ?? label}
+        aria-current={active ? 'page' : undefined}
+      >
+        <span className="relative flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5">
+          {icon}
+          {collapsed && (opts?.badge ?? 0) > 0 ? (
+            <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[0.875rem] h-3.5 rounded-full bg-amber-500 text-white text-[8px] font-bold px-0.5">
+              {(opts?.badge ?? 0) > 9 ? '9+' : opts?.badge}
+            </span>
+          ) : null}
+        </span>
+        <span className={collapsed ? 'sr-only' : 'truncate flex-1'}>{label}</span>
+        {!collapsed && (opts?.badge ?? 0) > 0 ? (
+          <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
+            {(opts?.badge ?? 0) > 99 ? '99+' : opts?.badge}
+          </span>
+        ) : null}
+      </button>
+    );
+  };
 
   return (
     <nav
-      className={`glass-panel fixed left-0 top-0 bottom-0 z-[50] ${APP_SIDEBAR_WIDTH} flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg`}
+      className={`glass-panel fixed left-0 top-0 bottom-0 z-[50] ${navWidth} flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-[width] duration-300 ease-out`}
       aria-label="Main navigation"
     >
       <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10">
-        <div className="flex items-center gap-2 min-w-0">
+        <div className={`flex items-center gap-2 min-w-0 ${collapsed ? 'justify-center' : ''}`}>
           {mounted && (
             <div className="relative w-8 h-8 flex-shrink-0">
               <img
@@ -100,9 +174,13 @@ export default function Navbar({
               />
             </div>
           )}
-          <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">Sweep OS</h1>
+          {!collapsed ? (
+            <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">
+              Sweep OS
+            </h1>
+          ) : null}
         </div>
-        {organizationName ? (
+        {!collapsed && organizationName ? (
           <p
             className={`text-xs font-medium text-gray-500 dark:text-gray-400 truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''}`}
             title={organizationName}
@@ -122,35 +200,14 @@ export default function Navbar({
       </div>
 
       <div className="flex-shrink-0 p-2 border-t border-gray-200/50 dark:border-white/10 space-y-1">
-        {shouldShowBottomNavTab('automations') && (
-          <button
-            type="button"
-            onClick={() => onTabChange('automations')}
-            className={`${navBtnBase} ${navBtnInactive} ${activeTab === 'automations' ? 'ring-2 ring-violet-500/50' : ''}`}
-            aria-label="Automations"
-            title="Automated email playbooks & worker health"
-          >
-            <span className="flex-shrink-0 w-5 h-5 flex items-center justify-center">
-              <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className="w-5 h-5">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M13 10V3L4 14h7v7l9-11h-7z"
-                />
-              </svg>
-            </span>
-            <span className="truncate flex-1">Automations</span>
-            {automationsAwaitingApproval > 0 ? (
-              <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
-                {automationsAwaitingApproval > 99 ? '99+' : automationsAwaitingApproval}
-              </span>
-            ) : null}
-          </button>
-        )}
+        {shouldShowBottomNavTab('automations') &&
+          iconBtn('automations', 'Automations', TAB_ICONS.automations, {
+            title: 'Automated email playbooks & worker health',
+            badge: automationsAwaitingApproval,
+          })}
         {shouldShowBottomNavTab('intelligence') &&
           iconBtn(
-            () => onTabChange('intelligence'),
+            'intelligence',
             'Intelligence',
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path
@@ -161,14 +218,13 @@ export default function Navbar({
               />
             </svg>,
             {
-              extraClass: activeTab === 'intelligence' ? 'ring-2 ring-violet-500/50' : '',
               ariaLabel: 'AI Intelligence',
               title: 'AI Intelligence profile',
             }
           )}
         {shouldShowBottomNavTab('integrations') &&
           iconBtn(
-            () => onTabChange('integrations'),
+            'integrations',
             'Integrations',
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path
@@ -179,13 +235,12 @@ export default function Navbar({
               />
             </svg>,
             {
-              extraClass: activeTab === 'integrations' ? 'ring-2 ring-violet-500/50' : '',
               title: 'Connect Stripe, Brevo, Whop, and more',
             }
           )}
         {shouldShowBottomNavTab('users') &&
           iconBtn(
-            () => onTabChange('users'),
+            'users',
             'Users',
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
               <path
@@ -196,25 +251,43 @@ export default function Navbar({
               />
             </svg>,
             {
-              extraClass: activeTab === 'users' ? 'ring-2 ring-violet-500/50' : '',
               title: 'Team members and invitations',
             }
           )}
         {shouldShowBottomNavTab('settings') &&
           iconBtn(
-          () => onTabChange('settings'),
-          'Settings',
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-            />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-          </svg>,
-          { ariaLabel: 'Open settings' }
-        )}
+            'settings',
+            'Settings',
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+              />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>,
+            { ariaLabel: 'Open settings' }
+          )}
+
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className={`${navBtnBase} ${btnLayout} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2`}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <NavIcon>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+              {collapsed ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+              )}
+            </svg>
+          </NavIcon>
+          <span className={collapsed ? 'sr-only' : 'truncate'}>{collapsed ? 'Expand' : 'Collapse'}</span>
+        </button>
       </div>
     </nav>
   );

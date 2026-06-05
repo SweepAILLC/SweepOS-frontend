@@ -11,8 +11,25 @@ import {
 } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import { useLoading } from '@/contexts/LoadingContext';
-import PerformancePipelineMini from '@/components/ui/PerformancePipelineMini';
+import PipelineSnapshot from '@/components/pipeline/PipelineSnapshot';
 import EmailComposer from '@/components/brevo/EmailComposer';
+import {
+  hydratePipelineStoreFromCache,
+  peekPipelineColumnFilter,
+  setPipelineColumnFilter,
+} from '@/lib/pipelineStore';
+import {
+  hydratePerformanceApprovals,
+  hydratePerformanceSnapshot,
+  persistPerformanceApprovals,
+  persistPerformanceSnapshot,
+} from '@/lib/performancePrioritiesCache';
+import { TERMINAL_DATA_REFRESHED_EVENT } from '@/lib/cache';
+import {
+  isTerminalRefreshInFlight,
+  isTerminalSyncOnLoadPending,
+} from '@/lib/terminalRefresh';
+import { useRouter } from 'next/router';
 
 type RxMap = Record<string, { why: string; prescription: string; next_step: string }>;
 type DraftMap = Record<string, PerformanceTaskEmailDraft>;
@@ -26,6 +43,12 @@ type ComposerPayload = {
 const AUTO_EMAIL_DRAFT_CAP = 6;
 /** How long a just-completed priority stays in the open list with a checked visual before moving to Completed. */
 const COMPLETE_VISUAL_GRACE_MS = 850;
+/** Defer LLM prescription/draft batch so calendar + finance loads finish first. */
+const PRESCRIPTION_DEFER_MS = 3200;
+/** Defer approvals inbox while terminal session sync runs. */
+const APPROVALS_DEFER_BUSY_MS = 2200;
+const APPROVALS_DEFER_DEFAULT_MS = 700;
+const APPROVALS_INBOX_LIMIT = 50;
 
 /**
  * Each automation playbook maps to one or more focus tags that overlap with Performance
@@ -117,6 +140,7 @@ interface PerformancePanelProps {
 }
 
 export default function PerformancePanel({ variant = 'standalone' }: PerformancePanelProps) {
+  const router = useRouter();
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +175,8 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
   const [approvalsLoading, setApprovalsLoading] = useState(false);
   const [approvalBusy, setApprovalBusy] = useState<Record<string, 'approve' | 'decline' | undefined>>({});
   const [approvalError, setApprovalError] = useState<string | null>(null);
+  const [pipelineFilter, setPipelineFilter] = useState<string | null>(null);
+  const hasApprovalsDataRef = useRef(false);
 
   const clearAllCompletingGrace = useCallback(() => {
     completingGraceTimersRef.current.forEach((t) => clearTimeout(t));
@@ -196,6 +222,35 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
     return () => {
       completingGraceTimersRef.current.forEach((t) => clearTimeout(t));
       completingGraceTimersRef.current.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    hydratePipelineStoreFromCache();
+    const cachedSnap = hydratePerformanceSnapshot();
+    if (cachedSnap) {
+      setSnap(cachedSnap);
+      setTasks(cachedSnap.tasks || []);
+      hasSnapshotDataRef.current = true;
+      setLoading(false);
+      const seededDrafts: DraftMap = {};
+      for (const d of cachedSnap.drafts || []) {
+        if (d?.task_id) seededDrafts[d.task_id] = d;
+      }
+      setDrafts(seededDrafts);
+    }
+    const cachedApprovals = hydratePerformanceApprovals();
+    if (cachedApprovals) {
+      setApprovals(cachedApprovals);
+      hasApprovalsDataRef.current = true;
+    }
+    setPipelineFilter(peekPipelineColumnFilter());
+    const syncPipelineFilter = () => setPipelineFilter(peekPipelineColumnFilter());
+    document.addEventListener('visibilitychange', syncPipelineFilter);
+    window.addEventListener('focus', syncPipelineFilter);
+    return () => {
+      document.removeEventListener('visibilitychange', syncPipelineFilter);
+      window.removeEventListener('focus', syncPipelineFilter);
     };
   }, []);
 
@@ -290,13 +345,16 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
   );
 
   const loadSnapshot = useCallback(
-    async ({ runFollowups = true }: { runFollowups?: boolean } = {}) => {
+    async ({
+      runFollowups = true,
+      force = false,
+    }: { runFollowups?: boolean; force?: boolean } = {}) => {
       if (!hasSnapshotDataRef.current) {
         setLoading(true);
       }
       setError(null);
       try {
-        const data = await apiClient.getPerformanceSnapshot();
+        const data = await apiClient.getPerformanceSnapshot(force);
         setError(null);
         setSnap(data);
         setTasks(data.tasks || []);
@@ -311,9 +369,13 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
         // Server is source of truth — drop any in-flight “stay in open list” grace so lists match API.
         clearAllCompletingGrace();
 
+        persistPerformanceSnapshot(data);
+
         if (runFollowups && !prescriptionRequestedRef.current) {
           prescriptionRequestedRef.current = true;
-          void requestPrescriptionsAndDrafts(data);
+          window.setTimeout(() => {
+            void requestPrescriptionsAndDrafts(data);
+          }, PRESCRIPTION_DEFER_MS);
         }
         return data;
       } catch (e: unknown) {
@@ -331,19 +393,26 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
   );
 
   /** Pull only the awaiting-approval portion of the unified inbox; performance tasks come from the snapshot. */
-  const loadApprovals = useCallback(async () => {
-    setApprovalsLoading(true);
+  const loadApprovals = useCallback(async (opts?: { silent?: boolean; force?: boolean }) => {
+    if (!opts?.silent && !hasApprovalsDataRef.current) {
+      setApprovalsLoading(true);
+    }
     setApprovalError(null);
     try {
-      const res = await apiClient.getOutreachInbox({
-        include_performance: false,
-        include_automations: true,
-        limit: 100,
-      });
+      const res = await apiClient.getOutreachInbox(
+        {
+          include_performance: false,
+          include_automations: true,
+          limit: APPROVALS_INBOX_LIMIT,
+        },
+        !!opts?.force
+      );
       const pending = (res.items || []).filter(
         (it) => it.source === 'automation_job' && it.requires_approval,
       );
       setApprovals(pending);
+      persistPerformanceApprovals(pending);
+      hasApprovalsDataRef.current = true;
     } catch (e: unknown) {
       const msg =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
@@ -411,7 +480,7 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
     if (reanalyzing) return;
     setReanalyzing(true);
     setReanalyzeNotice(null);
-    void loadApprovals();
+    void loadApprovals({ force: true });
     const notices: string[] = [];
     try {
       // loadSnapshot swallows API errors and returns null (it also sets panel `error` state).
@@ -548,12 +617,35 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
   }, [drafts, pendingComposerTaskId, tasks, tryOpenComposerWith]);
 
   useEffect(() => {
-    loadSnapshot();
+    const delayMs =
+      isTerminalSyncOnLoadPending() || isTerminalRefreshInFlight()
+        ? APPROVALS_DEFER_BUSY_MS
+        : APPROVALS_DEFER_DEFAULT_MS;
+    const snapshotTimer = window.setTimeout(() => {
+      void loadSnapshot();
+    }, delayMs);
+    return () => window.clearTimeout(snapshotTimer);
   }, [loadSnapshot]);
 
   useEffect(() => {
-    void loadApprovals();
+    const delayMs =
+      isTerminalSyncOnLoadPending() || isTerminalRefreshInFlight()
+        ? APPROVALS_DEFER_BUSY_MS + 400
+        : APPROVALS_DEFER_DEFAULT_MS + 400;
+    const approvalsTimer = window.setTimeout(() => {
+      void loadApprovals();
+    }, delayMs);
+    return () => window.clearTimeout(approvalsTimer);
   }, [loadApprovals]);
+
+  useEffect(() => {
+    const onTerminalRefresh = () => {
+      void loadSnapshot({ runFollowups: false });
+      void loadApprovals({ silent: true });
+    };
+    window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, onTerminalRefresh);
+    return () => window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, onTerminalRefresh);
+  }, [loadApprovals, loadSnapshot]);
 
   /**
    * For each pending automation approval, build a (client_id → focus_tag set) map.
@@ -662,7 +754,7 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
     return (
       <div className="w-full max-w-lg mx-auto glass-card p-6 text-center">
         <p className="text-red-600 dark:text-red-400 mb-4">{error}</p>
-        <button type="button" onClick={() => loadSnapshot()} className="glass-button px-4 py-2 rounded-md text-sm">
+        <button type="button" onClick={() => loadSnapshot({ force: true })} className="glass-button px-4 py-2 rounded-md text-sm">
           Retry
         </button>
       </div>
@@ -694,6 +786,15 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
       </svg>
       {reanalyzing ? 'Re-analyzing…' : 'Re-analyze'}
     </button>
+  );
+
+  const handlePipelineSnapshotFilter = useCallback(
+    (column: string | null) => {
+      setPipelineFilter(column);
+      setPipelineColumnFilter(column);
+      router.push({ pathname: '/', query: { tab: 'pipeline' } }, undefined, { shallow: true });
+    },
+    [router]
   );
 
   const instructionLine = (
@@ -733,6 +834,18 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
         <p className="text-xs text-amber-700 dark:text-amber-300 mb-3">{reanalyzeNotice}</p>
       )}
 
+      <div className="mb-6">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+          Cold Lead → Nurturing → Qualified → Booked → Active → Offboarding → Dead
+        </p>
+        <PipelineSnapshot
+          onFilterChange={handlePipelineSnapshotFilter}
+          activeFilter={pipelineFilter}
+          isActive
+          footerHint="Click a stage to open the Pipeline tab and filter the board. Click again to clear."
+        />
+      </div>
+
       {diagnosis && (
         <div className="glass-card neon-glow p-4 mb-6 rounded-xl">
           <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">
@@ -752,13 +865,6 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
           <p className="text-sm text-gray-600 dark:text-gray-300 mt-3 leading-relaxed">
             {diagnosis.traffic_hint} {diagnosis.nurture_hint} {diagnosis.conversion_hint}
           </p>
-
-          {diagnosis.pipeline_strip?.segments?.length ? (
-            <PerformancePipelineMini
-              segments={diagnosis.pipeline_strip.segments}
-              totalClients={diagnosis.pipeline_strip.total_clients ?? 0}
-            />
-          ) : null}
 
           {(diagnosis.revenue_compare || diagnosis.funnel_compare) && (
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">

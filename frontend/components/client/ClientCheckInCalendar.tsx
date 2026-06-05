@@ -627,7 +627,11 @@ export default function ClientCheckInCalendar({
       {/* Day Details Modal - shows when a date is selected */}
       {selectedDate && (
         <div 
-          className={inline ? "absolute left-full top-0 ml-2 z-10 flex items-start pt-0" : "fixed left-[calc(672px+1rem)] top-0 bottom-0 z-[110] pointer-events-auto flex items-start pt-6"}
+          className={
+            inline
+              ? 'absolute left-full top-0 ml-2 z-10 flex items-start pt-0'
+              : 'fixed right-4 top-6 bottom-6 z-[110] pointer-events-auto flex items-start'
+          }
           onClick={(e) => e.stopPropagation()}
           onMouseDown={(e) => e.stopPropagation()}
         >
@@ -844,27 +848,29 @@ export default function ClientCheckInCalendar({
   );
 
   const wrapped = inline ? (
-    <div className="w-full max-w-2xl h-full flex flex-col overflow-hidden bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg relative">
+    <div className="h-full w-full flex flex-col overflow-hidden bg-white dark:bg-gray-800 relative">
       {panelContent}
     </div>
   ) : (
-    <div className="fixed inset-0 z-[100]">
+    <div className="fixed inset-0 z-[100] flex justify-end pointer-events-none">
       <div
-        className="fixed inset-0 pointer-events-auto bg-transparent"
-        style={{ left: 'calc(672px + 24rem + 1rem)' }}
-        onClick={() => { if (onCloseBoth) onCloseBoth(); else onClose(); }}
+        className="absolute inset-0 pointer-events-auto bg-black/25"
+        onClick={() => {
+          if (onCloseBoth) onCloseBoth();
+          else onClose();
+        }}
       />
       <Transition
         show={isOpen}
         as={React.Fragment}
         enter="transform transition ease-out duration-300"
-        enterFrom="-translate-x-full"
+        enterFrom="translate-x-full"
         enterTo="translate-x-0"
         leave="transform transition ease-in duration-200"
         leaveFrom="translate-x-0"
-        leaveTo="-translate-x-full"
+        leaveTo="translate-x-full"
       >
-        <div className="fixed left-0 top-0 bottom-0 w-full max-w-2xl bg-white dark:bg-gray-800 shadow-2xl overflow-hidden pointer-events-auto relative flex flex-col z-[100]">
+        <div className="relative w-full max-w-md h-full bg-white dark:bg-gray-800 shadow-2xl overflow-hidden pointer-events-auto flex flex-col z-[100]">
           {panelContent}
         </div>
       </Transition>

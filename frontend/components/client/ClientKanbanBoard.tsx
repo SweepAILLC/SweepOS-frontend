@@ -39,14 +39,40 @@ import { STRIPE_DATA_UPDATED_EVENT, TERMINAL_CLIENTS_UPDATED_EVENT, invalidateSt
 import {
   getPipelineClients,
   patchPipelineClient,
+  removePipelineClient,
   setPipelineClients,
   subscribePipelineClients,
 } from '@/lib/pipelineStore';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
+
+function mergeClientRow(existing: Client, incoming: Client): Client {
+  const incomingMs = incoming.updated_at ? Date.parse(incoming.updated_at) : 0;
+  const existingMs = existing.updated_at ? Date.parse(existing.updated_at) : 0;
+  const incomingIsStale =
+    incomingMs > 0 && existingMs > 0 && incomingMs < existingMs;
+
+  const merged: Client = {
+    ...existing,
+    ...incoming,
+    offer_enrollment:
+      'offer_enrollment' in incoming ? incoming.offer_enrollment : existing.offer_enrollment,
+    meta: 'meta' in incoming ? incoming.meta : existing.meta,
+  };
+
+  // Avoid a slower PATCH (e.g. program clear while still dead) overwriting a newer column move.
+  if (incomingIsStale && incoming.lifecycle_state !== existing.lifecycle_state) {
+    merged.lifecycle_state = existing.lifecycle_state;
+  }
+
+  return merged;
+}
 import { CALL_INSIGHTS_REANALYZED_EVENT, CLIENT_MERGED_EVENT } from './IntelligenceSection';
 import ShinyButton from '../ui/ShinyButton';
 import EmailComposer from '../brevo/EmailComposer';
+import { KanbanSkeleton } from '@/components/ui/SkeletonLoader';
+import { PremiumReveal } from '@/components/ui/PremiumMotion';
+import { COLUMN_STAGGER_MS } from '@/lib/premiumMotion';
 
 const COLUMNS = PIPELINE_COLUMNS;
 
@@ -95,6 +121,7 @@ export default function ClientKanbanBoard({
   const [balanceDueFilter, setBalanceDueFilter] = useState(false);
   const hasCalledOnLoadComplete = useRef(false);
   const pipelineLoadStartedRef = useRef(false);
+  const shouldAnimateColumns = useRef(hydratePipelineClients().length === 0);
   const [createFormData, setCreateFormData] = useState({
     first_name: '',
     last_name: '',
@@ -218,7 +245,6 @@ export default function ClientKanbanBoard({
 
   useEffect(() => {
     if (!isActive) return;
-    if (clients.length === 0) return;
     setPipelineClients(clients);
   }, [clients, isActive]);
 
@@ -364,18 +390,44 @@ export default function ClientKanbanBoard({
       const column =
         normalizeLifecycleColumn(normalized.lifecycle_state) ??
         (normalized.lifecycle_state as PipelineColumnId);
+      const prevRow = clientsRef.current.find((c) => c.id === normalized.id);
+      const prevColumn = prevRow
+        ? normalizeLifecycleColumn(prevRow.lifecycle_state) ?? (prevRow.lifecycle_state as PipelineColumnId)
+        : null;
+      const merged = prevRow ? mergeClientRow(prevRow, normalized) : normalized;
+
+      if (column === 'dead' && prevColumn !== 'dead') {
+        setHealthRefreshToken((t) => t + 1);
+        setCallInsightTags((prev) => {
+          const existing = prev[normalized.id];
+          const tags = Array.from(new Set([...(existing?.tags ?? []), 'revive']));
+          return {
+            ...prev,
+            [normalized.id]: { tags, headline: existing?.headline ?? '' },
+          };
+        });
+        void refreshBoardTags();
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent(CALL_INSIGHTS_REANALYZED_EVENT, { detail: { clientId: normalized.id } }),
+          );
+        }
+      }
+
       setClients((prev) => {
         const exists = prev.some((c) => c.id === normalized.id);
         if (exists) {
-          return prev.map((c) => (c.id === normalized.id ? normalized : c));
+          return prev.map((c) => (c.id === normalized.id ? mergeClientRow(c, normalized) : c));
         }
-        return [normalized, ...prev];
+        return [merged, ...prev];
       });
-      setSelectedClient((sel) => (sel?.id === normalized.id ? normalized : sel));
-      patchPipelineClient(normalized);
+      setSelectedClient((sel) =>
+        sel?.id === normalized.id ? mergeClientRow(sel, normalized) : sel,
+      );
+      patchPipelineClient(merged);
       if (column) onClientLifecycleChanged?.(column);
     },
-    [normalizeClient, onClientLifecycleChanged],
+    [normalizeClient, onClientLifecycleChanged, refreshBoardTags],
   );
 
   const refreshSelectedClient = useCallback(async () => {
@@ -480,6 +532,8 @@ export default function ClientKanbanBoard({
             const keptClient = await apiClient.mergeClients([draggedClient.id, targetClient.id]);
             const keptId = keptClient?.id;
             const removedId = keptId === draggedClient.id ? targetClient.id : draggedClient.id;
+            if (removedId) removePipelineClient(removedId);
+            if (keptId && keptClient) patchPipelineClient(keptClient);
             // Optimistically remove the merged-away card so it disappears immediately
             setClients((prev) =>
               prev.filter((c) => c.id !== removedId).map((c) => (c.id === keptId && keptClient ? { ...c, ...keptClient } : c))
@@ -566,27 +620,24 @@ export default function ClientKanbanBoard({
       return;
     }
 
-    // Check if moving FROM offboarding to another column
-    // If so, reset program fields
-    const isMovingFromOffboarding = currentColumn === 'offboarding' && targetColumn !== 'offboarding';
-    
-    // Prepare update data
-    const updateData: any = {
+    // Leaving offboarding or dead: clear program timeline so completion % cannot force dead again.
+    const isLeavingProgramDrivenColumn =
+      (currentColumn === 'offboarding' || currentColumn === 'dead') && targetColumn !== currentColumn;
+
+    const updateData: Record<string, unknown> = {
       lifecycle_state: targetColumn,
     };
-    
-    // If moving from offboarding, reset program fields
-    if (isMovingFromOffboarding) {
+
+    if (isLeavingProgramDrivenColumn) {
       updateData.program_progress_percent = null;
       updateData.program_duration_days = null;
       updateData.program_start_date = null;
       updateData.program_end_date = null;
-      console.log(`[KANBAN] Moving client from offboarding to ${newColumnId}, resetting program fields`);
     }
 
     const buildOptimistic = (base: Client): Client => {
       const next: Client = { ...base, lifecycle_state: targetColumn };
-      if (isMovingFromOffboarding) {
+      if (isLeavingProgramDrivenColumn) {
         next.program_progress_percent = undefined;
         next.program_duration_days = undefined;
         next.program_start_date = undefined;
@@ -845,15 +896,42 @@ export default function ClientKanbanBoard({
     const confirmMessage = `Are you sure you want to delete "${[client.first_name, client.last_name].filter(Boolean).join(' ') || 'this client'}"?`;
     if (!window.confirm(confirmMessage)) return;
 
+    const id = client.id;
+    const previousClients = clientsRef.current;
+    const previousSelected = selectedClient;
+
+    const withoutDeleted = previousClients.filter((c) => c.id !== id);
+    removePipelineClient(id);
+    clientsRef.current = withoutDeleted;
+    setClients(withoutDeleted);
+    setCallInsightTags((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setHealthScores((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    if (selectedClient?.id === id) {
+      setIsDrawerOpen(false);
+      setSelectedClient(null);
+    }
+
     try {
-      await apiClient.deleteClient(client.id, false);
-      setClients((prev) => prev.filter((c) => c.id !== client.id));
-      if (selectedClient?.id === client.id) {
-        setIsDrawerOpen(false);
-        setSelectedClient(null);
-      }
+      await apiClient.deleteClient(id, false);
     } catch (error: any) {
       console.error('Failed to delete client:', error);
+      clientsRef.current = previousClients;
+      setClients(previousClients);
+      setPipelineClients(previousClients);
+      if (previousSelected?.id === id) {
+        setSelectedClient(previousSelected);
+        setIsDrawerOpen(true);
+      }
       alert(error?.response?.data?.detail || 'Failed to delete client. Please try again.');
     }
   };
@@ -895,14 +973,6 @@ export default function ClientKanbanBoard({
       setCreating(false);
     }
   };
-
-  if (loading && clients.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-500 dark:text-gray-400">Loading clients...</div>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -1171,32 +1241,43 @@ export default function ClientKanbanBoard({
           setActiveDragClient(null);
         }}
       >
-        <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-1 px-1 sm:mx-0 sm:px-0 scroll-smooth touch-pan-x min-w-0">
-          {COLUMNS.map((column) => {
-            const columnClients = getClientsForColumn(column.id);
-            if (filteredColumn && filteredColumn !== column.id) {
-              return null;
-            }
-            return (
-              <KanbanColumn
-                key={column.id}
-                id={column.id}
-                title={column.title}
-                clients={columnClients}
-                isActive={activeColumn === column.id}
-                dragOverId={dragOverId}
-                mergingCards={mergingCards}
-                onClientClick={(client) => {
-                  setSelectedClient(client);
-                  setIsDrawerOpen(true);
-                }}
-                onClientDelete={handleDeleteClient}
-                callInsightTags={callInsightTags}
-                onEmailColumn={handleEmailColumn}
-              />
-            );
-          })}
-        </div>
+        {loading && clients.length === 0 ? (
+          <KanbanSkeleton />
+        ) : (
+          <div className="flex gap-3 sm:gap-4 overflow-x-auto pb-4 -mx-1 px-1 sm:mx-0 sm:px-0 scroll-smooth touch-pan-x min-w-0">
+            {COLUMNS.map((column, columnIndex) => {
+              const columnClients = getClientsForColumn(column.id);
+              if (filteredColumn && filteredColumn !== column.id) {
+                return null;
+              }
+              return (
+                <PremiumReveal
+                  key={column.id}
+                  delayMs={columnIndex * COLUMN_STAGGER_MS}
+                  animate={shouldAnimateColumns.current}
+                  className="flex-shrink-0"
+                >
+                  <KanbanColumn
+                    id={column.id}
+                    title={column.title}
+                    clients={columnClients}
+                    isActive={activeColumn === column.id}
+                    dragOverId={dragOverId}
+                    mergingCards={mergingCards}
+                    onClientClick={(client) => {
+                      const latest = clientsRef.current.find((c) => c.id === client.id) ?? client;
+                      setSelectedClient(latest);
+                      setIsDrawerOpen(true);
+                    }}
+                    onClientDelete={handleDeleteClient}
+                    callInsightTags={callInsightTags}
+                    onEmailColumn={handleEmailColumn}
+                  />
+                </PremiumReveal>
+              );
+            })}
+          </div>
+        )}
         <DragOverlay dropAnimation={{ duration: 200, easing: 'cubic-bezier(0.25, 1, 0.5, 1)' }}>
           {activeDragClient ? (
             <div className="glass-card neon-glow p-3 rounded-lg shadow-2xl ring-2 ring-primary-500/40 cursor-grabbing max-w-[260px] rotate-1 scale-[1.02] transition-transform">

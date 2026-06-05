@@ -17,6 +17,7 @@ import {
   formatPpMoM,
   lastTwoDefined,
 } from '@/lib/healthTrendMetrics';
+import { PREMIUM_LINE_ANIMATION } from '@/lib/premiumMotion';
 
 const tooltipStyle = {
   contentStyle: {
@@ -133,6 +134,7 @@ export function ShowUpVsCloseRateChart({
               strokeWidth={2}
               dot={{ r: 3 }}
               connectNulls
+              {...PREMIUM_LINE_ANIMATION}
             />
             <Line
               type="monotone"
@@ -142,6 +144,7 @@ export function ShowUpVsCloseRateChart({
               strokeWidth={2}
               dot={{ r: 3 }}
               connectNulls
+              {...PREMIUM_LINE_ANIMATION}
             />
           </ComposedChart>
         </ResponsiveContainer>
@@ -207,6 +210,7 @@ export function ClientLtvTrendChart({
               strokeWidth={2}
               dot={{ r: 3 }}
               connectNulls
+              {...PREMIUM_LINE_ANIMATION}
             />
           </LineChart>
         </ResponsiveContainer>

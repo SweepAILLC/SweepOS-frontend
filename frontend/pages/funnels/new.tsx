@@ -2,12 +2,13 @@ import { useState } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar from '@/components/ui/Navbar';
-import { APP_MAIN_PL_OFFSET } from '@/components/ui/layoutConstants';
+import { useSidebar } from '@/contexts/SidebarContext';
 import { useCurrentOrgName } from '@/hooks/useCurrentOrgName';
 import ShinyButton from '@/components/ui/ShinyButton';
 
 export default function NewFunnelPage() {
   const router = useRouter();
+  const { mainPaddingClass } = useSidebar();
   const organizationName = useCurrentOrgName();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -53,7 +54,7 @@ export default function NewFunnelPage() {
           onTabChange={(tab) => router.push(`/?tab=${tab}`)}
           organizationName={organizationName}
         />
-      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${APP_MAIN_PL_OFFSET}`}>
+      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-[padding-left] duration-300 ease-out ${mainPaddingClass}`}>
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}

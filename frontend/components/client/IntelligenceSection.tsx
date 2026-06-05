@@ -15,6 +15,7 @@ import {
   mergeMetaWithDismissedClip,
   readDismissedClipIds,
 } from '@/lib/intelligenceQueue';
+import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
@@ -91,6 +92,8 @@ interface IntelligenceSectionProps {
   refreshToken?: number;
   /** When false, checklist is omitted (e.g. rendered below engagement in the drawer). Default true. */
   showChecklist?: boolean;
+  /** Nested inside ClientStrategyPanel — hides outer section title and tightens copy. */
+  variant?: 'default' | 'strategy';
   /** After persisting clip dismissals (meta patch), refetch client in parent. */
   onClientUpdated?: () => void;
   /** Prefer PATCH response merged into drawer/Kanban (instant persisted meta); optional. */
@@ -119,10 +122,12 @@ export default function IntelligenceSection({
   client,
   refreshToken = 0,
   showChecklist = true,
+  variant = 'default',
   onClientUpdated,
   onClientPatched,
   onOpenEmailComposerWithDraft,
 }: IntelligenceSectionProps) {
+  const embeddedInStrategy = variant === 'strategy';
   const [insightData, setInsightData] = useState<ClientCallInsightsResponse | null>(null);
   const [insightLoading, setInsightLoading] = useState(false);
   const [insightError, setInsightError] = useState<string | null>(null);
@@ -300,6 +305,15 @@ export default function IntelligenceSection({
   const isLead = (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(lc);
   const isDead = lc === 'dead';
   const summaryTags = insightData?.summary?.tags || [];
+  const offerBalanceDue = useMemo(
+    () => hasOutstandingOfferBalance(client),
+    [
+      client.offer_enrollment?.slot,
+      client.offer_enrollment?.total_cents,
+      client.offer_enrollment?.paid_cents,
+      client.lifetime_revenue_cents,
+    ],
+  );
 
   const showMaximizeRoiBox =
     isClientRoi &&
@@ -338,11 +352,19 @@ export default function IntelligenceSection({
   return (
     <div
       className={`space-y-4 ${
-        showChecklist ? 'border-t border-gray-200 dark:border-white/10 pt-6' : 'pt-0'
+        embeddedInStrategy
+          ? 'pt-0'
+          : showChecklist
+            ? 'border-t border-gray-200 dark:border-white/10 pt-6'
+            : 'pt-0'
       }`}
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Client profile & opportunity</h3>
+        {embeddedInStrategy ? (
+          <p className="text-[11px] font-medium text-gray-600 dark:text-gray-400">Fathom call context & ROI signals</p>
+        ) : (
+          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Client profile & opportunity</h3>
+        )}
         <button
           type="button"
           onClick={() => void handleReanalyzeRoi()}
@@ -369,15 +391,17 @@ export default function IntelligenceSection({
         </button>
       </div>
 
-      <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-        Fathom call context plus ROI signals (testimonials, upsell readiness, referrals)—your situation, momentum, and
-        revenue opportunities in one place.
-        {showChecklist
-          ? ' Checklist below includes call follow-ups + '
-          : ' Next steps & checklist live below Engagement. '}
-        <span className="font-medium text-gray-600 dark:text-gray-300">View draft</span>
-        {showChecklist ? '.' : ' opens Brevo from the checklist section.'}
-      </p>
+      {!embeddedInStrategy ? (
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
+          Fathom call context plus ROI signals (testimonials, upsell readiness, referrals)—your situation, momentum, and
+          revenue opportunities in one place.
+          {showChecklist
+            ? ' Checklist below includes call follow-ups + '
+            : ' Next steps & checklist live in the Strategy panel. '}
+          <span className="font-medium text-gray-600 dark:text-gray-300">View draft</span>
+          {showChecklist ? '.' : ' opens Brevo from Next steps.'}
+        </p>
+      ) : null}
 
       {insightLoading && !insightData && (
         <div className="flex justify-center py-3">
@@ -403,9 +427,17 @@ export default function IntelligenceSection({
         </div>
       )}
 
-      {insightData?.summary?.tags && insightData.summary.tags.length > 0 && (
+      {(offerBalanceDue || (insightData?.summary?.tags && insightData.summary.tags.length > 0)) && (
         <div className="flex flex-wrap gap-1.5">
-          {insightData.summary.tags.map((t) => (
+          {offerBalanceDue ? (
+            <span
+              className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${BALANCE_DUE_CHIP_CLASS}`}
+              title="Recorded payments are below the full offer amount"
+            >
+              Balance due
+            </span>
+          ) : null}
+          {insightData?.summary?.tags?.map((t) => (
             <span
               key={t}
               className={`text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded border ${tagClass(t)}`}

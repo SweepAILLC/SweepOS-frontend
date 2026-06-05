@@ -2,7 +2,7 @@
  * Shared time-range presets for dashboard charts (Finances revenue timeline, Calendar trends).
  * Matches Finances dashboard: MTD, rolling N days, last year (365), or all-time scope.
  */
-import type { CalendarSyncedBookingRow } from '@/lib/api';
+import type { CalendarSyncedBookingRow, CalendarTrendSummary as CalendarTrendSummaryApi } from '@/lib/api';
 
 export type DashboardTimeRange = number | 'mtd' | 'all';
 
@@ -27,9 +27,9 @@ export function financesTimelineApiParams(tr: DashboardTimeRange): { days: numbe
 }
 
 /**
- * Activity window for Calendar trends summary counts:
- * - Past meetings: started between window start and now (within range rules).
- * - Upcoming meetings: start between now and window end (MTD → end of month; rolling N → now+N days).
+ * Activity window for Calendar trends summary counts (UTC — matches Stripe/finances `scope=mtd`).
+ * - Past meetings: start in [pastStart, now).
+ * - Upcoming meetings: start in [now, upcomingEnd].
  */
 export function getCalendarTrendsActivityWindow(tr: DashboardTimeRange, now = new Date()) {
   const t = now.getTime();
@@ -45,24 +45,55 @@ export function getCalendarTrendsActivityWindow(tr: DashboardTimeRange, now = ne
   }
 
   if (tr === 'mtd') {
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    const monthStart = new Date(y, m, 1, 0, 0, 0, 0);
-    const monthEnd = new Date(y, m + 1, 0, 23, 59, 59, 999);
+    const y = now.getUTCFullYear();
+    const m = now.getUTCMonth();
+    const monthStart = new Date(Date.UTC(y, m, 1, 0, 0, 0, 0));
+    const upcomingEnd = new Date(Date.UTC(y, m + 1, 0, 23, 59, 59, 999));
     return {
       pastStart: monthStart,
       pastEnd: now,
       upcomingStart: now,
-      upcomingEnd: monthEnd,
+      upcomingEnd,
     };
   }
 
   const n = tr as number;
+  const utcMidnight = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    0,
+    0,
+    0,
+    0
+  );
   return {
-    pastStart: new Date(t - n * dayMs),
+    pastStart: new Date(utcMidnight - n * dayMs),
     pastEnd: now,
     upcomingStart: now,
     upcomingEnd: new Date(t + n * dayMs),
+  };
+}
+
+/** Params for GET /integrations/calendar/trend-summary */
+export function calendarTrendSummaryApiParams(
+  tr: DashboardTimeRange
+): { scope?: 'mtd' | 'all'; range_days?: number } {
+  if (tr === 'mtd') return { scope: 'mtd' };
+  if (tr === 'all') return { scope: 'all' };
+  return { range_days: tr };
+}
+
+export function calendarSyncedBookingsFetchParams(tr: DashboardTimeRange): {
+  upcoming_limit: number;
+  past_limit: number;
+  past_since?: string;
+} {
+  const w = getCalendarTrendsActivityWindow(tr);
+  return {
+    upcoming_limit: tr === 'all' ? 200 : 150,
+    past_limit: tr === 'all' ? 500 : 300,
+    past_since: tr === 'all' ? undefined : w.pastStart.toISOString(),
   };
 }
 
@@ -75,6 +106,19 @@ export interface CalendarTrendSummary {
   showUpRatePct: number | null;
   attendanceEligiblePast: number;
   showedUpCount: number;
+}
+
+export function mapCalendarTrendSummaryFromApi(row: CalendarTrendSummaryApi): CalendarTrendSummary {
+  return {
+    upcomingCount: row.upcoming_count,
+    pastCount: row.past_count,
+    closeRatePct: row.close_rate_pct,
+    salesCallsInRange: row.sales_calls_in_range,
+    closedSalesCount: row.closed_sales_count,
+    showUpRatePct: row.show_up_rate_pct,
+    attendanceEligiblePast: row.attendance_eligible_past,
+    showedUpCount: row.showed_up_count,
+  };
 }
 
 /** Aggregate synced booking rows for the Calendar trends summary cards (client-side, matches selected range). */
@@ -92,7 +136,7 @@ export function computeCalendarTrendSummaryFromRows(
     const t = new Date(r.start_time).getTime();
     if (t >= nowMs) return false;
     if (tr === 'all') return true;
-    return t >= w.pastStart.getTime() && t <= w.pastEnd.getTime();
+    return t >= w.pastStart.getTime();
   });
 
   const upcomingRows = upcoming.filter((r) => {
@@ -108,10 +152,10 @@ export function computeCalendarTrendSummaryFromRows(
   const closeRatePct =
     salesCalls.length > 0 ? Math.round((closedSalesCount / salesCalls.length) * 100) : null;
 
-  const attendanceEligible = pastRows.filter((r) => !r.cancelled);
-  const showedUpCount = attendanceEligible.filter((r) => r.completed && !r.no_show).length;
+  // Past sales calls count as attended unless explicitly marked no-show (matches calendar display_status).
+  const showedUpCount = salesCalls.filter((r) => !r.no_show).length;
   const showUpRatePct =
-    attendanceEligible.length > 0 ? Math.round((showedUpCount / attendanceEligible.length) * 100) : null;
+    salesCalls.length > 0 ? Math.round((showedUpCount / salesCalls.length) * 100) : null;
 
   return {
     upcomingCount: upcomingRows.length,
@@ -120,7 +164,7 @@ export function computeCalendarTrendSummaryFromRows(
     salesCallsInRange: salesCalls.length,
     closedSalesCount,
     showUpRatePct,
-    attendanceEligiblePast: attendanceEligible.length,
+    attendanceEligiblePast: salesCalls.length,
     showedUpCount,
   };
 }
@@ -320,17 +364,19 @@ export function isManualStripePaymentRow(p: { stripe_id?: string | null }): bool
   return !!p.stripe_id?.startsWith('manual:');
 }
 
-/** Primary combined cash figure for finances summary + selected range. */
+/**
+ * Primary combined cash (Stripe + Whop + manual) for the selected dashboard range.
+ * Finances API maps the active window into `combined.last_30_days_revenue` (not always 30d).
+ */
 export function combinedCashForRange(
   summary: { combined: { last_30_days_revenue: number; last_mtd_revenue: number } },
   tr: DashboardTimeRange
 ): number {
   if (tr === 'mtd') return summary.combined.last_mtd_revenue ?? 0;
-  // Finances API maps the active window into last_30_days_revenue (including scope=all).
   return summary.combined.last_30_days_revenue ?? 0;
 }
 
-/** Fallback cash when Finances summary is unavailable (terminal / Stripe widgets). */
+/** Fallback when GET /integrations/finances/summary is unavailable. */
 export function fallbackCashForRange(
   tr: DashboardTimeRange,
   opts: {
@@ -340,6 +386,7 @@ export function fallbackCashForRange(
         last_7_days?: number;
         last_30_days?: number;
         last_mtd?: number;
+        all_time?: number;
       };
     } | null;
     stripeLast30?: number;
@@ -348,6 +395,9 @@ export function fallbackCashForRange(
   const c = opts.terminal?.cash_collected;
   if (tr === 'mtd') return c?.last_mtd ?? opts.stripeLast30 ?? 0;
   if (tr === 7) return c?.last_7_days ?? opts.stripeLast30 ?? 0;
+  if (tr === 'all') return c?.all_time ?? c?.last_30_days ?? opts.stripeLast30 ?? 0;
+  if (tr === 30) return c?.last_30_days ?? opts.stripeLast30 ?? 0;
+  // Rolling N-day windows without a dedicated terminal field — approximate with 30d terminal cash.
   return c?.last_30_days ?? opts.stripeLast30 ?? 0;
 }
 

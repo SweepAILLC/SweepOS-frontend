@@ -2,10 +2,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar, { type TabId } from '@/components/ui/Navbar';
-import {
-  APP_MAIN_PL_OFFSET,
-  APP_MAIN_PL_WITH_CALL_LIBRARY,
-} from '@/components/ui/layoutConstants';
+import { useSidebar } from '@/contexts/SidebarContext';
 import TerminalDashboard from '@/components/terminal/TerminalDashboard';
 import PipelineDashboard from '@/components/pipeline/PipelineDashboard';
 import FunnelListPanel from '@/components/FunnelListPanel';
@@ -37,6 +34,7 @@ import { clearSessionCaches } from '@/lib/cache';
 export default function Dashboard() {
   const router = useRouter();
   const { setLoading: setGlobalLoading } = useLoading();
+  const { mainPaddingClass, callLibraryPaddingClass } = useSidebar();
   
   // Tab ids are centralized in lib/tabs.ts (Navbar imports the same type).
   type DashboardTabId = TabId;
@@ -356,7 +354,7 @@ export default function Dashboard() {
 
       <div
         className={`min-w-0 w-full min-h-screen transition-[padding-left] duration-300 ease-out ${
-          activeTab === 'call_library' ? APP_MAIN_PL_WITH_CALL_LIBRARY : APP_MAIN_PL_OFFSET
+          activeTab === 'call_library' ? callLibraryPaddingClass : mainPaddingClass
         }`}
       >
         <main

@@ -15,13 +15,13 @@ import {
   normalizeLifecycleColumn,
   withNormalizedLifecycle,
 } from '@/lib/pipelineColumns';
+import { isProgramProgressVisible } from '@/lib/clientProgram';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
-import ClientHealthScoreContent from './ClientHealthScoreContent';
-import IntelligenceSection from './IntelligenceSection';
-import OfferEnrollmentSection from './OfferEnrollmentSection';
-import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
+import ClientNotesSection from './ClientNotesSection';
+import ClientStrategyPanel from './ClientStrategyPanel';
+import ClientProfileRail from './ClientProfileRail';
 
 interface ClientDetailDrawerProps {
   client: Client | null;
@@ -92,10 +92,6 @@ export default function ClientDetailDrawer({
   const fieldBlurSave = () => {
     void saveClientFields();
   };
-
-  useEffect(() => {
-    if (!isOpen) setEngagementOpen(false);
-  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen) setShowCheckInCalendar(false);
@@ -547,9 +543,9 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-screen max-w-2xl flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                <Dialog.Panel className="pointer-events-auto w-[min(90vw,1400px)] max-w-none flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
-                    <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                    <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
                     <div className="flex-shrink-0 px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-white/10">
                         <div className="flex items-center justify-between gap-3">
                         <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
@@ -631,737 +627,305 @@ export default function ClientDetailDrawer({
                         </div>
                     </div>
 
-                    {/* Content - scrollable: holistic profile → engagement → checklist */}
-                    <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-                      <div className="space-y-6">
-                        <IntelligenceSection
-                          client={client}
-                          refreshToken={healthRefreshToken}
-                          showChecklist={false}
-                          onClientUpdated={onUpdate}
-                          onClientPatched={onClientSaved}
-                          onOpenEmailComposerWithDraft={(draft) => {
-                            const emails = getAllClientEmails(client);
-                            if (emails.length === 0) {
-                              alert('Add an email address to this client to compose a message.');
-                              return;
-                            }
-                            setEmailComposerDraft({
-                              initialSubject: draft.subject,
-                              initialHtmlContent: draft.bodyHtml,
-                              initialTextContent: draft.bodyText,
-                            });
-                            setShowEmailComposer(true);
-                          }}
-                        />
-
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-4">
-                          <button
-                            type="button"
-                            onClick={() => setEngagementOpen((o) => !o)}
-                            className="flex w-full items-center justify-between gap-2 text-left rounded-lg px-1 py-1 text-sm font-medium text-gray-900 dark:text-gray-100 hover:bg-gray-50 dark:hover:bg-white/5 transition-colors"
-                            aria-expanded={engagementOpen}
-                          >
-                            <span>Engagement (health score)</span>
-                            <svg
-                              className={`w-4 h-4 shrink-0 text-gray-500 transition-transform ${engagementOpen ? 'rotate-180' : ''}`}
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          {engagementOpen ? (
-                            <div className="mt-3">
-                              <ClientHealthScoreContent
-                                client={client}
-                                refreshToken={healthRefreshToken}
-                                engagementStrip
-                                showFactors={false}
-                                onScoreLoaded={onHealthScoreLoaded}
-                              />
-                            </div>
-                          ) : null}
-                        </div>
-
-                        <AIRecommendationsSection
-                          client={client}
-                          refreshToken={healthRefreshToken}
-                          embedded
-                          onOpenEmailComposerWithDraft={(draft) => {
-                            const emails = getAllClientEmails(client);
-                            if (emails.length === 0) {
-                              alert('Add an email address to this client to compose a message.');
-                              return;
-                            }
-                            setEmailComposerDraft({
-                              initialSubject: draft.subject,
-                              initialHtmlContent: draft.bodyHtml,
-                              initialTextContent: draft.bodyText,
-                            });
-                            setShowEmailComposer(true);
-                          }}
-                        />
-
-                        {/* Basic Info */}
-                        <div>
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Contact Information</h3>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <dl className="space-y-4">
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">First Name</dt>
-                              <input
-                                type="text"
-                                value={formData.first_name}
-                                onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Last Name</dt>
-                              <input
-                                type="text"
-                                value={formData.last_name}
-                                onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Primary email</dt>
-                              <input
-                                type="email"
-                                value={formData.email}
-                                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-
-                            <div className="md:col-span-2">
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Additional emails</dt>
-                              <div className="space-y-2">
-                                {formData.emails.map((e, i) => (
-                                  <div key={i} className="flex gap-2 items-center">
-                                    <input
-                                      type="email"
-                                      value={e}
-                                      onChange={(ev) => {
-                                        const next = [...formData.emails];
-                                        next[i] = ev.target.value;
-                                        setFormData({ ...formData, emails: next });
-                                      }}
-                                      onBlur={fieldBlurSave}
-                                      className="flex-1 rounded-md glass-input focus:ring-blue-500 sm:text-sm"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const next = {
-                                          ...formData,
-                                          emails: formData.emails.filter((_, j) => j !== i),
-                                        };
-                                        setFormData(next);
-                                        void saveClientFields(next);
-                                      }}
-                                      className="text-red-400 hover:text-red-600 text-sm"
-                                    >
-                                      Remove
-                                    </button>
-                                  </div>
-                                ))}
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const next = { ...formData, emails: [...formData.emails, ''] };
-                                    setFormData(next);
-                                  }}
-                                  className="text-sm text-primary-500 hover:text-primary-600"
-                                >
-                                  + Add email
-                                </button>
-                              </div>
-                            </div>
-
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Phone / SMS</dt>
-                              <input
-                                type="tel"
-                                value={formData.phone}
-                                onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                placeholder="+1234567890"
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-                          </dl>
-                          
-                          <dl className="space-y-4">
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Instagram</dt>
-                              <input
-                                type="text"
-                                value={formData.instagram}
-                                onChange={(e) => setFormData({ ...formData, instagram: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                placeholder="@username"
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-                          </dl>
-                          </div>
-                        </div>
-
-                        {/* Financial Summary */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Financial Summary</h3>
-                          <dl className="space-y-3">
-                            <div>
-                              <dt className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                                Total amount paid
-                              </dt>
-                              <dd className="mt-0.5 text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
-                                {formatCurrency(totalPaid)}
-                              </dd>
-                              <p className="mt-1 text-[10px] text-gray-400 dark:text-gray-500">
-                                Plan “paid” matches this total.
-                              </p>
-                            </div>
-
-                            {client.offer_enrollment?.slot && planContractCents > 0 && (
-                              <div className="rounded-lg bg-gray-50/80 dark:bg-white/[0.04] px-3 py-2 space-y-1">
-                                <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
-                                  Offer plan
-                                </dt>
-                                <dd className="text-sm text-gray-900 dark:text-gray-100">
-                                  {client.offer_enrollment.name_snapshot ||
-                                    client.offer_enrollment.slot.replace(/:/g, ' · ')}
-                                </dd>
-                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums text-gray-700 dark:text-gray-300">
-                                  <span>
-                                    Contract{' '}
-                                    <strong>{formatCurrency(planContractCents / 100)}</strong>
-                                  </span>
-                                  <span>
-                                    Paid <strong>{formatCurrency(recordedPaidCents / 100)}</strong>
-                                  </span>
-                                  {planOwedCents != null && (
-                                    <span className="text-gray-900 dark:text-gray-100">
-                                      Owed <strong>{formatCurrency(planOwedCents / 100)}</strong>
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            <div>
-                              <dt className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
-                                Estimated MRR
-                              </dt>
-                              <dd className="mt-0.5 text-sm tabular-nums text-gray-900 dark:text-gray-100">
-                                {formatCurrency(client.estimated_mrr || 0)}
-                              </dd>
-                            </div>
-
-                            {client.stripe_customer_id && (
-                              <div>
-                                <dt className="text-xs font-medium text-gray-500 dark:text-gray-400">Stripe Customer ID</dt>
-                                <dd className="mt-1 text-xs text-gray-900 dark:text-gray-100 font-mono break-all">
-                                  {client.stripe_customer_id}
-                                </dd>
-                              </div>
-                            )}
-                          </dl>
-
-                          <OfferEnrollmentSection
+                    <div className="flex flex-1 min-h-0 flex-col lg:flex-row overflow-hidden">
+                      {showCheckInCalendar ? (
+                        <div className="lg:hidden absolute inset-0 z-20 flex flex-col bg-white dark:bg-gray-900 border-l border-gray-200 dark:border-white/10">
+                          <ClientCheckInCalendar
                             client={client}
-                            recordedPaidCents={recordedPaidCents}
-                            minimal
-                            onSaved={(updated) => {
-                              if (updated) onClientSaved?.(updated);
-                              else void loadPayments();
+                            isOpen={showCheckInCalendar}
+                            onClose={() => {
+                              setShowCheckInCalendar(false);
+                              loadNextCheckIn();
+                            }}
+                            onCloseBoth={() => {
+                              setShowCheckInCalendar(false);
+                              onClose();
+                            }}
+                            inline
+                          />
+                        </div>
+                      ) : null}
+
+                      <div className="flex flex-1 min-w-0 flex-col lg:flex-row overflow-hidden">
+                        <div className="flex-1 min-w-0 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5 space-y-5">
+                          <ClientNotesSection
+                            value={formData.notes}
+                            onChange={(notes) => setFormData({ ...formData, notes })}
+                            onBlurSave={fieldBlurSave}
+                          />
+                          <ClientStrategyPanel
+                            client={client}
+                            healthRefreshToken={healthRefreshToken}
+                            onClientUpdated={onUpdate}
+                            onClientPatched={onClientSaved}
+                            onHealthScoreLoaded={onHealthScoreLoaded}
+                            onOpenEmailComposerWithDraft={(draft) => {
+                              const emails = getAllClientEmails(client);
+                              if (emails.length === 0) {
+                                alert('Add an email address to this client to compose a message.');
+                                return;
+                              }
+                              setEmailComposerDraft({
+                                initialSubject: draft.subject,
+                                initialHtmlContent: draft.bodyHtml,
+                                initialTextContent: draft.bodyText,
+                              });
+                              setShowEmailComposer(true);
                             }}
                           />
                         </div>
 
-                        {/* Check-Ins Section */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Check-Ins</h3>
-                          {nextCheckIn ? (
-                            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                              <div className="flex items-start gap-3">
-                                <svg className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
-                                </svg>
-                                <div className="flex-1">
-                                  <div className="flex items-center gap-2 mb-1">
-                                    <span className="text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide">
-                                      Next Check-In
-                                    </span>
-                                  </div>
-                                  <h4 className="font-semibold text-gray-900 dark:text-gray-100 mb-1">
-                                    {nextCheckIn.title}
-                                  </h4>
-                                  <p className="text-sm text-gray-600 dark:text-gray-400">
-                                    {new Date(nextCheckIn.start_time).toLocaleDateString('en-US', { 
-                                      month: 'long', 
-                                      day: 'numeric', 
-                                      year: 'numeric',
-                                      hour: 'numeric',
-                                      minute: '2-digit',
-                                      hour12: true 
-                                    })}
-                                  </p>
-                                  {nextCheckIn.meeting_url && (
-                                    <a
-                                      href={nextCheckIn.meeting_url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 dark:text-blue-400 hover:underline mt-2 inline-block"
-                                    >
-                                      Join Meeting →
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="bg-gray-50 dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-                              <p className="text-sm text-gray-600 dark:text-gray-400">
-                                No upcoming check-ins. Use the <strong>Calendar</strong> button in the header to sync with your calendar and view check-in history.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Payment History */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Payment History</h3>
-                            <button
-                              onClick={() => setShowManualPaymentForm(true)}
-                              className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors"
-                            >
-                              + Add Manual Payment
-                            </button>
-                          </div>
-                          
-                          {/* Manual Payment Form Modal */}
-                          {showManualPaymentForm && (
-                            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                              <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Add Manual Payment</h3>
-                                <form onSubmit={async (e) => {
-                                  e.preventDefault();
-                                  if (!client) return;
-                                  
-                                  setSubmittingManualPayment(true);
-                                  try {
-                                    // Convert local date to ISO string preserving the user's local date
-                                    // When user selects a date like "2024-01-15", treat it as that date at midnight in their local timezone
-                                    let paymentDateISO: string | undefined;
-                                    if (manualPaymentForm.payment_date) {
-                                      // Parse the date string (YYYY-MM-DD) and create a date at midnight local time
-                                      const [year, month, day] = manualPaymentForm.payment_date.split('-').map(Number);
-                                      const localDate = new Date(year, month - 1, day, 0, 0, 0, 0); // month is 0-indexed
-                                      // Convert to ISO string (this preserves the local date by converting to UTC)
-                                      paymentDateISO = localDate.toISOString();
-                                    }
-                                    
-                                    await apiClient.createManualPayment(
-                                      client.id,
-                                      parseFloat(manualPaymentForm.amount),
-                                      paymentDateISO,
-                                      manualPaymentForm.description || undefined,
-                                      manualPaymentForm.payment_method || undefined,
-                                      manualPaymentForm.receipt_url || undefined
-                                    );
-                                    setShowManualPaymentForm(false);
-                                    setManualPaymentForm({
-                                      amount: '',
-                                      payment_date: new Date().toISOString().split('T')[0],
-                                      description: '',
-                                      payment_method: '',
-                                      receipt_url: '',
-                                    });
-                                    // Reload payments
-                                    loadPayments();
-                                    onUpdate();
-                                    // Dispatch custom event to refresh cash collected
-                                    dispatchManualPaymentCreated();
-                                  } catch (error: any) {
-                                    console.error('Failed to create manual payment:', error);
-                                    alert(error?.response?.data?.detail || 'Failed to create manual payment');
-                                  } finally {
-                                    setSubmittingManualPayment(false);
-                                  }
-                                }}>
-                                  <div className="space-y-4">
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Amount ($)
-                                      </label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0.01"
-                                        required
-                                        value={manualPaymentForm.amount}
-                                        onChange={(e) => setManualPaymentForm({ ...manualPaymentForm, amount: e.target.value })}
-                                        className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                        placeholder="0.00"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Payment Date
-                                      </label>
-                                      <input
-                                        type="date"
-                                        required
-                                        value={manualPaymentForm.payment_date}
-                                        onChange={(e) => setManualPaymentForm({ ...manualPaymentForm, payment_date: e.target.value })}
-                                        className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Payment Method (optional)
-                                      </label>
-                                      <select
-                                        value={manualPaymentForm.payment_method}
-                                        onChange={(e) => setManualPaymentForm({ ...manualPaymentForm, payment_method: e.target.value })}
-                                        className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                      >
-                                        <option value="">Select method...</option>
-                                        <option value="cash">Cash</option>
-                                        <option value="check">Check</option>
-                                        <option value="bank_transfer">Bank Transfer</option>
-                                        <option value="other">Other</option>
-                                      </select>
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Description (optional)
-                                      </label>
-                                      <textarea
-                                        value={manualPaymentForm.description}
-                                        onChange={(e) => setManualPaymentForm({ ...manualPaymentForm, description: e.target.value })}
-                                        className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                        rows={3}
-                                        placeholder="Payment notes..."
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                        Receipt URL (optional)
-                                      </label>
-                                      <input
-                                        type="url"
-                                        value={manualPaymentForm.receipt_url}
-                                        onChange={(e) => setManualPaymentForm({ ...manualPaymentForm, receipt_url: e.target.value })}
-                                        className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                        placeholder="https://..."
-                                      />
-                                    </div>
-                                  </div>
-                                  <div className="mt-6 flex justify-end space-x-3">
-                                    <button
-                                      type="button"
-                                      onClick={() => setShowManualPaymentForm(false)}
-                                      className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
-                                    >
-                                      Cancel
-                                    </button>
-                                    <button
-                                      type="submit"
-                                      disabled={submittingManualPayment}
-                                      className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-                                    >
-                                      {submittingManualPayment ? 'Adding...' : 'Add Payment'}
-                                    </button>
-                                  </div>
-                                </form>
-                              </div>
-                            </div>
-                          )}
-                          {paymentsLoading ? (
-                            <div className="text-sm text-gray-500 dark:text-gray-100">Loading payments...</div>
-                          ) : payments && payments.payments.length > 0 ? (
-                            <div className="space-y-2">
-                              {payments.payments.map((payment) => (
-                                <div
-                                  key={payment.id}
-                                  className="flex items-center justify-between p-3 bg-white dark:glass-panel rounded-lg border border-gray-200 dark:border-white/10 shadow-sm"
-                                >
-                                  <div>
-                                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                                      {formatCurrency(payment.amount)}
-                                      {payment.type === 'manual_payment' && (
-                                        <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">(Manual)</span>
-                                      )}
-                                    </div>
-                                    <div className="text-xs text-gray-500 dark:text-gray-100">
-                                      {payment.created_at
-                                        ? formatDate(payment.created_at)
-                                        : 'Unknown date'}
-                                    </div>
-                                    {payment.description && (
-                                      <div className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                                        {payment.description}
-                                      </div>
-                                    )}
-                                    {payment.payment_method && (
-                                      <div className="text-xs text-gray-400 dark:text-gray-500">
-                                        Method: {payment.payment_method}
-                                      </div>
-                                    )}
-                                  </div>
-                                  <div className="text-right flex items-center gap-2">
-                                    <span
-                                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                                        payment.status === 'succeeded'
-                                          ? 'bg-green-100 text-green-800'
-                                          : payment.status === 'failed'
-                                          ? 'bg-red-100 text-red-800'
-                                          : 'bg-gray-100 text-gray-800'
-                                      }`}
-                                    >
-                                      {payment.status}
-                                    </span>
-                                    {payment.receipt_url && (
-                                      <a
-                                        href={payment.receipt_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-blue-600 hover:text-blue-800"
-                                      >
-                                        Receipt
-                                      </a>
-                                    )}
-                                    {payment.type === 'manual_payment' && client && (
-                                      <button
-                                        onClick={async () => {
-                                          if (!confirm('Are you sure you want to delete this manual payment?')) {
-                                            return;
-                                          }
-                                          setDeletingPaymentId(payment.id);
-                                          try {
-                                            await apiClient.deleteManualPayment(client.id, payment.id);
-                                            loadPayments();
-                                            onUpdate();
-                                          } catch (error: any) {
-                                            console.error('Failed to delete manual payment:', error);
-                                            alert(error?.response?.data?.detail || 'Failed to delete manual payment');
-                                          } finally {
-                                            setDeletingPaymentId(null);
-                                          }
-                                        }}
-                                        disabled={deletingPaymentId === payment.id}
-                                        className="text-xs text-red-600 hover:text-red-800 disabled:opacity-50"
-                                        title="Delete manual payment"
-                                      >
-                                        {deletingPaymentId === payment.id ? 'Deleting...' : 'Delete'}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-sm text-gray-500 dark:text-gray-100">No payments found</div>
-                          )}
-                        </div>
-
-                        {/* Program Timeline */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Program Timeline</h3>
-                          <dl className="space-y-4">
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">Program Start Date</dt>
-                              <input
-                                type="date"
-                                value={formData.program_start_date}
-                                onChange={(e) => setFormData({ ...formData, program_start_date: e.target.value })}
-                                onBlur={fieldBlurSave}
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                            </div>
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 mb-1">Program End Date</dt>
-                              <input
-                                type="date"
-                                value={formData.program_end_date}
-                                onChange={(e) =>
-                                  setFormData({
-                                    ...formData,
-                                    program_end_date: e.target.value,
-                                  })
-                                }
-                                onBlur={fieldBlurSave}
-                                min={formData.program_start_date || undefined}
-                                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                              />
-                              <p className="mt-1 text-xs text-gray-500">
-                                Client will automatically move to offboarding at 75% and dead when expired
-                              </p>
-                            </div>
-                            {client.program_duration_days ? (
-                              <div>
-                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Program Duration</dt>
-                                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                  {client.program_duration_days} days
-                                </dd>
-                              </div>
-                            ) : null}
-                            {!isLead &&
-                              client.program_progress_percent !== undefined &&
-                              client.program_progress_percent !== null && (
-                                <div>
-                                  <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Program Progress</dt>
-                                  <dd className="mt-1">
-                                    <div className="space-y-1">
-                                      <div className="flex items-center justify-between text-sm">
-                                        <span className="text-gray-900 dark:text-gray-100">
-                                          {client.program_progress_percent.toFixed(1)}% Complete
-                                        </span>
-                                        <span className="text-gray-500 dark:text-gray-100">
-                                          {client.program_progress_percent >= 100
-                                            ? 'Expired'
-                                            : client.program_progress_percent >= 75
-                                              ? 'Offboarding'
-                                              : 'Active'}
-                                        </span>
-                                      </div>
-                                      <div className="w-full bg-gray-200 rounded-full h-3">
-                                        <div
-                                          className={`h-3 rounded-full transition-all ${
-                                            client.program_progress_percent >= 100
-                                              ? 'bg-red-500'
-                                              : client.program_progress_percent >= 75
-                                                ? 'bg-yellow-500'
-                                                : 'bg-blue-500'
-                                          }`}
-                                          style={{
-                                            width: `${Math.min(100, Math.max(0, client.program_progress_percent))}%`,
-                                          }}
-                                        />
-                                      </div>
-                                    </div>
-                                  </dd>
-                                </div>
-                              )}
-                            {isLead ? (
-                              <div>
-                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-1">
-                                  Follow-up due date
-                                </dt>
-                                <input
-                                  type="date"
-                                  value={formData.follow_up_due_date}
-                                  onChange={(e) =>
-                                    setFormData({ ...formData, follow_up_due_date: e.target.value })
-                                  }
-                                  onBlur={fieldBlurSave}
-                                  className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                                />
-                                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                                  Optional. Clear the field to use a 14-day window from last activity (see timer
-                                  below). Dates use your local calendar day.
-                                </p>
-                              </div>
-                            ) : null}
-                            {isLead && followUpBar ? (
-                              <div>
-                                <dt className="text-sm font-medium text-gray-500 dark:text-gray-100 mb-2">Follow-up</dt>
-                                <dd className="mt-1">
-                                  <div
-                                    className="space-y-1"
-                                    title={
-                                      followUpBar.hasExplicitDue
-                                        ? 'Specific follow-up date (profile or call insight)'
-                                        : 'Default 14 days from last activity (or created date)'
-                                    }
-                                  >
-                                    <div className="flex items-center justify-between text-sm">
-                                      <span className="text-gray-900 dark:text-gray-100">
-                                        {followUpBar.percent.toFixed(1)}% to due date
-                                      </span>
-                                      <span className="text-gray-500 dark:text-gray-100">
-                                        {followUpBar.percent >= 100 ? 'Due' : 'Open'}
-                                      </span>
-                                    </div>
-                                    <div className="w-full bg-gray-200 rounded-full h-3">
-                                      <div
-                                        className={`h-3 rounded-full transition-all ${
-                                          followUpBar.percent >= 100
-                                            ? 'bg-red-500'
-                                            : followUpBar.percent >= 75
-                                              ? 'bg-yellow-500'
-                                              : 'bg-blue-500'
-                                        }`}
-                                        style={{
-                                          width: `${Math.min(100, Math.max(0, followUpBar.percent))}%`,
-                                        }}
-                                      />
-                                    </div>
-                                    <p className="text-xs text-gray-500 dark:text-gray-100 mt-1">
-                                      {followUpBar.subtitle}
-                                    </p>
-                                  </div>
-                                </dd>
-                              </div>
-                            ) : null}
-                          </dl>
-                        </div>
-
-                        {/* Notes */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Notes</h3>
-                          <textarea
-                            value={formData.notes}
-                            onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                            onBlur={fieldBlurSave}
-                            rows={6}
-                            className="block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                            placeholder="Add notes about this client..."
+                        <aside className="w-full lg:w-80 xl:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-white/10 overflow-y-auto bg-gray-50/50 dark:bg-white/[0.02]">
+                          <ClientProfileRail
+                            client={client}
+                            formData={{
+                              first_name: formData.first_name,
+                              last_name: formData.last_name,
+                              email: formData.email,
+                              emails: formData.emails,
+                              phone: formData.phone,
+                              instagram: formData.instagram,
+                              program_start_date: formData.program_start_date,
+                              program_end_date: formData.program_end_date,
+                              follow_up_due_date: formData.follow_up_due_date,
+                            }}
+                            setFormData={(action) => {
+                              setFormData((prev) => {
+                                const patch =
+                                  typeof action === 'function'
+                                    ? action({
+                                        first_name: prev.first_name,
+                                        last_name: prev.last_name,
+                                        email: prev.email,
+                                        emails: prev.emails,
+                                        phone: prev.phone,
+                                        instagram: prev.instagram,
+                                        program_start_date: prev.program_start_date,
+                                        program_end_date: prev.program_end_date,
+                                        follow_up_due_date: prev.follow_up_due_date,
+                                      })
+                                    : action;
+                                return { ...prev, ...patch };
+                              });
+                            }}
+                            fieldBlurSave={fieldBlurSave}
+                            saveClientFields={(data) =>
+                              void saveClientFields(
+                                data ? { ...formDataRef.current, ...data } : undefined,
+                              )
+                            }
+                            isLead={isLead}
+                            followUpBar={followUpBar}
+                            payments={payments}
+                            paymentsLoading={paymentsLoading}
+                            totalPaid={totalPaid}
+                            recordedPaidCents={recordedPaidCents}
+                            planContractCents={planContractCents}
+                            planOwedCents={planOwedCents}
+                            formatCurrency={formatCurrency}
+                            formatDate={formatDate}
+                            nextCheckIn={nextCheckIn}
+                            onOpenCalendar={() => setShowCheckInCalendar(true)}
+                            onAddManualPayment={() => setShowManualPaymentForm(true)}
+                            onDeleteManualPayment={async (paymentId) => {
+                              if (!confirm('Delete this manual payment?')) return;
+                              setDeletingPaymentId(paymentId);
+                              try {
+                                await apiClient.deleteManualPayment(client.id, paymentId);
+                                loadPayments();
+                                onUpdate();
+                              } catch (error: unknown) {
+                                const err = error as { response?: { data?: { detail?: string } } };
+                                alert(err?.response?.data?.detail || 'Failed to delete payment');
+                              } finally {
+                                setDeletingPaymentId(null);
+                              }
+                            }}
+                            deletingPaymentId={deletingPaymentId}
+                            onClientSaved={onClientSaved}
+                            onReloadPayments={loadPayments}
                           />
-                        </div>
+                        </aside>
 
-                        {/* Metadata */}
-                        <div className="border-t border-gray-200 dark:border-white/10 pt-6">
-                          <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-4">Additional Info</h3>
-                          <dl className="space-y-2">
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Lifecycle State</dt>
-                              <dd className="mt-1">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                  {client.lifecycle_state.replace('_', ' ').toUpperCase()}
-                                </span>
-                              </dd>
-                            </div>
-
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Last Activity</dt>
-                              <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                {formatDate(client.last_activity_at)}
-                              </dd>
-                            </div>
-
-                            <div>
-                              <dt className="text-sm font-medium text-gray-500 dark:text-gray-100">Created</dt>
-                              <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">
-                                {formatDate(client.created_at)}
-                              </dd>
-                            </div>
-                          </dl>
-                        </div>
+                        {showCheckInCalendar ? (
+                          <div className="hidden lg:flex w-[min(420px,32vw)] shrink-0 border-l border-gray-200 dark:border-white/10 overflow-hidden">
+                            <ClientCheckInCalendar
+                              client={client}
+                              isOpen={showCheckInCalendar}
+                              onClose={() => {
+                                setShowCheckInCalendar(false);
+                                loadNextCheckIn();
+                              }}
+                              onCloseBoth={() => {
+                                setShowCheckInCalendar(false);
+                                onClose();
+                              }}
+                              inline
+                            />
+                          </div>
+                        ) : null}
                       </div>
                     </div>
+
+                    {showManualPaymentForm && (
+                      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+                        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
+                          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                            Add Manual Payment
+                          </h3>
+                          <form
+                            onSubmit={async (e) => {
+                              e.preventDefault();
+                              if (!client) return;
+                              setSubmittingManualPayment(true);
+                              try {
+                                let paymentDateISO: string | undefined;
+                                if (manualPaymentForm.payment_date) {
+                                  const [year, month, day] = manualPaymentForm.payment_date
+                                    .split('-')
+                                    .map(Number);
+                                  const localDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+                                  paymentDateISO = localDate.toISOString();
+                                }
+                                await apiClient.createManualPayment(
+                                  client.id,
+                                  parseFloat(manualPaymentForm.amount),
+                                  paymentDateISO,
+                                  manualPaymentForm.description || undefined,
+                                  manualPaymentForm.payment_method || undefined,
+                                  manualPaymentForm.receipt_url || undefined,
+                                );
+                                setShowManualPaymentForm(false);
+                                setManualPaymentForm({
+                                  amount: '',
+                                  payment_date: new Date().toISOString().split('T')[0],
+                                  description: '',
+                                  payment_method: '',
+                                  receipt_url: '',
+                                });
+                                loadPayments();
+                                onUpdate();
+                                dispatchManualPaymentCreated();
+                              } catch (error: unknown) {
+                                const err = error as { response?: { data?: { detail?: string } } };
+                                console.error('Failed to create manual payment:', error);
+                                alert(err?.response?.data?.detail || 'Failed to create manual payment');
+                              } finally {
+                                setSubmittingManualPayment(false);
+                              }
+                            }}
+                          >
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Amount ($)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0.01"
+                                  required
+                                  value={manualPaymentForm.amount}
+                                  onChange={(e) =>
+                                    setManualPaymentForm({ ...manualPaymentForm, amount: e.target.value })
+                                  }
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Payment Date
+                                </label>
+                                <input
+                                  type="date"
+                                  required
+                                  value={manualPaymentForm.payment_date}
+                                  onChange={(e) =>
+                                    setManualPaymentForm({
+                                      ...manualPaymentForm,
+                                      payment_date: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Payment Method (optional)
+                                </label>
+                                <select
+                                  value={manualPaymentForm.payment_method}
+                                  onChange={(e) =>
+                                    setManualPaymentForm({
+                                      ...manualPaymentForm,
+                                      payment_method: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                >
+                                  <option value="">Select method...</option>
+                                  <option value="cash">Cash</option>
+                                  <option value="check">Check</option>
+                                  <option value="bank_transfer">Bank Transfer</option>
+                                  <option value="other">Other</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Description (optional)
+                                </label>
+                                <textarea
+                                  value={manualPaymentForm.description}
+                                  onChange={(e) =>
+                                    setManualPaymentForm({
+                                      ...manualPaymentForm,
+                                      description: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                  rows={3}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Receipt URL (optional)
+                                </label>
+                                <input
+                                  type="url"
+                                  value={manualPaymentForm.receipt_url}
+                                  onChange={(e) =>
+                                    setManualPaymentForm({
+                                      ...manualPaymentForm,
+                                      receipt_url: e.target.value,
+                                    })
+                                  }
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                  placeholder="https://..."
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-6 flex justify-end space-x-3">
+                              <button
+                                type="button"
+                                onClick={() => setShowManualPaymentForm(false)}
+                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="submit"
+                                disabled={submittingManualPayment}
+                                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                              >
+                                {submittingManualPayment ? 'Adding...' : 'Add Payment'}
+                              </button>
+                            </div>
+                          </form>
+                        </div>
+                      </div>
+                    )}
+
                   </div>
                   </div>
                 </Dialog.Panel>
@@ -1371,23 +935,6 @@ export default function ClientDetailDrawer({
         </div>
       </Dialog>
     </Transition>
-
-    {/* Calendar modal - overlay to the right of the drawer (original position) */}
-    {showCheckInCalendar && client && (
-      <ClientCheckInCalendar
-        client={client}
-        isOpen={showCheckInCalendar}
-        onClose={() => {
-          setShowCheckInCalendar(false);
-          loadNextCheckIn();
-        }}
-        onCloseBoth={() => {
-          setShowCheckInCalendar(false);
-          onClose();
-        }}
-        inline={false}
-      />
-    )}
 
     {/* Email Composer Modal */}
     {showEmailComposer && client && getAllClientEmails(client).length > 0 && (

@@ -115,11 +115,26 @@ export default function OfferEnrollmentSection({
 
   const persist = async (body: { offer_enrollment: Client['offer_enrollment'] }) => {
     setErr(null);
+    const previous = client;
+    const optimistic: Client = {
+      ...client,
+      offer_enrollment: body.offer_enrollment ?? null,
+    };
+    onSaved?.(optimistic);
     setSaving(true);
     try {
       const updated = (await apiClient.updateClient(client.id, body)) as Client;
-      onSaved?.(updated);
+      const merged: Client = {
+        ...optimistic,
+        ...updated,
+        offer_enrollment:
+          updated.offer_enrollment !== undefined
+            ? updated.offer_enrollment
+            : body.offer_enrollment,
+      };
+      onSaved?.(merged);
     } catch (e: unknown) {
+      onSaved?.(previous);
       const msg = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
       setErr(typeof msg === 'string' ? msg : 'Could not save');
     } finally {
@@ -129,6 +144,10 @@ export default function OfferEnrollmentSection({
 
   const handleSave = async () => {
     if (!slot) {
+      if (totalStr.trim() || notes.trim()) {
+        setErr('Select an offer before saving the contract amount.');
+        return;
+      }
       await persist({ offer_enrollment: null });
       return;
     }

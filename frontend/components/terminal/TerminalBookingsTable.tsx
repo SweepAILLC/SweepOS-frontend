@@ -4,8 +4,13 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api';
 import EventDetailsModal from '@/components/calendar/EventDetailsModal';
+import CalendarStatusBadge from '@/components/calendar/CalendarStatusBadge';
+import CalendarEventTypeNodes from '@/components/calendar/CalendarEventTypeNodes';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
+import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
+import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
 import type { Client } from '@/types/client';
+import { ListSkeleton, PremiumReveal, TableSkeletonPremium } from '@/components/ui/PremiumMotion';
 
 type BookingsTab = 'upcoming' | 'past';
 
@@ -43,18 +48,23 @@ export default function TerminalBookingsTable() {
     status: 'scheduled' as 'scheduled' | 'completed' | 'cancelled' | 'no_show',
   });
   const [submittingManualBooking, setSubmittingManualBooking] = useState(false);
+  const [eventTypesRefreshKey, setEventTypesRefreshKey] = useState(0);
 
   useEffect(() => {
     if (showManualBookingModal) {
       setManualBookingClientsLoading(true);
       apiClient
-        .getClients(undefined, true)
-        .then((list: Client[]) => setManualBookingClients(list || []))
+        .getClients()
+        .then((list) => setManualBookingClients(deduplicateClientsForAssign(list || [])))
         .catch(() => setManualBookingClients([]))
         .finally(() => setManualBookingClientsLoading(false));
       const d = new Date();
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      setManualBookingForm((prev) => ({ ...prev, date: dateStr }));
+      setManualBookingForm((prev) => ({
+        ...prev,
+        clientId: '',
+        date: dateStr,
+      }));
     }
   }, [showManualBookingModal]);
 
@@ -75,8 +85,8 @@ export default function TerminalBookingsTable() {
 
   if (statusLoading && !connectedProvider) {
     return (
-      <div className="glass-card p-6 text-sm text-gray-500 dark:text-gray-400 animate-pulse">
-        Loading bookings…
+      <div className="glass-card p-6 min-w-0">
+        <TableSkeletonPremium rows={5} columns={6} />
       </div>
     );
   }
@@ -96,8 +106,8 @@ export default function TerminalBookingsTable() {
   }
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0" aria-busy={bookingsLoading}>
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+    <div className="glass-card p-4 sm:p-6 min-w-0 flex flex-col min-h-0" aria-busy={bookingsLoading}>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4 shrink-0">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Bookings</h3>
         <div className="flex flex-wrap items-center gap-2">
           <button
@@ -109,7 +119,10 @@ export default function TerminalBookingsTable() {
           </button>
           <button
             type="button"
-            onClick={() => void refreshSyncedCalendar()}
+            onClick={() => {
+              setEventTypesRefreshKey((k) => k + 1);
+              void refreshSyncedCalendar();
+            }}
             disabled={bookingsLoading}
             className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-60"
           >
@@ -119,16 +132,24 @@ export default function TerminalBookingsTable() {
       </div>
 
       {lastSyncedAt && (
-        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 shrink-0">
           Last synced: {new Date(lastSyncedAt).toLocaleString()}
         </p>
       )}
 
       {bookingsError && (
-        <p className="text-sm text-red-600 dark:text-red-400 mb-2">{bookingsError}</p>
+        <p className="text-sm text-red-600 dark:text-red-400 mb-2 shrink-0">{bookingsError}</p>
       )}
 
-      <div className="mb-4 border-b border-white/10">
+      <CalendarEventTypeNodes
+        provider={connectedProvider}
+        refreshKey={eventTypesRefreshKey}
+        compact
+        onSalesCallChanged={() => void refreshSyncedCalendar()}
+        className="mb-4 pb-4 border-b border-gray-200/80 dark:border-white/10 shrink-0"
+      />
+
+      <div className="mb-4 border-b border-white/10 shrink-0">
         <div className="flex space-x-1">
           {(['upcoming', 'past'] as const).map((tab) => (
             <button
@@ -147,14 +168,15 @@ export default function TerminalBookingsTable() {
         </div>
       </div>
 
+      <div className="min-h-0">
       {bookingsLoading && filteredBookings.length === 0 ? (
-        <p className="text-sm text-gray-500 py-8 text-center">Loading bookings…</p>
+        <TableSkeletonPremium rows={5} columns={6} />
       ) : filteredBookings.length === 0 ? (
-        <p className="text-sm text-gray-500 py-8 text-center">
+        <p className="text-sm text-gray-500 py-8 text-center premium-reveal">
           No {bookingsTab} bookings found
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        <PremiumReveal className="overflow-x-auto">
           <table className="w-full min-w-[640px]">
             <thead>
               <tr className="border-b border-white/10">
@@ -171,14 +193,6 @@ export default function TerminalBookingsTable() {
             <tbody className="divide-y divide-white/10">
               {filteredBookings.map((row) => {
                 const loc = row.meeting_url || row.location || '';
-                const statusText =
-                  row.display_status === 'cancelled'
-                    ? 'Cancelled'
-                    : row.display_status === 'no_show'
-                      ? 'No-show'
-                      : row.display_status === 'confirmed'
-                        ? 'Confirmed'
-                        : 'Completed';
                 return (
                   <tr
                     key={row.id}
@@ -200,7 +214,9 @@ export default function TerminalBookingsTable() {
                       <div className="font-medium">{row.client_name || '—'}</div>
                       <div className="text-xs text-gray-500">{row.attendee_email}</div>
                     </td>
-                    <td className="px-3 py-2 text-sm">{statusText}</td>
+                    <td className="px-3 py-2 text-sm">
+                      <CalendarStatusBadge status={row.display_status} />
+                    </td>
                     <td className="px-3 py-2 text-sm">
                       {row.is_sales_call ? (
                         <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">
@@ -230,8 +246,9 @@ export default function TerminalBookingsTable() {
               })}
             </tbody>
           </table>
-        </div>
+        </PremiumReveal>
       )}
+      </div>
 
       {selectedEvent && (
         <EventDetailsModal
@@ -296,23 +313,14 @@ export default function TerminalBookingsTable() {
               }}
               className="space-y-3"
             >
-              <div>
-                <label className="block text-sm font-medium mb-1">Client</label>
-                <select
-                  required
-                  value={manualBookingForm.clientId}
-                  onChange={(e) => setManualBookingForm((f) => ({ ...f, clientId: e.target.value }))}
-                  className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600"
-                  disabled={manualBookingClientsLoading}
-                >
-                  <option value="">Select client…</option>
-                  {manualBookingClients.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {[c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || c.id}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <ClientSearchCombobox
+                clients={manualBookingClients}
+                loading={manualBookingClientsLoading}
+                clientId={manualBookingForm.clientId}
+                onClientIdChange={(id) => setManualBookingForm((f) => ({ ...f, clientId: id }))}
+                resetKey={showManualBookingModal}
+                inputId="manual-booking-client-search"
+              />
               <div>
                 <label className="block text-sm font-medium mb-1">Title</label>
                 <input

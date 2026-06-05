@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import Link from 'next/link';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
+import { ListSkeleton, PremiumReveal } from '@/components/ui/PremiumMotion';
 
 function formatDate(dateString: string) {
   const date = new Date(dateString);
@@ -65,12 +66,7 @@ export default function UpcomingAppointmentsList() {
   const loading = statusLoading || (bookingsLoading && appointments.length === 0);
 
   if (loading && !connectedProvider) {
-    return (
-      <div className="animate-pulse space-y-2">
-        <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-lg" />
-        <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-lg" />
-      </div>
-    );
+    return <ListSkeleton rows={2} />;
   }
 
   if (!connectedProvider) {
@@ -91,11 +87,12 @@ export default function UpcomingAppointmentsList() {
   }
 
   return (
-    <div className="space-y-2 min-w-0">
+    <PremiumReveal className="space-y-2 min-w-0">
       {appointments.map((appointment, index) => (
         <div
           key={appointment.id || index}
-          className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800 min-w-0"
+          className="premium-reveal bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 border border-blue-200 dark:border-blue-800 min-w-0"
+          style={{ animationDelay: `${index * 80}ms` }}
         >
           <div className="flex items-start justify-between gap-2 min-w-0">
             <div className="flex-1 min-w-0">
@@ -135,6 +132,6 @@ export default function UpcomingAppointmentsList() {
           </div>
         </div>
       ))}
-    </div>
+    </PremiumReveal>
   );
 }

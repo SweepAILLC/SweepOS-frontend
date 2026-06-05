@@ -1,4 +1,5 @@
 // Simple in-memory cache with TTL support
+import { clearPerformancePrioritiesCache } from './performancePrioritiesCache';
 import { clearPipelineStore } from './pipelineStore';
 
 interface CacheEntry<T> {
@@ -132,6 +133,8 @@ export const TERMINAL_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 export const TERMINAL_STRIPE_UPDATED_KEY = 'terminal_last_stripe_updated';
 /** Milliseconds since epoch when client last synced with server Stripe data version (numeric compare, no string bugs). */
 export const TERMINAL_STRIPE_MS_KEY = 'terminal_last_stripe_ms';
+/** Milliseconds since epoch when client last synced with server calendar check-in version. */
+export const TERMINAL_CALENDAR_MS_KEY = 'terminal_last_calendar_ms';
 
 export function getSeenStripeDataMs(): number {
   if (typeof sessionStorage === 'undefined') return 0;
@@ -146,6 +149,19 @@ export function setSeenStripeDataMs(ms: number): void {
   }
 }
 
+export function getSeenCalendarDataMs(): number {
+  if (typeof sessionStorage === 'undefined') return 0;
+  const v = sessionStorage.getItem(TERMINAL_CALENDAR_MS_KEY);
+  const n = v ? parseInt(v, 10) : 0;
+  return Number.isFinite(n) ? n : 0;
+}
+
+export function setSeenCalendarDataMs(ms: number): void {
+  if (typeof sessionStorage !== 'undefined') {
+    sessionStorage.setItem(TERMINAL_CALENDAR_MS_KEY, String(ms));
+  }
+}
+
 /** Invalidate Cal.com / Calendly connection status cache (e.g. after connect, disconnect, or switching provider/org). */
 export function clearCalendarIntegrationStatusCache(): void {
   cache.delete(CACHE_KEYS.CALCOM_STATUS);
@@ -157,6 +173,9 @@ export function clearCalendarIntegrationStatusCache(): void {
 /** Clear caches that should not persist across logout. Call on logout. Terminal Stripe data refetches on next load. */
 export function clearSessionCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.deleteByPrefix('performance_snapshot_');
+  cache.deleteByPrefix('outreach_inbox_');
+  clearPerformancePrioritiesCache();
   cache.deleteByPrefix('stripe_');
   // Client list must not bleed across orgs or sessions (key was previously global `clients`)
   cache.deleteByPrefix('clients');
@@ -164,6 +183,7 @@ export function clearSessionCaches(): void {
   if (typeof sessionStorage !== 'undefined') {
     sessionStorage.removeItem(TERMINAL_STRIPE_UPDATED_KEY);
     sessionStorage.removeItem(TERMINAL_STRIPE_MS_KEY);
+    sessionStorage.removeItem(TERMINAL_CALENDAR_MS_KEY);
   }
 }
 
@@ -182,8 +202,28 @@ export function invalidateStripeAndTerminalAfterWebhook(seenMs: number): void {
   setSeenStripeDataMs(seenMs);
 }
 
+/** After Cal.com / Calendly webhook or check-in sync — bookings + trend charts refetch from DB. */
+export function invalidateTerminalAfterCalendarWebhook(seenMs: number): void {
+  cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+  cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+  cache.deleteByPrefix('calendar_trend_summary_');
+  setSeenCalendarDataMs(seenMs);
+}
+
 /** Custom event name: dispatch when Stripe data was updated by webhook so components can refetch in background without full loading. */
 export const STRIPE_DATA_UPDATED_EVENT = 'stripeDataUpdated';
+
+/** Cal.com / Calendly check-ins changed (webhook or sync) — refetch bookings table + calendar KPI inputs. */
+export const CALENDAR_BOOKINGS_UPDATED_EVENT = 'calendarBookingsUpdated';
+
+/** Cal.com / Calendly connected or disconnected — refresh status + kick off booking sync. */
+export const CALENDAR_INTEGRATION_CHANGED_EVENT = 'calendarIntegrationChanged';
+
+export function dispatchCalendarIntegrationChanged(): void {
+  if (typeof window === 'undefined') return;
+  clearCalendarIntegrationStatusCache();
+  window.dispatchEvent(new CustomEvent(CALENDAR_INTEGRATION_CHANGED_EVENT));
+}
 
 /** Terminal dashboard finished sync + cache invalidation — refetch charts and KPIs. */
 export const TERMINAL_DATA_REFRESHED_EVENT = 'terminalDataRefreshed';

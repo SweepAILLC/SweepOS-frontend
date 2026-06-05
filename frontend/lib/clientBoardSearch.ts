@@ -1,5 +1,29 @@
 import type { Client } from '@/types/client';
 
+export const CLIENT_SEARCH_SUGGESTION_LIMIT = 8;
+
+export function clientDisplayName(client: Client): string {
+  return [client.first_name, client.last_name].filter(Boolean).join(' ') || client.email || 'Unnamed';
+}
+
+/** One row per email / Stripe customer when loading assign & manual-entry pickers. */
+export function deduplicateClientsForAssign(rawClients: Client[]): Client[] {
+  const seenKeys = new Set<string>();
+  const result: Client[] = [];
+  for (const client of rawClients) {
+    const email = client.email?.replace(/\s+/g, '').toLowerCase().trim() || null;
+    const key = email
+      ? `email:${email}`
+      : client.stripe_customer_id
+        ? `stripe:${client.stripe_customer_id}`
+        : `id:${client.id}`;
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    result.push(client);
+  }
+  return result;
+}
+
 /**
  * Board search: matches clients by the same contact/profile fields users rely on in the UI
  * (name, emails, phone, Instagram, notes, Stripe id, offer name, client id). Phone matching

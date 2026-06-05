@@ -299,7 +299,7 @@ export default function NotificationsCard({ onLoadComplete }: NotificationsCardP
             {summary.show_up_rate != null ? `${summary.show_up_rate}%` : '—'}
           </div>
           <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">
-            Show-up Rate
+            Sales call show-up rate
           </div>
         </div>
       </div>

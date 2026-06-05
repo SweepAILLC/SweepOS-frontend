@@ -2,6 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import { cache, CACHE_KEYS, TERMINAL_CACHE_TTL_MS } from '@/lib/cache';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PREMIUM_PIE_ANIMATION } from '@/lib/premiumMotion';
+import {
+  PieChartSkeleton,
+  PremiumContentGate,
+  PremiumReveal,
+} from '@/components/ui/PremiumMotion';
 
 interface LeadSource {
   source: string;
@@ -16,6 +22,7 @@ interface LeadsBySourceProps {
 export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {}) {
   const [leadSources, setLeadSources] = useState<LeadSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [animatePie, setAnimatePie] = useState(true);
   const hasCalledOnLoadComplete = useRef(false);
 
   const initialLoadDone = useRef(false);
@@ -35,6 +42,13 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     const interval = setInterval(() => loadLeadSources(false, false), 60 * 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!loading && leadSources.length > 0 && animatePie) {
+      const t = setTimeout(() => setAnimatePie(false), 2600);
+      return () => clearTimeout(t);
+    }
+  }, [loading, leadSources.length, animatePie]);
 
   const loadLeadSources = async (forceRefresh = false, showLoading = false) => {
     try {
@@ -152,17 +166,16 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
         <span className="text-xs sm:text-sm font-normal text-gray-500 dark:text-gray-400 ml-1 sm:ml-2">(Last 30d)</span>
       </h3>
 
-      {loading ? (
-        <div className="text-center py-8">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900 dark:border-gray-100"></div>
-          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">Loading...</p>
-        </div>
-      ) : leadSources.length === 0 ? (
-        <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8">
-          No lead source data available.
-        </p>
-      ) : (
-        <div className="flex flex-col gap-4 min-w-0">
+      <PremiumContentGate
+        loading={loading}
+        skeleton={<PieChartSkeleton height={220} />}
+      >
+        {leadSources.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400 text-center py-8 premium-reveal">
+            No lead source data available.
+          </p>
+        ) : (
+        <PremiumReveal className="flex flex-col gap-4 min-w-0">
           <div className="w-full min-w-0 max-w-full h-[220px] overflow-hidden">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -192,8 +205,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
                   outerRadius={72}
                   paddingAngle={2}
                   cornerRadius={10}
-                  isAnimationActive={true}
-                  animationDuration={500}
+                  {...(animatePie ? PREMIUM_PIE_ANIMATION : { isAnimationActive: false })}
                   labelLine={false}
                   label={({ percent }: any) =>
                     percent != null && percent > 0.04 ? `${Math.round(percent * 100)}%` : ''
@@ -217,7 +229,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
                 ▼
               </span>
             </summary>
-            <div className="mt-3 space-y-2">
+            <div className="mt-3 max-h-40 overflow-y-auto overscroll-y-contain space-y-2 pr-1">
               {leadSources.map((source, index) => {
                 const color = COLORS[index % COLORS.length];
                 return (
@@ -247,8 +259,9 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
               })}
             </div>
           </details>
-        </div>
-      )}
+        </PremiumReveal>
+        )}
+      </PremiumContentGate>
     </div>
   );
 }

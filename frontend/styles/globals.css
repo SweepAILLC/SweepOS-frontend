@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --app-sidebar-width: 14rem;
+}
+
 body {
   @apply bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
   transition: background-color 0.2s ease, color 0.2s ease;
@@ -203,6 +207,134 @@ body {
     }
     50% {
       transform: translate(-50%, -50%) scale(1.20);
+    }
+  }
+
+  /* ── Premium load / reveal (Terminal + dashboards) ── */
+  @keyframes premium-reveal-up {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+      filter: blur(3px);
+    }
+    60% {
+      opacity: 0.92;
+      filter: blur(0.5px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes premium-skeleton-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes premium-shimmer-slide {
+    0% {
+      transform: translateX(-120%);
+    }
+    100% {
+      transform: translateX(120%);
+    }
+  }
+
+  @keyframes premium-scanline {
+    0% {
+      transform: translateY(-100%);
+    }
+    100% {
+      transform: translateY(100%);
+    }
+  }
+
+  @keyframes premium-pulse-ring {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.35);
+      opacity: 0.85;
+    }
+    50% {
+      box-shadow: 0 0 0 10px rgba(99, 102, 241, 0);
+      opacity: 1;
+    }
+  }
+
+  @keyframes premium-overlay-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  .premium-reveal {
+    animation: premium-reveal-up 1.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .premium-skeleton-enter {
+    animation: premium-skeleton-in 0.85s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .premium-shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 0%,
+      rgba(255, 255, 255, 0.06) 42%,
+      rgba(147, 197, 253, 0.14) 50%,
+      rgba(255, 255, 255, 0.06) 58%,
+      transparent 100%
+    );
+    animation: premium-shimmer-slide 2.2s ease-in-out infinite;
+  }
+
+  .premium-scanline::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(99, 102, 241, 0.06) 48%,
+      transparent 100%
+    );
+    animation: premium-scanline 3.5s linear infinite;
+  }
+
+  .premium-pulse-ring {
+    animation: premium-pulse-ring 2s ease-in-out infinite;
+  }
+
+  .premium-overlay-backdrop {
+    animation: premium-overlay-in 0.35s ease-out both;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .premium-reveal,
+    .premium-skeleton-enter {
+      animation: none;
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+
+    .premium-shimmer::after,
+    .premium-scanline::after,
+    .premium-pulse-ring {
+      animation: none;
     }
   }
 }

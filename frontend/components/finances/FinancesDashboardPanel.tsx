@@ -139,6 +139,7 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
     ...p,
     stripe: p.stripe_revenue,
     whop: p.whop_revenue,
+    manual: p.manual_revenue ?? 0,
     total: p.total_revenue,
   }));
 
@@ -205,6 +206,13 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
                     <span className="font-medium">${summary.whop.last_30_days_revenue.toFixed(2)}</span>{' '}
                     <span className="text-gray-500">({dashboardPeriodLabel(timeRange)})</span>
                   </p>
+                  {(summary.manual?.last_30_days_revenue ?? 0) > 0 && (
+                    <p>
+                      <span className="text-gray-500">Manual:</span>{' '}
+                      <span className="font-medium">${summary.manual!.last_30_days_revenue.toFixed(2)}</span>{' '}
+                      <span className="text-gray-500">({dashboardPeriodLabel(timeRange)})</span>
+                    </p>
+                  )}
                   <p className="text-xs text-gray-500 mt-2">
                     Stripe {summary.stripe_connected ? 'connected' : 'not connected'} · Whop{' '}
                     {summary.whop_connected ? 'connected' : 'not connected'}
@@ -231,6 +239,7 @@ export default function FinancesDashboardPanel({ userRole = 'member' }: { userRo
                     <Legend />
                     <Line type="monotone" dataKey="stripe" name="Stripe" stroke="#6366f1" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="whop" name="Whop" stroke="#10b981" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="manual" name="Manual" stroke="#a855f7" strokeWidth={2} dot={false} />
                     <Line type="monotone" dataKey="total" name="Total" stroke="#f59e0b" strokeWidth={1.5} dot={false} strokeDasharray="4 4" />
                   </LineChart>
                 </ResponsiveContainer>

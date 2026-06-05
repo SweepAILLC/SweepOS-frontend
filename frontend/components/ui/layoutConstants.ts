@@ -1,4 +1,7 @@
-/** Left app rail width — Navbar and main content offset must stay aligned. */
+/**
+ * Left app rail width — Navbar and main content offset must stay aligned.
+ * When the sidebar is collapsible, prefer `useSidebar()` from `@/contexts/SidebarContext`.
+ */
 export const APP_SIDEBAR_WIDTH = 'w-56';
 export const APP_MAIN_PL_OFFSET = 'pl-56';
 

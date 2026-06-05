@@ -3,18 +3,25 @@ import Cookies from 'js-cookie';
 import { apiClient, type CalendarSyncedBookingRow } from '@/lib/api';
 import { clearCalendarIntegrationStatusCache } from '@/lib/cache';
 import { 
-  CalComStatus, CalComEventType,
-  CalendlyStatus, CalendlyScheduledEvent, CalendlyEventType
+  CalComStatus,
+  CalendlyStatus, CalendlyScheduledEvent
 } from '@/types/integration';
 import type { Client } from '@/types/client';
+import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
+import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
 import EventDetailsModal from './EventDetailsModal';
+import CalendarStatusBadge from './CalendarStatusBadge';
+import CalendarEventTypeNodes from './CalendarEventTypeNodes';
 import { useLoading } from '@/contexts/LoadingContext';
 import { ShowUpVsCloseRateChart } from '@/components/owner/OwnerHealthTrendCharts';
 import {
   type DashboardTimeRange,
   dashboardPeriodLabel,
+  calendarTrendSummaryApiParams,
+  mapCalendarTrendSummaryFromApi,
   computeCalendarTrendSummaryFromRows,
   filterMonthlyCoachingPeriodsForDashboardRange,
+  type CalendarTrendSummary,
 } from '@/lib/dashboardTimeRange';
 
 type BookingsTab = 'upcoming' | 'past';
@@ -75,16 +82,9 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [bookingsError, setBookingsError] = useState<string | null>(null);
-  
-  // Event types state
-  const [calcomEventTypes, setCalcomEventTypes] = useState<CalComEventType[]>([]);
-  const [calendlyEventTypes, setCalendlyEventTypes] = useState<CalendlyEventType[]>([]);
+
   const [eventTypesLoading, setEventTypesLoading] = useState(false);
-  const [eventTypesError, setEventTypesError] = useState<string | null>(null);
-  const [salesCallEventTypeIds, setSalesCallEventTypeIds] = useState<string[]>([]);
-  
-  // Copy feedback state
-  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [eventTypesRefreshKey, setEventTypesRefreshKey] = useState(0);
 
   type CloseRateSection = { total_sales_calls: number; closed_count: number; close_rate_pct: number | null };
 
@@ -102,6 +102,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const [monthlyCoachingPeriods, setMonthlyCoachingPeriods] = useState<MonthlyCoachingRow[]>([]);
   const [monthlyCoachingLoading, setMonthlyCoachingLoading] = useState(false);
   const [calendarTrendsTimeRange, setCalendarTrendsTimeRange] = useState<DashboardTimeRange>('mtd');
+  const [calendarTrendSummary, setCalendarTrendSummary] = useState<CalendarTrendSummary | null>(null);
 
   // Manual booking modal (same as client detail drawer: create manual check-in)
   const [showManualBookingModal, setShowManualBookingModal] = useState(false);
@@ -121,13 +122,14 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   useEffect(() => {
     if (showManualBookingModal) {
       setManualBookingClientsLoading(true);
-      apiClient.getClients(undefined, true)
-        .then((list: Client[]) => setManualBookingClients(list || []))
+      apiClient
+        .getClients()
+        .then((list) => setManualBookingClients(deduplicateClientsForAssign(list || [])))
         .catch(() => setManualBookingClients([]))
         .finally(() => setManualBookingClientsLoading(false));
       const d = manualBookingPrefillDate || new Date();
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      setManualBookingForm(prev => ({ ...prev, date: dateStr }));
+      setManualBookingForm((prev) => ({ ...prev, clientId: '', date: dateStr }));
     } else {
       setManualBookingPrefillDate(null);
     }
@@ -334,7 +336,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           void refreshSyncedCalendar({ silent: true });
         }
       }, 250);
-      loadCalcomEventTypes();
+      setEventTypesRefreshKey((k) => k + 1);
       return () => clearTimeout(t);
     }
     if (connectedProvider === 'calendly') {
@@ -368,7 +370,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           void refreshSyncedCalendar({ silent: true });
         }
       }, 250);
-      loadCalendlyEventTypes();
+      setEventTypesRefreshKey((k) => k + 1);
       return () => clearTimeout(t);
     }
     if (!connectedProvider && !loading && !bookingsLoading && !eventTypesLoading) {
@@ -424,61 +426,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       setGlobalLoading(false);
     }
   };
-
-  const loadCalcomEventTypes = async () => {
-    if (!calcomStatus?.connected) return;
-    
-    setEventTypesLoading(true);
-    setEventTypesError(null);
-    try {
-      const data = await apiClient.getCalComEventTypes();
-      setCalcomEventTypes(data.event_types || []);
-    } catch (error: any) {
-      console.error('Failed to load Cal.com event types:', error);
-      setEventTypesError(error?.response?.data?.detail || 'Failed to load event types');
-      setCalcomEventTypes([]);
-    } finally {
-      setEventTypesLoading(false);
-    }
-  };
-
-  const loadCalendlyEventTypes = async () => {
-    if (!calendlyStatus?.connected) return;
-    
-    setEventTypesLoading(true);
-    setEventTypesError(null);
-    try {
-      const data = await apiClient.getCalendlyEventTypes({
-        count: 50,
-        sort: 'name:asc'
-      });
-      setCalendlyEventTypes(data.collection || []);
-    } catch (error: any) {
-      console.error('Failed to load Calendly event types:', error);
-      setEventTypesError(error?.response?.data?.detail || 'Failed to load event types');
-      setCalendlyEventTypes([]);
-    } finally {
-      setEventTypesLoading(false);
-    }
-  };
-
-  const loadSalesCallEventTypes = async () => {
-    if (!connectedProvider) return;
-    try {
-      const data = await apiClient.listSalesCallEventTypes(connectedProvider);
-      setSalesCallEventTypeIds(data.event_type_ids || []);
-    } catch {
-      setSalesCallEventTypeIds([]);
-    }
-  };
-
-  useEffect(() => {
-    if (connectedProvider) {
-      loadSalesCallEventTypes();
-    } else {
-      setSalesCallEventTypeIds([]);
-    }
-  }, [connectedProvider]);
 
   const handleConnect = async () => {
     if (!selectedProvider || !apiKey.trim()) {
@@ -551,29 +498,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     }
   };
 
-  const formatDuration = (minutes: number | undefined) => {
-    if (!minutes) return 'N/A';
-    if (minutes < 60) {
-      return `${minutes} min`;
-    }
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
-  };
-
-  const copyToClipboard = async (text: string, id: string, label: string = 'Link') => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedId(id);
-      setTimeout(() => {
-        setCopiedId(null);
-      }, 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-      alert(`Failed to copy ${label} to clipboard`);
-    }
-  };
-
   const isUrl = (str: string | undefined): boolean => {
     if (!str) return false;
     try {
@@ -595,12 +519,29 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
 
   const filteredBookings = getFilteredBookings();
   const currentStatus = connectedProvider === 'calcom' ? calcomStatus : calendlyStatus;
-  const currentEventTypes = connectedProvider === 'calcom' ? calcomEventTypes : calendlyEventTypes;
 
-  const calendarTrendSummary = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, calendarTrendsTimeRange);
-  }, [connectedProvider, syncedUpcoming, syncedPast, calendarTrendsTimeRange]);
+  useEffect(() => {
+    if (!connectedProvider) {
+      setCalendarTrendSummary(null);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .getCalendarTrendSummary(calendarTrendSummaryApiParams(calendarTrendsTimeRange))
+      .then((row) => {
+        if (!cancelled) setCalendarTrendSummary(mapCalendarTrendSummaryFromApi(row));
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setCalendarTrendSummary(
+            computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, calendarTrendsTimeRange)
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [connectedProvider, calendarTrendsTimeRange, syncedUpcoming, syncedPast]);
 
   const filteredMonthlyCoachingPeriods = useMemo(
     () => filterMonthlyCoachingPeriodsForDashboardRange(monthlyCoachingPeriods, calendarTrendsTimeRange),
@@ -627,8 +568,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                 type="button"
                 onClick={() => {
                   void handleRefreshBookings();
-                  if (connectedProvider === 'calcom') loadCalcomEventTypes();
-                  else loadCalendlyEventTypes();
+                  setEventTypesRefreshKey((k) => k + 1);
                 }}
                 disabled={bookingsLoading || eventTypesLoading}
                 aria-busy={bookingsLoading || eventTypesLoading}
@@ -930,8 +870,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                   Show up rate
                   {calendarTrendSummary.attendanceEligiblePast > 0 && (
                     <span className="block text-xs text-gray-500 dark:text-gray-500">
-                      {calendarTrendSummary.showedUpCount} / {calendarTrendSummary.attendanceEligiblePast} past meetings
-                      (excl. cancelled)
+                      {calendarTrendSummary.showedUpCount} / {calendarTrendSummary.attendanceEligiblePast} sales calls
+                      showed up (excl. cancelled)
                     </span>
                   )}
                 </div>
@@ -1002,6 +942,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               </button>
             </div>
           </div>
+
+          <CalendarEventTypeNodes
+            provider={connectedProvider}
+            refreshKey={eventTypesRefreshKey}
+            onLoadingChange={setEventTypesLoading}
+            onSalesCallChanged={() => void refreshSyncedCalendar({ silent: true })}
+            className="mb-4 pb-4 border-b border-gray-200/80 dark:border-white/10"
+          />
+
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 min-h-[1rem]" aria-live="polite">
             {lastSyncedAt && (
               <p className="text-xs text-gray-500 dark:text-gray-400">
@@ -1161,22 +1110,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                   <tbody className="divide-y divide-white/10">
                     {(filteredBookings as CalendarSyncedBookingRow[]).map((row) => {
                       const loc = row.meeting_url || row.location || '';
-                      const statusClass =
-                        row.display_status === 'cancelled'
-                          ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                          : row.display_status === 'no_show'
-                          ? 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
-                          : row.display_status === 'confirmed'
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
-                          : 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200';
-                      const statusText =
-                        row.display_status === 'cancelled'
-                          ? 'Cancelled'
-                          : row.display_status === 'no_show'
-                          ? 'No-show'
-                          : row.display_status === 'confirmed'
-                          ? 'Confirmed'
-                          : 'Completed';
                       return (
                         <tr
                           key={row.id}
@@ -1204,7 +1137,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
                             <div className="text-xs text-gray-500 dark:text-gray-400">{row.attendee_email}</div>
                           </td>
                           <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-1 rounded text-xs ${statusClass}`}>{statusText}</span>
+                            <CalendarStatusBadge status={row.display_status} />
                           </td>
                           <td className="px-4 py-3 text-sm">
                             {row.is_sales_call ? (
@@ -1325,24 +1258,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               }}
               className="space-y-4"
             >
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client *</label>
-                <select
-                  required
-                  value={manualBookingForm.clientId}
-                  onChange={(e) => setManualBookingForm(f => ({ ...f, clientId: e.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-primary-500"
-                  disabled={manualBookingClientsLoading}
-                >
-                  <option value="">Select client...</option>
-                  {manualBookingClients.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {([c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || c.id)}
-                    </option>
-                  ))}
-                </select>
-                {manualBookingClientsLoading && <p className="text-xs text-gray-500 mt-1">Loading clients...</p>}
-              </div>
+              <ClientSearchCombobox
+                clients={manualBookingClients}
+                loading={manualBookingClientsLoading}
+                clientId={manualBookingForm.clientId}
+                onClientIdChange={(id) => setManualBookingForm((f) => ({ ...f, clientId: id }))}
+                resetKey={showManualBookingModal}
+                inputId="manual-booking-client-search-calendar"
+                label="Client *"
+              />
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
                 <input
@@ -1416,164 +1340,6 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
               </div>
             </form>
           </div>
-        </div>
-      )}
-
-      {/* Event Types Section */}
-      {connectedProvider && (
-        <div className="glass-card p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Event Types</h2>
-            <button
-              onClick={() => {
-                if (connectedProvider === 'calcom') {
-                  loadCalcomEventTypes();
-                } else {
-                  loadCalendlyEventTypes();
-                }
-                loadSalesCallEventTypes();
-              }}
-              disabled={eventTypesLoading}
-              className="px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-50"
-            >
-              {eventTypesLoading ? 'Loading...' : 'Refresh'}
-            </button>
-          </div>
-
-          {eventTypesError && (
-            <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-md">
-              <p className="text-sm text-red-800 dark:text-red-200">
-                <strong>Error loading event types:</strong> {eventTypesError}
-              </p>
-            </div>
-          )}
-
-          {eventTypesLoading && currentEventTypes.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">Loading event types...</div>
-          ) : currentEventTypes.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-              <p className="text-base font-medium mb-2">No event types found</p>
-              <p className="text-sm">
-                {eventTypesError
-                  ? `Error: ${eventTypesError}`
-                  : `You don't have any event types configured in ${connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'}. Create event types in your ${connectedProvider === 'calcom' ? 'Cal.com' : 'Calendly'} dashboard to get started.`}
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {connectedProvider === 'calcom' ? (
-                (currentEventTypes as CalComEventType[]).map((eventType) => {
-                  const etId = String(eventType.id);
-                  const isSalesCall = salesCallEventTypeIds.includes(etId);
-                  return (
-                    <div key={eventType.id} className="glass-card p-4">
-                      <h3 className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        {eventType.title}
-                      </h3>
-                      <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                        {eventType.length && (
-                          <p>Duration: {formatDuration(eventType.length)}</p>
-                        )}
-                        {eventType.slug && (
-                          <p className="text-xs">
-                            Slug: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{eventType.slug}</code>
-                          </p>
-                        )}
-                        {eventType.bookingUrl && (
-                          <button
-                            onClick={() => copyToClipboard(eventType.bookingUrl!, `booking-${eventType.id}`, 'booking URL')}
-                            className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 text-xs underline ${
-                              copiedId === `booking-${eventType.id}` ? 'text-green-500 dark:text-green-400' : ''
-                            }`}
-                          >
-                            {copiedId === `booking-${eventType.id}` ? '✓ Copied!' : 'Copy Booking URL'}
-                          </button>
-                        )}
-                        <p className="pt-2">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                if (isSalesCall) {
-                                  await apiClient.removeSalesCallEventType('calcom', etId);
-                                } else {
-                                  await apiClient.addSalesCallEventType('calcom', etId);
-                                }
-                                await loadSalesCallEventTypes();
-                                void refreshSyncedCalendar({ silent: true });
-                              } catch (e: any) {
-                                console.error(e);
-                                const msg = e?.response?.data?.detail || e?.message || 'Request failed';
-                                alert(msg);
-                              }
-                            }}
-                            className={`text-xs font-medium px-2 py-1 rounded ${isSalesCall ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                          >
-                            {isSalesCall ? '✓ Sales call' : 'Mark as sales call'}
-                          </button>
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                (currentEventTypes as CalendlyEventType[]).map((eventType) => {
-                  const etId = eventType.uri;
-                  const isSalesCall = salesCallEventTypeIds.includes(etId);
-                  return (
-                    <div key={eventType.uri} className="glass-card p-4">
-                      <h3 className="font-medium text-gray-900 dark:text-gray-100 mb-2">
-                        {eventType.name}
-                      </h3>
-                      <div className="space-y-1 text-sm text-gray-600 dark:text-gray-400">
-                        {eventType.duration && (
-                          <p>Duration: {formatDuration(eventType.duration)}</p>
-                        )}
-                        {eventType.slug && (
-                          <p className="text-xs">
-                            Slug: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{eventType.slug}</code>
-                          </p>
-                        )}
-                        {eventType.scheduling_url && (
-                          <button
-                            onClick={() => copyToClipboard(eventType.scheduling_url!, `scheduling-${eventType.uri}`, 'scheduling URL')}
-                            className={`text-primary-500 hover:text-primary-600 dark:text-primary-400 dark:hover:text-primary-300 text-xs underline ${
-                              copiedId === `scheduling-${eventType.uri}` ? 'text-green-500 dark:text-green-400' : ''
-                            }`}
-                          >
-                            {copiedId === `scheduling-${eventType.uri}` ? '✓ Copied!' : 'Copy Scheduling URL'}
-                          </button>
-                        )}
-                        <p className="pt-2">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              try {
-                                if (isSalesCall) {
-                                  await apiClient.removeSalesCallEventType('calendly', etId);
-                                } else {
-                                  await apiClient.addSalesCallEventType('calendly', etId);
-                                }
-                                await loadSalesCallEventTypes();
-                                void refreshSyncedCalendar({ silent: true });
-                              } catch (e: any) {
-                                console.error(e);
-                                const msg = e?.response?.data?.detail || e?.message || 'Request failed';
-                                alert(msg);
-                              }
-                            }}
-                            className={`text-xs font-medium px-2 py-1 rounded ${isSalesCall ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'}`}
-                          >
-                            {isSalesCall ? '✓ Sales call' : 'Mark as sales call'}
-                          </button>
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
         </div>
       )}
 

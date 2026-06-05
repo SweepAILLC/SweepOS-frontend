@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import {
+  CALENDAR_BOOKINGS_UPDATED_EVENT,
   MANUAL_PAYMENT_CREATED_EVENT,
   STRIPE_DATA_UPDATED_EVENT,
   TERMINAL_DATA_REFRESHED_EVENT,
@@ -14,10 +15,13 @@ import type {
   FinancesTimelinePoint,
   TerminalSummaryForWidgets,
 } from '@/types/integration';
+import type { CalendarTrendSummary } from '@/lib/dashboardTimeRange';
 import {
   dashboardPeriodLabel,
   financesSummaryApiParams,
   financesTimelineApiParams,
+  calendarTrendSummaryApiParams,
+  mapCalendarTrendSummaryFromApi,
   computeCalendarTrendSummaryFromRows,
   computeCalendarPastCountTrendPct,
   computeCalendarUpcomingCountTrendPct,
@@ -31,6 +35,8 @@ import {
 } from '@/lib/dashboardTimeRange';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
 import { useTerminalTimeRange } from '@/contexts/TerminalTimeRangeContext';
+import { KpiGridSkeleton, PremiumReveal } from '@/components/ui/PremiumMotion';
+import { COLUMN_STAGGER_MS } from '@/lib/premiumMotion';
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-US', {
@@ -46,7 +52,7 @@ function TrendBadge({ pct, suffix = '%' }: { pct: number | null | undefined; suf
   const positive = pct >= 0;
   return (
     <span
-      className={`text-xs font-medium tabular-nums shrink-0 ${
+      className={`text-[10px] font-medium tabular-nums shrink-0 leading-none ${
         positive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
       }`}
     >
@@ -71,15 +77,21 @@ function KpiTile({
   sub?: string;
 }) {
   return (
-    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2.5 sm:p-3 min-w-0 overflow-hidden">
-      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-        <div className="text-lg sm:text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate min-w-0">
+    <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md px-2 py-1.5 sm:px-2.5 sm:py-2 min-w-0 overflow-hidden">
+      <div className="flex items-baseline gap-1 min-w-0">
+        <div className="text-sm sm:text-base font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate min-w-0 leading-tight">
           {value}
         </div>
         <TrendBadge pct={trendPct} suffix={trendSuffix} />
       </div>
-      <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5">{label}</div>
-      {sub && <div className="text-xs text-gray-500 dark:text-gray-500 mt-0.5 truncate">{sub}</div>}
+      <div className="text-[10px] sm:text-[11px] text-gray-600 dark:text-gray-400 mt-0.5 leading-snug line-clamp-2" title={label}>
+        {label}
+      </div>
+      {sub && (
+        <div className="text-[10px] text-gray-500 dark:text-gray-500 mt-0.5 truncate leading-snug" title={sub}>
+          {sub}
+        </div>
+      )}
     </div>
   );
 }
@@ -96,6 +108,7 @@ export default function TerminalKpiRow() {
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [calendarTrendSummary, setCalendarTrendSummary] = useState<CalendarTrendSummary | null>(null);
 
   const hasLoadedOnce = useRef(false);
 
@@ -165,10 +178,12 @@ export default function TerminalKpiRow() {
     const handler = () => void loadKpis({ silent: true });
     window.addEventListener(STRIPE_DATA_UPDATED_EVENT, handler);
     window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
+    window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
     window.addEventListener(MANUAL_PAYMENT_CREATED_EVENT, handler);
     return () => {
       window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, handler);
       window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
+      window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
       window.removeEventListener(MANUAL_PAYMENT_CREATED_EVENT, handler);
     };
   }, [loadKpis]);
@@ -190,10 +205,49 @@ export default function TerminalKpiRow() {
     }
   };
 
-  const calendarTrendSummary = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, kpiTimeRange);
+  const loadCalendarTrendSummary = useCallback(async () => {
+    if (!connectedProvider) {
+      setCalendarTrendSummary(null);
+      return;
+    }
+    try {
+      const row = await apiClient.getCalendarTrendSummary(calendarTrendSummaryApiParams(kpiTimeRange));
+      setCalendarTrendSummary(mapCalendarTrendSummaryFromApi(row));
+    } catch {
+      if (syncedUpcoming.length > 0 || syncedPast.length > 0) {
+        setCalendarTrendSummary(
+          computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, kpiTimeRange)
+        );
+      }
+    }
+  }, [connectedProvider, kpiTimeRange, syncedUpcoming, syncedPast]);
+
+  useEffect(() => {
+    if (!connectedProvider) {
+      setCalendarTrendSummary(null);
+      return;
+    }
+    if (syncedUpcoming.length > 0 || syncedPast.length > 0) {
+      setCalendarTrendSummary(
+        computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, kpiTimeRange)
+      );
+    }
   }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
+
+  useEffect(() => {
+    if (!connectedProvider) return;
+    const delayMs = syncedUpcoming.length + syncedPast.length > 0 ? 400 : 1200;
+    const timer = window.setTimeout(() => {
+      void loadCalendarTrendSummary();
+    }, delayMs);
+    return () => window.clearTimeout(timer);
+  }, [connectedProvider, loadCalendarTrendSummary, syncedUpcoming.length, syncedPast.length]);
+
+  useEffect(() => {
+    const handler = () => void loadCalendarTrendSummary();
+    window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
+  }, [loadCalendarTrendSummary]);
 
   const calendarPastTrendPct = useMemo(() => {
     if (!connectedProvider) return null;
@@ -215,8 +269,6 @@ export default function TerminalKpiRow() {
     return computeCalendarShowUpRateTrendPp(syncedUpcoming, syncedPast, kpiTimeRange);
   }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
 
-  const arrTrendPct = stripeSummary?.mrr_change_percent ?? null;
-
   const ltvTrendPct = useMemo(
     () =>
       computeAvgRevenuePerCustomerTrend(
@@ -230,38 +282,16 @@ export default function TerminalKpiRow() {
   const rangeLabel = dashboardPeriodLabel(kpiTimeRange);
   const rangeLabelLower = rangeLabel.toLowerCase();
 
-  // Terminal summary includes manual + Stripe + Whop cash; finances API is Stripe/Whop only.
-  const terminalCash =
-    terminalSummary?.cash_collected != null
-      ? kpiTimeRange === 'mtd'
-        ? terminalSummary.cash_collected.last_mtd
-        : kpiTimeRange === 7
-          ? terminalSummary.cash_collected.last_7_days
-          : kpiTimeRange === 30 || kpiTimeRange === 90 || kpiTimeRange === 365
-            ? terminalSummary.cash_collected.last_30_days
-            : kpiTimeRange === 'all'
-              ? terminalSummary.cash_collected.last_30_days
-              : undefined
-      : undefined;
-
-  const combinedCash =
-    terminalCash != null
-      ? terminalCash
-      : financesSummary
-        ? combinedCashForRange(financesSummary, kpiTimeRange)
-        : fallbackCashForRange(kpiTimeRange, {
-            terminal: terminalSummary,
-            stripeLast30: stripeSummary?.last_30_days_revenue,
-          });
+  const combinedCash = financesSummary
+    ? combinedCashForRange(financesSummary, kpiTimeRange)
+    : fallbackCashForRange(kpiTimeRange, {
+        terminal: terminalSummary,
+        stripeLast30: stripeSummary?.last_30_days_revenue,
+      });
 
   const mrr =
     stripeSummary?.total_mrr ??
     terminalSummary?.mrr?.current_mrr ??
-    0;
-
-  const arr =
-    stripeSummary?.total_arr ??
-    terminalSummary?.mrr?.arr ??
     0;
 
   const cashLabel =
@@ -272,7 +302,7 @@ export default function TerminalKpiRow() {
         : `Combined cash (${rangeLabelLower})`;
 
   return (
-    <div className="glass-card p-4 sm:p-6 min-w-0">
+    <div className="glass-card p-3 sm:p-4 min-w-0">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Key metrics</h3>
         <div className="flex flex-wrap items-center gap-2">
@@ -323,86 +353,125 @@ export default function TerminalKpiRow() {
         <p className="text-xs text-amber-600 dark:text-amber-400 mb-3">{loadError}</p>
       )}
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2 sm:gap-3 min-w-0">
-        <KpiTile
-          label={cashLabel}
-          value={loading ? '…' : formatCurrency(combinedCash)}
-          trendPct={cashTrendPct}
-          sub={financesSummary ? 'Stripe + Whop' : 'Stripe / terminal fallback'}
-        />
-        <KpiTile
-          label="MRR"
-          value={loading ? '…' : formatCurrency(mrr)}
-          trendPct={stripeSummary?.mrr_change_percent}
-          sub={rangeLabel}
-        />
-        <KpiTile
-          label="Total ARR"
-          value={loading ? '…' : formatCurrency(arr)}
-          trendPct={arrTrendPct}
-          sub={rangeLabel}
-        />
-        <KpiTile
-          label="Avg LTV"
-          value={
-            loading
-              ? '…'
-              : stripeSummary?.average_client_ltv != null
-                ? formatCurrency(stripeSummary.average_client_ltv)
-                : '—'
-          }
-          trendPct={ltvTrendPct}
-          sub="Avg total spend"
-        />
-        <KpiTile
-          label={`Upcoming (${rangeLabelLower})`}
-          value={
-            connectedProvider && calendarTrendSummary
-              ? String(calendarTrendSummary.upcomingCount)
-              : '—'
-          }
-          trendPct={calendarUpcomingTrendPct}
-        />
-        <KpiTile
-          label={`Past meetings (${rangeLabelLower})`}
-          value={
-            connectedProvider && calendarTrendSummary
-              ? String(calendarTrendSummary.pastCount)
-              : '—'
-          }
-          trendPct={calendarPastTrendPct}
-        />
-        <KpiTile
-          label={`Sales close rate (${rangeLabelLower})`}
-          value={
-            calendarTrendSummary?.closeRatePct != null
-              ? `${calendarTrendSummary.closeRatePct}%`
-              : '—'
-          }
-          trendPct={calendarCloseRateTrendPp}
-          trendSuffix=" pp"
-          sub={
-            calendarTrendSummary && calendarTrendSummary.salesCallsInRange > 0
-              ? `${calendarTrendSummary.closedSalesCount}/${calendarTrendSummary.salesCallsInRange} sales calls`
-              : undefined
-          }
-        />
-        <KpiTile
-          label={`Show-up rate (${rangeLabelLower})`}
-          value={
-            calendarTrendSummary?.showUpRatePct != null
-              ? `${calendarTrendSummary.showUpRatePct}%`
-              : '—'
-          }
-          trendPct={calendarShowUpTrendPp}
-          trendSuffix=" pp"
-          sub={
-            calendarTrendSummary && calendarTrendSummary.attendanceEligiblePast > 0
-              ? `${calendarTrendSummary.showedUpCount}/${calendarTrendSummary.attendanceEligiblePast} past meetings`
-              : undefined
-          }
-        />
+      {loading && !hasLoadedOnce.current ? (
+        <KpiGridSkeleton />
+      ) : (
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2 min-w-0">
+        {(
+          [
+            {
+              key: 'cash',
+              tile: (
+                <KpiTile
+                  label={cashLabel}
+                  value={formatCurrency(combinedCash)}
+                  trendPct={cashTrendPct}
+                  sub={financesSummary ? 'Stripe + Whop + Manual' : 'Terminal / Stripe fallback'}
+                />
+              ),
+            },
+            {
+              key: 'mrr',
+              tile: (
+                <KpiTile
+                  label="MRR"
+                  value={formatCurrency(mrr)}
+                  trendPct={stripeSummary?.mrr_change_percent}
+                  sub={rangeLabel}
+                />
+              ),
+            },
+            {
+              key: 'ltv',
+              tile: (
+                <KpiTile
+                  label="Avg LTV"
+                  value={
+                    stripeSummary?.average_client_ltv != null
+                      ? formatCurrency(stripeSummary.average_client_ltv)
+                      : '—'
+                  }
+                  trendPct={ltvTrendPct}
+                  sub="Avg total spend"
+                />
+              ),
+            },
+            {
+              key: 'upcoming',
+              tile: (
+                <KpiTile
+                  label={`Upcoming (${rangeLabelLower})`}
+                  value={
+                    connectedProvider && calendarTrendSummary
+                      ? String(calendarTrendSummary.upcomingCount)
+                      : '—'
+                  }
+                  trendPct={calendarUpcomingTrendPct}
+                />
+              ),
+            },
+            {
+              key: 'past',
+              tile: (
+                <KpiTile
+                  label={`Past meetings (${rangeLabelLower})`}
+                  value={
+                    connectedProvider && calendarTrendSummary
+                      ? String(calendarTrendSummary.pastCount)
+                      : '—'
+                  }
+                  trendPct={calendarPastTrendPct}
+                />
+              ),
+            },
+            {
+              key: 'close',
+              tile: (
+                <KpiTile
+                  label={`Sales close rate (${rangeLabelLower})`}
+                  value={
+                    calendarTrendSummary?.closeRatePct != null
+                      ? `${calendarTrendSummary.closeRatePct}%`
+                      : '—'
+                  }
+                  trendPct={calendarCloseRateTrendPp}
+                  trendSuffix=" pp"
+                  sub={
+                    calendarTrendSummary && calendarTrendSummary.salesCallsInRange > 0
+                      ? `${calendarTrendSummary.closedSalesCount}/${calendarTrendSummary.salesCallsInRange} sales calls`
+                      : undefined
+                  }
+                />
+              ),
+            },
+            {
+              key: 'showup',
+              tile: (
+                <KpiTile
+                  label={`Show-up rate (${rangeLabelLower})`}
+                  value={
+                    calendarTrendSummary?.showUpRatePct != null
+                      ? `${calendarTrendSummary.showUpRatePct}%`
+                      : '—'
+                  }
+                  trendPct={calendarShowUpTrendPp}
+                  trendSuffix=" pp"
+                  sub={
+                    calendarTrendSummary && calendarTrendSummary.attendanceEligiblePast > 0
+                      ? `${calendarTrendSummary.showedUpCount}/${calendarTrendSummary.attendanceEligiblePast} sales calls`
+                      : undefined
+                  }
+                />
+              ),
+            },
+          ] as const
+        ).map((item, i) => (
+          <PremiumReveal key={item.key} delayMs={i * COLUMN_STAGGER_MS}>
+            {item.tile}
+          </PremiumReveal>
+        ))}
       </div>
+      )}
     </div>
   );
 }

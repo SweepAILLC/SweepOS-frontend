@@ -1,12 +1,16 @@
 import { apiClient } from '@/lib/api';
+import { runCalendarCheckInSync } from '@/lib/calendarSync';
 import { normalizeLifecycleColumn } from '@/lib/pipelineColumns';
 import { setPipelineClients } from '@/lib/pipelineStore';
 import type { Client } from '@/types/client';
 import {
   cache,
   CACHE_KEYS,
+  CALENDAR_BOOKINGS_UPDATED_EVENT,
   clearCalendarIntegrationStatusCache,
+  getSeenCalendarDataMs,
   invalidateStripeAndTerminalAfterWebhook,
+  invalidateTerminalAfterCalendarWebhook,
   STRIPE_DATA_UPDATED_EVENT,
   TERMINAL_DATA_REFRESHED_EVENT,
 } from '@/lib/cache';
@@ -17,6 +21,16 @@ const MIN_AUTO_REFRESH_GAP_MS = 45_000;
 
 let refreshChain: Promise<TerminalRefreshResult> = Promise.resolve({ ok: true });
 let lastRefreshFinishedAt = 0;
+let refreshInFlight = false;
+
+export function isTerminalRefreshInFlight(): boolean {
+  return refreshInFlight;
+}
+
+export function isTerminalSyncOnLoadPending(): boolean {
+  if (typeof sessionStorage === 'undefined') return false;
+  return sessionStorage.getItem(TERMINAL_SYNC_ON_LOAD_KEY) === '1';
+}
 
 export type TerminalRefreshReason = 'manual' | 'new_session' | 'webhook';
 
@@ -47,17 +61,37 @@ function invalidateTerminalCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
   cache.delete(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE);
   cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+  cache.deleteByPrefix('performance_snapshot_');
+  cache.deleteByPrefix('outreach_inbox_');
   cache.deleteByPrefix('stripe_');
 }
 
 function notifyTerminalWidgetsRefreshed(): void {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
-  window.dispatchEvent(new CustomEvent('calendarBookingsUpdated'));
+  window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
   window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
 }
 
+/** Poll after Cal.com / Calendly webhook — DB already has the row; no provider pull needed. */
+export async function checkCalendarWebhookAndRefresh(): Promise<boolean> {
+  try {
+    const { last_updated_ms } = await apiClient.getCalendarLastUpdated();
+    if (last_updated_ms == null || getSeenCalendarDataMs() >= last_updated_ms) return false;
+    invalidateTerminalAfterCalendarWebhook(last_updated_ms);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
+      window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function executeTerminalRefresh(): Promise<TerminalRefreshResult> {
+  refreshInFlight = true;
+  try {
   const result: TerminalRefreshResult = { ok: true };
   invalidateTerminalCaches();
 
@@ -67,6 +101,19 @@ async function executeTerminalRefresh(): Promise<TerminalRefreshResult> {
     apiClient.getCalComStatus().catch(() => ({ connected: false })),
     apiClient.getCalendlyStatus().catch(() => ({ connected: false })),
   ]);
+
+  if (calcom?.connected || calendly?.connected) {
+    try {
+      await runCalendarCheckInSync({ applyPipelineRules: false });
+      result.calendar = true;
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
+      }
+    } catch {
+      result.calendar = false;
+      result.ok = false;
+    }
+  }
 
   const syncTasks: Promise<void>[] = [];
 
@@ -93,20 +140,6 @@ async function executeTerminalRefresh(): Promise<TerminalRefreshResult> {
         })
         .catch(() => {
           result.whop = false;
-        })
-    );
-  }
-
-  if (calcom?.connected || calendly?.connected) {
-    syncTasks.push(
-      apiClient
-        .syncCheckIns({ applyPipelineRules: false })
-        .then(() => {
-          result.calendar = true;
-        })
-        .catch(() => {
-          result.calendar = false;
-          result.ok = false;
         })
     );
   }
@@ -142,6 +175,9 @@ async function executeTerminalRefresh(): Promise<TerminalRefreshResult> {
 
   lastRefreshFinishedAt = Date.now();
   return result;
+  } finally {
+    refreshInFlight = false;
+  }
 }
 
 /**

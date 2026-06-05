@@ -6,6 +6,7 @@ import React, { memo, useMemo, useCallback } from 'react';
 import { computeLeadFollowUpBar } from '@/lib/leadFollowUp';
 import { insightChipClass } from '@/lib/callInsightChips';
 import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
+import { isProgramProgressVisible } from '@/lib/clientProgram';
 
 const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
@@ -38,7 +39,15 @@ function ClientCard({
 }: ClientCardProps) {
   const sortableId = client.id;
 
-  const offerBalanceDue = useMemo(() => hasOutstandingOfferBalance(client), [client]);
+  const offerBalanceDue = useMemo(
+    () => hasOutstandingOfferBalance(client),
+    [
+      client.offer_enrollment?.slot,
+      client.offer_enrollment?.total_cents,
+      client.offer_enrollment?.paid_cents,
+      client.lifetime_revenue_cents,
+    ],
+  );
 
   const followUpBar = useMemo(() => (isLeadColumn ? computeLeadFollowUpBar(client) : null), [isLeadColumn, client]);
 
@@ -199,8 +208,7 @@ function ClientCard({
             </div>
           ) : (
             !isLeadColumn &&
-            client.program_progress_percent !== undefined &&
-            client.program_progress_percent !== null && (
+            isProgramProgressVisible(client) && (
               <div className="mt-2">
                 <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
                   <span className="digitized-text">Program Progress</span>

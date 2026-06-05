@@ -2,6 +2,12 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
 import { CalComBooking, CalendlyScheduledEvent } from '@/types/integration';
+import CalendarStatusBadge from './CalendarStatusBadge';
+import {
+  calendarStatusBadgeClass,
+  displayStatusFromCheckInFlags,
+  type CalendarDisplayStatus,
+} from '@/lib/calendarBookingStatus';
 
 interface EventDetailsModalProps {
   isOpen: boolean;
@@ -726,53 +732,39 @@ export default function EventDetailsModal({
                     {/* Status: cancelled / no-show / confirmed (Cal.com and Calendly) */}
                     <div className="flex justify-between items-start gap-2">
                       <span className="text-gray-500 dark:text-gray-400">Status:</span>
-                      <span className="text-gray-900 dark:text-gray-100">
+                      <span className="text-gray-900 dark:text-gray-100 text-right">
                         {checkInId && manualCheckIn ? (
-                          manualCheckIn.cancelled ? (
-                            <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
-                          ) : manualCheckIn.no_show ? (
-                            <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>
-                          ) : manualCheckIn.completed ? (
-                            <span className="text-green-600 dark:text-green-400 font-medium">Completed</span>
-                          ) : (
-                            <span className="text-green-600 dark:text-green-400">Confirmed</span>
-                          )
+                          <CalendarStatusBadge status={displayStatusFromCheckInFlags(manualCheckIn)} />
                         ) : provider === 'calcom' && booking ? (() => {
                           const isNoShow = booking.status === 'accepted' && (
                             booking.absentHost === true ||
                             (Array.isArray(booking.attendees) && booking.attendees.some((a: { absent?: boolean }) => a.absent === true))
                           );
-                          if (isNoShow) return <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>;
+                          if (isNoShow) return <CalendarStatusBadge status="no_show" />;
                           if (booking.status === 'cancelled') {
                             return (
-                              <span>
-                                <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
+                              <span className="inline-flex flex-col items-end gap-1">
+                                <CalendarStatusBadge status="cancelled" />
                                 {booking.cancellationReason && (
-                                  <span className="block text-gray-600 dark:text-gray-400 text-xs mt-1">{booking.cancellationReason}</span>
+                                  <span className="text-gray-600 dark:text-gray-400 text-xs">{booking.cancellationReason}</span>
                                 )}
                                 {booking.cancelledByEmail && (
-                                  <span className="block text-gray-500 dark:text-gray-500 text-xs">by {booking.cancelledByEmail}</span>
+                                  <span className="text-gray-500 dark:text-gray-500 text-xs">by {booking.cancelledByEmail}</span>
                                 )}
                               </span>
                             );
                           }
-                          if (booking.status === 'accepted') return <span className="text-green-600 dark:text-green-400">Confirmed</span>;
-                          if (booking.status === 'rejected') return <span className="text-red-600 dark:text-red-400">Rejected</span>;
-                          return <span>{booking.status || '—'}</span>;
+                          if (booking.status === 'accepted') return <CalendarStatusBadge status="confirmed" />;
+                          if (booking.status === 'rejected') return <CalendarStatusBadge status="cancelled" />;
+                          return <CalendarStatusBadge status={booking.status || 'confirmed'} />;
                         })() : event ? (
                           event.status === 'canceled' || event.status === 'cancelled'
-                            ? <span className="text-red-600 dark:text-red-400 font-medium">Canceled</span>
+                            ? <CalendarStatusBadge status="cancelled" />
                             : event.status === 'active'
-                            ? <span className="text-green-600 dark:text-green-400">Active</span>
-                            : <span>{event.status || '—'}</span>
+                            ? <CalendarStatusBadge status="confirmed" />
+                            : <CalendarStatusBadge status={event.status || 'confirmed'} />
                         ) : manualCheckIn ? (
-                          manualCheckIn.cancelled
-                            ? <span className="text-red-600 dark:text-red-400 font-medium">Cancelled</span>
-                            : manualCheckIn.no_show
-                            ? <span className="text-amber-600 dark:text-amber-400 font-medium">No-show</span>
-                            : manualCheckIn.completed
-                            ? <span className="text-green-600 dark:text-green-400 font-medium">Completed</span>
-                            : <span className="text-gray-700 dark:text-gray-300">Scheduled</span>
+                          <CalendarStatusBadge status={displayStatusFromCheckInFlags(manualCheckIn)} />
                         ) : '—'}
                       </span>
                     </div>
@@ -808,7 +800,7 @@ export default function EventDetailsModal({
                           value={attendanceValue(manualCheckIn)}
                           disabled={attendanceUpdating || salesUpdating}
                           onChange={(e) => void setAttendanceStatus(e.target.value as AttendanceStatus)}
-                          className="mt-1 block w-full max-w-xs px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-primary-500 focus:border-primary-500"
+                          className={`mt-1 block w-full max-w-xs px-3 py-2 text-sm border-2 rounded-md focus:ring-primary-500 focus:border-primary-500 ${calendarStatusBadgeClass(attendanceValue(manualCheckIn) as CalendarDisplayStatus)}`}
                         >
                           <option value="confirmed">Confirmed / upcoming</option>
                           <option value="completed">Completed (showed up)</option>

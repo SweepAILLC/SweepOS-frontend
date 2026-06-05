@@ -300,8 +300,14 @@ export default function IntegrationsPanel() {
     try {
       await apiClient.connectCalComWithApiKey(calcomKey.trim());
       setCalcomKey('');
-      setSuccess('Cal.com connected.');
+      setSuccess('Cal.com connected. Pulling bookings…');
       await refreshIntegrationSummaries();
+      try {
+        await apiClient.syncCheckIns({ applyPipelineRules: false });
+        setSuccess('Cal.com connected. Bookings will stay in sync automatically.');
+      } catch {
+        setSuccess('Cal.com connected. Open Terminal to finish the first booking sync.');
+      }
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } } };
       setCalcomErr(ax?.response?.data?.detail || 'Cal.com connect failed.');
@@ -339,8 +345,14 @@ export default function IntegrationsPanel() {
     try {
       await apiClient.connectCalendlyWithApiKey(calendlyKey.trim());
       setCalendlyKey('');
-      setSuccess('Calendly connected.');
+      setSuccess('Calendly connected. Pulling bookings…');
       await refreshIntegrationSummaries();
+      try {
+        await apiClient.syncCheckIns({ applyPipelineRules: false });
+        setSuccess('Calendly connected. Bookings will stay in sync automatically.');
+      } catch {
+        setSuccess('Calendly connected. Open Terminal to finish the first booking sync.');
+      }
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } } };
       setCalendlyErr(ax?.response?.data?.detail || 'Calendly connect failed.');

@@ -340,7 +340,7 @@ export default function CallLibraryPanel() {
             <aside
               className={`hidden lg:flex fixed top-0 bottom-0 z-[44] ${APP_CALL_LIBRARY_SIDEBAR_WIDTH} flex-col glass-panel border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-[left] duration-300 ease-out`}
               aria-label="Call Library list"
-              style={{ left: '14rem' }}
+              style={{ left: 'var(--app-sidebar-width, 14rem)' }}
             >
               <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10 flex items-center justify-between gap-2">
                 <div className="min-w-0">

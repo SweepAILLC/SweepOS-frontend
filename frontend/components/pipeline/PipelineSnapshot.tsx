@@ -1,12 +1,16 @@
-import { useState, useEffect, useMemo, useRef, useId } from 'react';
+import { useState, useEffect, useMemo, useRef, useId, useCallback } from 'react';
+import { apiClient } from '@/lib/api';
+import { TERMINAL_CLIENTS_UPDATED_EVENT } from '@/lib/cache';
 import { buildPipelineFunnelPath } from '@/lib/pipelineFunnel';
-import { PIPELINE_COLUMNS } from '@/lib/pipelineColumns';
+import { PIPELINE_COLUMNS, withNormalizedLifecycle } from '@/lib/pipelineColumns';
 import {
   getPipelineClients,
   hydratePipelineStoreFromCache,
   pipelineCountsFromClients,
+  setPipelineClients,
   subscribePipelineClients,
 } from '@/lib/pipelineStore';
+import type { Client } from '@/types/client';
 
 interface PipelineSnapshotProps {
   onFilterChange: (column: string | null) => void;
@@ -14,6 +18,8 @@ interface PipelineSnapshotProps {
   /** Controlled filter — stays in sync with the board after refresh / tab switch. */
   activeFilter?: string | null;
   isActive?: boolean;
+  /** Override footer hint (e.g. when embedded in Terminal priorities). */
+  footerHint?: string;
 }
 
 const COLUMNS = PIPELINE_COLUMNS.map(({ id, shortTitle }) => ({ id, title: shortTitle }));
@@ -26,27 +32,72 @@ function hydrateSnapshotCounts(): Record<string, number> {
   return pipelineCountsFromClients(getPipelineClients());
 }
 
+const DEFAULT_FOOTER_HINT =
+  'Click a stage to filter the board below. Click again to clear.';
+
 export default function PipelineSnapshot({
   onFilterChange,
   onLoadComplete,
   activeFilter = null,
   isActive = true,
+  footerHint = DEFAULT_FOOTER_HINT,
 }: PipelineSnapshotProps) {
   const gradientId = `funnelGrad-${useId().replace(/:/g, '')}`;
   const [counts, setCounts] = useState<Record<string, number>>(hydrateSnapshotCounts);
   const hasCalledOnLoadComplete = useRef(false);
+  const loadInFlightRef = useRef<Promise<void> | null>(null);
 
-  const syncCountsFromStore = () => setCounts(hydrateSnapshotCounts());
+  const syncCountsFromStore = useCallback(() => {
+    setCounts(hydrateSnapshotCounts());
+  }, []);
+
+  const ensurePipelineClients = useCallback(async (forceRefresh = false) => {
+    hydratePipelineStoreFromCache();
+    if (!forceRefresh && getPipelineClients().length > 0) {
+      syncCountsFromStore();
+      return;
+    }
+    if (loadInFlightRef.current) {
+      await loadInFlightRef.current;
+      syncCountsFromStore();
+      return;
+    }
+    const run = (async () => {
+      try {
+        const data = await apiClient.getClients(undefined, forceRefresh);
+        const normalized = (Array.isArray(data) ? data : []).map((row) =>
+          withNormalizedLifecycle(row as Client)
+        );
+        if (normalized.length > 0) setPipelineClients(normalized);
+      } catch {
+        /* keep cache/store counts */
+      } finally {
+        syncCountsFromStore();
+      }
+    })();
+    loadInFlightRef.current = run;
+    try {
+      await run;
+    } finally {
+      loadInFlightRef.current = null;
+    }
+  }, [syncCountsFromStore]);
 
   useEffect(() => {
     syncCountsFromStore();
     return subscribePipelineClients(syncCountsFromStore);
-  }, []);
+  }, [syncCountsFromStore]);
 
   useEffect(() => {
     if (!isActive) return;
-    syncCountsFromStore();
-  }, [isActive]);
+    void ensurePipelineClients();
+  }, [isActive, ensurePipelineClients]);
+
+  useEffect(() => {
+    const onClientsUpdated = () => syncCountsFromStore();
+    window.addEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, onClientsUpdated);
+    return () => window.removeEventListener(TERMINAL_CLIENTS_UPDATED_EVENT, onClientsUpdated);
+  }, [syncCountsFromStore]);
 
   useEffect(() => {
     if (!hasCalledOnLoadComplete.current && onLoadComplete) {
@@ -95,7 +146,7 @@ export default function PipelineSnapshot({
   const pathD = useMemo(() => buildPipelineFunnelPath(displayHeights), [displayHeights]);
 
   return (
-    <div className="glass-card p-3 sm:p-4 min-w-0 max-w-full overflow-hidden">
+    <div className="glass-card p-3 sm:p-4 min-w-0 max-w-full overflow-hidden premium-reveal">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 digitized-text">
         Pipeline Snapshot
       </h3>
@@ -187,9 +238,7 @@ export default function PipelineSnapshot({
         </div>
       )}
 
-      <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 mt-2">
-        Click a stage to filter the board below. Click again to clear.
-      </p>
+      <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 mt-2">{footerHint}</p>
     </div>
   );
 }

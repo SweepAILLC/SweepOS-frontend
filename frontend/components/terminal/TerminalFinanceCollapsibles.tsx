@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
 import { apiClient } from '@/lib/api';
-import { clientMatchesBoardSearch } from '@/lib/clientBoardSearch';
+import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
+import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
 import {
   dashboardPeriodLabel,
   isManualStripePaymentRow,
@@ -17,6 +18,7 @@ import {
   STRIPE_DATA_UPDATED_EVENT,
 } from '@/lib/cache';
 import EmailComposer from '@/components/brevo/EmailComposer';
+import ManualPaymentDetailModal from '@/components/terminal/ManualPaymentDetailModal';
 import type { Payment } from '@/types/integration';
 import type { Client } from '@/types/client';
 
@@ -46,30 +48,94 @@ function formatCurrency(amount: number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
 }
 
-const MANUAL_PAYMENT_CLIENT_SUGGESTION_LIMIT = 8;
+/** Tbody rows visible before the table body scrolls. */
+const FINANCE_TABLE_MAX_VISIBLE_ROWS = 6;
+const FINANCE_TABLE_HEADER_PX = 33;
+const FINANCE_TRANSACTION_ROW_PX = 41;
+const FINANCE_FAILED_ROW_PX = 52;
 
-function clientDisplayName(client: Client): string {
-  return [client.first_name, client.last_name].filter(Boolean).join(' ') || client.email || 'Unnamed';
+function financeTableScrollMaxPx(rowPx: number) {
+  return FINANCE_TABLE_HEADER_PX + FINANCE_TABLE_MAX_VISIBLE_ROWS * rowPx;
 }
 
-function deduplicateClientsForAssign(rawClients: Client[]): Client[] {
-  const seenKeys = new Set<string>();
-  const result: Client[] = [];
-  for (const client of rawClients) {
-    const email = client.email?.replace(/\s+/g, '').toLowerCase().trim() || null;
-    const key = email
-      ? `email:${email}`
-      : client.stripe_customer_id
-        ? `stripe:${client.stripe_customer_id}`
-        : `id:${client.id}`;
-    if (seenKeys.has(key)) continue;
-    seenKeys.add(key);
-    result.push(client);
+const FAILED_PAYMENTS_TABLE_MAX_PX = financeTableScrollMaxPx(FINANCE_FAILED_ROW_PX);
+const TRANSACTIONS_TABLE_MAX_PX = financeTableScrollMaxPx(FINANCE_TRANSACTION_ROW_PX);
+
+const FINANCE_SECTION_BODY_PAD_PX = 28;
+const FINANCE_FAILED_SUMMARY_PX = 56;
+const FINANCE_TRANSACTIONS_SUMMARY_PX = 64;
+const FINANCE_STACK_GAP_PX = 12;
+const FINANCE_EMPTY_MESSAGE_PX = 20;
+const FINANCE_LOAD_MORE_PX = 28;
+
+function financeTableBodyHeightPx(rowCount: number, rowPx: number) {
+  if (rowCount <= 0) return 0;
+  return FINANCE_TABLE_HEADER_PX + rowCount * rowPx;
+}
+
+function estimateFinanceStackHeight(
+  failedCount: number,
+  txCount: number,
+  failedLoading: boolean,
+  paymentsLoading: boolean,
+  hasLoadMore: boolean,
+) {
+  let total = 0;
+
+  total += FINANCE_FAILED_SUMMARY_PX + FINANCE_SECTION_BODY_PAD_PX;
+  if (failedLoading || failedCount === 0) total += FINANCE_EMPTY_MESSAGE_PX;
+  else total += financeTableBodyHeightPx(failedCount, FINANCE_FAILED_ROW_PX);
+
+  total += FINANCE_STACK_GAP_PX;
+
+  total += FINANCE_TRANSACTIONS_SUMMARY_PX + FINANCE_SECTION_BODY_PAD_PX;
+  if ((paymentsLoading && txCount === 0) || txCount === 0) total += FINANCE_EMPTY_MESSAGE_PX;
+  else {
+    total += financeTableBodyHeightPx(txCount, FINANCE_TRANSACTION_ROW_PX);
+    if (hasLoadMore) total += FINANCE_LOAD_MORE_PX;
   }
-  return result;
+
+  return total;
 }
 
-export default function TerminalFinanceCollapsibles() {
+/** Allow unroll when estimates are slightly below actual DOM height. */
+const FINANCE_STACK_HEIGHT_TOLERANCE_PX = 24;
+
+function cappedFinanceTableMaxPx(
+  canUnrollAll: boolean,
+  rowCount: number,
+  rowPx: number,
+  rowCapPx: number,
+): number | undefined {
+  if (rowCount <= 0) return undefined;
+  const natural = financeTableBodyHeightPx(rowCount, rowPx);
+  if (canUnrollAll) return undefined;
+  return Math.min(natural, rowCapPx);
+}
+
+function financeTableWrapProps(maxPx: number | undefined, rowCount: number, rowPx: number) {
+  const natural = financeTableBodyHeightPx(rowCount, rowPx);
+  const scrollable = maxPx != null && natural > maxPx;
+  return {
+    className: scrollable ? financeTableScrollClass : 'overflow-x-auto min-h-0',
+    style: maxPx != null ? ({ maxHeight: maxPx } as const) : undefined,
+  };
+}
+
+const financeTableScrollClass =
+  'overflow-x-auto overflow-y-auto min-h-0 overscroll-y-contain';
+
+const financeTableStickyHeadClass =
+  'sticky top-0 z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm';
+
+interface TerminalFinanceCollapsiblesProps {
+  /** Bookings column height (lg layout) — when tall enough, tables show all rows without scroll. */
+  bookingsColumnHeight?: number;
+}
+
+export default function TerminalFinanceCollapsibles({
+  bookingsColumnHeight,
+}: TerminalFinanceCollapsiblesProps) {
   const { timeRange } = useTerminalTimeRange();
   const rangeLabel = dashboardPeriodLabel(timeRange);
   const [failedPayments, setFailedPayments] = useState<FailedPayment[]>([]);
@@ -105,8 +171,7 @@ export default function TerminalFinanceCollapsibles() {
     payment_method: '',
     receipt_url: '',
   });
-  const [manualPaymentClientQuery, setManualPaymentClientQuery] = useState('');
-  const [manualPaymentClientDropdownOpen, setManualPaymentClientDropdownOpen] = useState(false);
+  const [selectedManualPayment, setSelectedManualPayment] = useState<Payment | null>(null);
 
   const pageSize = 50;
 
@@ -174,19 +239,9 @@ export default function TerminalFinanceCollapsibles() {
     apiClient.getBrevoStatus().then((s) => setBrevoConnected(!!s?.connected)).catch(() => setBrevoConnected(false));
   }, [loadFailed, loadPayments]);
 
-  const manualPaymentClientSuggestions = useMemo(() => {
-    const q = manualPaymentClientQuery.trim();
-    const matches = q
-      ? manualPaymentClients.filter((c) => clientMatchesBoardSearch(c, q))
-      : manualPaymentClients;
-    return matches.slice(0, MANUAL_PAYMENT_CLIENT_SUGGESTION_LIMIT);
-  }, [manualPaymentClients, manualPaymentClientQuery]);
-
   useEffect(() => {
     if (!showManualPaymentModal) return;
     setManualPaymentError(null);
-    setManualPaymentClientQuery('');
-    setManualPaymentClientDropdownOpen(false);
     setManualPaymentClientsLoading(true);
     apiClient
       .getClients()
@@ -314,8 +369,6 @@ export default function TerminalFinanceCollapsibles() {
         payment_method: '',
         receipt_url: '',
       });
-      setManualPaymentClientQuery('');
-      setManualPaymentClientDropdownOpen(false);
       setShowManualPaymentModal(false);
       dispatchManualPaymentCreated();
       await loadPayments(1);
@@ -335,10 +388,52 @@ export default function TerminalFinanceCollapsibles() {
     return name.includes(q) || email.includes(q);
   });
 
+  const canUnrollAllFinanceTables = useMemo(() => {
+    if (bookingsColumnHeight == null || bookingsColumnHeight <= 0) return false;
+    const stackHeight = estimateFinanceStackHeight(
+      failedPayments.length,
+      payments.length,
+      failedLoading,
+      paymentsLoading,
+      paymentsHasMore,
+    );
+    return bookingsColumnHeight + FINANCE_STACK_HEIGHT_TOLERANCE_PX >= stackHeight;
+  }, [
+    bookingsColumnHeight,
+    failedPayments.length,
+    payments.length,
+    failedLoading,
+    paymentsLoading,
+    paymentsHasMore,
+  ]);
+
+  const failedTableMaxPx = cappedFinanceTableMaxPx(
+    canUnrollAllFinanceTables,
+    failedPayments.length,
+    FINANCE_FAILED_ROW_PX,
+    FAILED_PAYMENTS_TABLE_MAX_PX,
+  );
+  const transactionsTableMaxPx = cappedFinanceTableMaxPx(
+    canUnrollAllFinanceTables,
+    payments.length,
+    FINANCE_TRANSACTION_ROW_PX,
+    TRANSACTIONS_TABLE_MAX_PX,
+  );
+  const failedTableWrap = financeTableWrapProps(
+    failedTableMaxPx,
+    failedPayments.length,
+    FINANCE_FAILED_ROW_PX,
+  );
+  const transactionsTableWrap = financeTableWrapProps(
+    transactionsTableMaxPx,
+    payments.length,
+    FINANCE_TRANSACTION_ROW_PX,
+  );
+
   return (
-    <div className="space-y-3 min-w-0">
-      <details className="group glass-card overflow-hidden">
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0">
+    <div className="flex flex-col gap-3 min-w-0">
+      <details className="group glass-card overflow-hidden" open>
+        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0 shrink-0">
           <span className={sectionToggleClass}>{sectionChevron}</span>
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
             Failed payments
@@ -358,9 +453,9 @@ export default function TerminalFinanceCollapsibles() {
             <p className="text-sm text-gray-500">No failed payments in queue</p>
           )}
           {!failedLoading && failedPayments.length > 0 && (
-            <div className="overflow-x-auto">
+            <div className={failedTableWrap.className} style={failedTableWrap.style}>
               <table className="min-w-full text-sm">
-                <thead>
+                <thead className={financeTableStickyHeadClass}>
                   <tr className="text-left text-xs text-gray-500 border-b border-white/10">
                     <th className="py-2 pr-2">Customer</th>
                     <th className="py-2 pr-2">Amount</th>
@@ -421,7 +516,7 @@ export default function TerminalFinanceCollapsibles() {
       </details>
 
       <details className="group glass-card overflow-hidden" open>
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0">
+        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0 shrink-0">
           <span className={sectionToggleClass}>{sectionChevron}</span>
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
             Recent transactions
@@ -453,9 +548,9 @@ export default function TerminalFinanceCollapsibles() {
           )}
           {payments.length > 0 && (
             <>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto">
+              <div className={transactionsTableWrap.className} style={transactionsTableWrap.style}>
                 <table className="min-w-full text-sm">
-                  <thead className="sticky top-0 bg-white/90 dark:bg-gray-900/90">
+                  <thead className={financeTableStickyHeadClass}>
                     <tr className="text-left text-xs text-gray-500 border-b border-white/10">
                       <th className="py-2 pr-2">Date</th>
                       <th className="py-2 pr-2">Customer</th>
@@ -464,8 +559,16 @@ export default function TerminalFinanceCollapsibles() {
                     </tr>
                   </thead>
                   <tbody>
-                    {payments.map((p) => (
-                      <tr key={p.id} className="border-b border-white/5">
+                    {payments.map((p) => {
+                      const isManual = isManualStripePaymentRow(p);
+                      return (
+                      <tr
+                        key={p.id}
+                        className={`border-b border-white/5 ${isManual ? 'cursor-pointer hover:bg-white/[0.04]' : ''}`}
+                        onClick={() => {
+                          if (isManual) setSelectedManualPayment(p);
+                        }}
+                      >
                         <td className="py-2 pr-2 whitespace-nowrap">
                           {p.created_at
                             ? new Date(p.created_at * 1000).toLocaleDateString()
@@ -483,8 +586,17 @@ export default function TerminalFinanceCollapsibles() {
                           {formatCurrency((p.amount_cents || 0) / 100)}
                         </td>
                         <td className="py-2">
-                          {isManualStripePaymentRow(p) ? (
-                            <span className="text-xs text-gray-500 dark:text-gray-400">Manual</span>
+                          {isManual ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedManualPayment(p);
+                              }}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                            >
+                              Edit
+                            </button>
                           ) : !p.client_id ? (
                             <button
                               type="button"
@@ -498,7 +610,8 @@ export default function TerminalFinanceCollapsibles() {
                           )}
                         </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -517,6 +630,24 @@ export default function TerminalFinanceCollapsibles() {
         </div>
       </details>
 
+      {selectedManualPayment && (
+        <ManualPaymentDetailModal
+          payment={selectedManualPayment}
+          isOpen
+          onClose={() => setSelectedManualPayment(null)}
+          onSaved={async () => {
+            dispatchManualPaymentCreated();
+            setPaymentsPage(1);
+            await loadPayments(1);
+          }}
+          onDeleted={async () => {
+            dispatchManualPaymentCreated();
+            setPaymentsPage(1);
+            await loadPayments(1);
+          }}
+        />
+      )}
+
       {showManualPaymentModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
@@ -528,8 +659,6 @@ export default function TerminalFinanceCollapsibles() {
                   onClick={() => {
                     setShowManualPaymentModal(false);
                     setManualPaymentError(null);
-                    setManualPaymentClientQuery('');
-                    setManualPaymentClientDropdownOpen(false);
                   }}
                   className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
                   aria-label="Close"
@@ -541,81 +670,14 @@ export default function TerminalFinanceCollapsibles() {
                 {manualPaymentError && (
                   <p className="text-sm text-red-600 dark:text-red-400">{manualPaymentError}</p>
                 )}
-                <div>
-                  <label
-                    htmlFor="manual-payment-client-search"
-                    className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1"
-                  >
-                    Client
-                  </label>
-                  <div className="relative">
-                    <input
-                      id="manual-payment-client-search"
-                      type="search"
-                      autoComplete="off"
-                      role="combobox"
-                      aria-expanded={manualPaymentClientDropdownOpen}
-                      aria-autocomplete="list"
-                      aria-controls="manual-payment-client-suggestions"
-                      disabled={manualPaymentClientsLoading}
-                      value={manualPaymentClientQuery}
-                      onChange={(e) => {
-                        setManualPaymentClientQuery(e.target.value);
-                        setManualPaymentForm((f) => ({ ...f, clientId: '' }));
-                        setManualPaymentClientDropdownOpen(true);
-                      }}
-                      onFocus={() => setManualPaymentClientDropdownOpen(true)}
-                      onBlur={() => {
-                        window.setTimeout(() => setManualPaymentClientDropdownOpen(false), 150);
-                      }}
-                      placeholder="Search by name, email, phone…"
-                      className="w-full rounded-md glass-input sm:text-sm"
-                    />
-                    {manualPaymentForm.clientId && (
-                      <p className="mt-1 text-xs text-green-700 dark:text-green-400">Client selected</p>
-                    )}
-                    {manualPaymentClientDropdownOpen && !manualPaymentClientsLoading && (
-                      <ul
-                        id="manual-payment-client-suggestions"
-                        role="listbox"
-                        className="absolute z-20 mt-1 w-full max-h-48 overflow-y-auto rounded-md border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg"
-                      >
-                        {manualPaymentClientSuggestions.length === 0 ? (
-                          <li className="px-3 py-2 text-sm text-gray-500">No clients found</li>
-                        ) : (
-                          manualPaymentClientSuggestions.map((c) => {
-                            const name = clientDisplayName(c);
-                            return (
-                              <li key={c.id} role="option" aria-selected={manualPaymentForm.clientId === c.id}>
-                                <button
-                                  type="button"
-                                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700/80"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => {
-                                    const label = c.email ? `${name} (${c.email})` : name;
-                                    setManualPaymentForm((f) => ({ ...f, clientId: c.id }));
-                                    setManualPaymentClientQuery(label);
-                                    setManualPaymentClientDropdownOpen(false);
-                                  }}
-                                >
-                                  <span className="font-medium text-gray-900 dark:text-gray-100">{name}</span>
-                                  {c.email && (
-                                    <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
-                                      {c.email}
-                                    </span>
-                                  )}
-                                </button>
-                              </li>
-                            );
-                          })
-                        )}
-                      </ul>
-                    )}
-                    {manualPaymentClientsLoading && (
-                      <p className="mt-1 text-xs text-gray-500">Loading clients…</p>
-                    )}
-                  </div>
-                </div>
+                <ClientSearchCombobox
+                  clients={manualPaymentClients}
+                  loading={manualPaymentClientsLoading}
+                  clientId={manualPaymentForm.clientId}
+                  onClientIdChange={(id) => setManualPaymentForm((f) => ({ ...f, clientId: id }))}
+                  resetKey={showManualPaymentModal}
+                  inputId="manual-payment-client-search"
+                />
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Amount ($)
@@ -689,8 +751,6 @@ export default function TerminalFinanceCollapsibles() {
                     onClick={() => {
                       setShowManualPaymentModal(false);
                       setManualPaymentError(null);
-                      setManualPaymentClientQuery('');
-                      setManualPaymentClientDropdownOpen(false);
                     }}
                     className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
                   >
