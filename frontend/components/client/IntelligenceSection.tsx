@@ -243,6 +243,16 @@ export default function IntelligenceSection({
     return buildClipQueueView(clipsForQueue, dismissedClipIds, INTELLIGENCE_MAX_POOL, INTELLIGENCE_VISIBLE_CLIPS);
   }, [clipsForQueue, dismissedClipIds]);
 
+  const offerBalanceDue = useMemo(
+    () => (client ? hasOutstandingOfferBalance(client) : false),
+    [
+      client?.offer_enrollment?.slot,
+      client?.offer_enrollment?.total_cents,
+      client?.offer_enrollment?.paid_cents,
+      client?.lifetime_revenue_cents,
+    ],
+  );
+
   if (!client) return null;
 
   const latestNonComplete = (insightData?.insights || []).find((i) => i.status !== 'complete' || !i.insight);
@@ -305,15 +315,6 @@ export default function IntelligenceSection({
   const isLead = (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(lc);
   const isDead = lc === 'dead';
   const summaryTags = insightData?.summary?.tags || [];
-  const offerBalanceDue = useMemo(
-    () => hasOutstandingOfferBalance(client),
-    [
-      client.offer_enrollment?.slot,
-      client.offer_enrollment?.total_cents,
-      client.offer_enrollment?.paid_cents,
-      client.lifetime_revenue_cents,
-    ],
-  );
 
   const showMaximizeRoiBox =
     isClientRoi &&

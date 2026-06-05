@@ -735,6 +735,15 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
 
   const diagnosis = snap?.diagnosis;
 
+  const handlePipelineSnapshotFilter = useCallback(
+    (column: string | null) => {
+      setPipelineFilter(column);
+      setPipelineColumnFilter(column);
+      router.push({ pathname: '/', query: { tab: 'pipeline' } }, undefined, { shallow: true });
+    },
+    [router]
+  );
+
   if (loading && !snap) {
     return (
       <div
@@ -786,15 +795,6 @@ export default function PerformancePanel({ variant = 'standalone' }: Performance
       </svg>
       {reanalyzing ? 'Re-analyzing…' : 'Re-analyze'}
     </button>
-  );
-
-  const handlePipelineSnapshotFilter = useCallback(
-    (column: string | null) => {
-      setPipelineFilter(column);
-      setPipelineColumnFilter(column);
-      router.push({ pathname: '/', query: { tab: 'pipeline' } }, undefined, { shallow: true });
-    },
-    [router]
   );
 
   const instructionLine = (
