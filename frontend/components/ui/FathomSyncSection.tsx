@@ -13,12 +13,19 @@ interface FathomSyncSectionProps {
 function formatSyncResult(r: FathomSyncResponse): string {
   const ing = r.ingested ?? r.processed ?? 0;
   const seen = r.meetings_seen ?? 0;
-  const noMatch = r.skipped_no_client_match ?? 0;
+  const unlinked = r.ingested_unlinked ?? 0;
+  const relinked = r.relinked_to_clients ?? 0;
+  const errors = r.ingest_errors ?? 0;
   const queued = r.call_insights_queued ?? 0;
   const parts = [
     `Imported ${ing} meeting(s) (${seen} seen from Fathom).`,
-    noMatch > 0 ? `${noMatch} skipped — invitee email didn’t match a client in Sweep.` : null,
+    unlinked > 0
+      ? `${unlinked} imported for marketing insights (not yet linked to a client).`
+      : null,
+    relinked > 0 ? `${relinked} call(s) linked to clients on your board.` : null,
+    errors > 0 ? `${errors} meeting(s) could not be saved — check backend logs.` : null,
     queued > 0 ? `${queued} call insight job(s) queued (run in background).` : null,
+    ing > 0 ? 'Sentiment and library reports continue in the background.' : null,
   ].filter(Boolean);
   return parts.join(' ');
 }
@@ -41,17 +48,37 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
         setSyncError(
           'No Fathom API key for this organization. Add it under Integrations (admins/owners) and save, or set FATHOM_API_KEY on the server.'
         );
+        setSyncInBackground(false);
         return;
       }
       if (r.skipped) {
         setSyncError(r.reason ? `Sync skipped: ${r.reason}` : 'Sync skipped.');
+        setSyncInBackground(false);
+        return;
+      }
+      if (r.started || r.background) {
+        setSyncMessage(
+          r.message ||
+            'Fathom sync started. Meeting metadata imports now; summaries and transcripts continue in the background.'
+        );
         return;
       }
       setSyncMessage(formatSyncResult(r) || 'Sync finished.');
       setSyncInBackground(false);
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } }; message?: string };
-      setSyncError(err?.response?.data?.detail || err?.message || 'Fathom sync failed.');
+      const err = e as {
+        response?: { data?: { detail?: string | { msg?: string }[] }; status?: number };
+        message?: string;
+      };
+      const detail = err?.response?.data?.detail;
+      const detailText =
+        typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d) => d?.msg).filter(Boolean).join('; ')
+            : null;
+      setSyncError(detailText || err?.message || 'Fathom sync failed.');
+      setSyncInBackground(false);
     } finally {
       setSyncing(false);
     }
@@ -74,8 +101,9 @@ export default function FathomSyncSection({ variant = 'panel' }: FathomSyncSecti
       <div>
         <h3 className={titleClass}>Import past Fathom calls</h3>
         <p className={`${descClass} mt-1`}>
-          Fetches recent recordings from your Fathom account and links them to clients when the meeting invitee email
-          matches a client in Sweep. Then sentiment and call insights can run. Large accounts may take up to a minute.
+          Fetches recent recordings from your Fathom account (metadata first, then summaries in the background).
+          All calls import for marketing insights even when the invitee email is not on your pipeline yet.
+          When a matching client is added later, calls link automatically.
         </p>
       </div>
       <button

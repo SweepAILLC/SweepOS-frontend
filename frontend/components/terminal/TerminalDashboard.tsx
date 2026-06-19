@@ -13,8 +13,9 @@ import { TerminalCalendarProvider } from '@/contexts/TerminalCalendarContext';
 import { TerminalTimeRangeProvider } from '@/contexts/TerminalTimeRangeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import { apiClient } from '@/lib/api';
-import { getSeenStripeDataMs } from '@/lib/cache';
 import {
+  checkCalendarWebhookAndRefresh,
+  checkStripeWebhookAndRefresh,
   consumeTerminalSyncOnLoad,
   runTerminalDataRefresh,
 } from '@/lib/terminalRefresh';
@@ -132,10 +133,15 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
 
     const checkWebhook = async () => {
       if (cancelled) return;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       try {
-        const { last_updated_ms } = await apiClient.getStripeLastUpdated();
-        if (last_updated_ms == null || getSeenStripeDataMs() >= last_updated_ms) return;
-        await runTerminalDataRefresh({ reason: 'webhook' });
+        const [stripeChanged] = await Promise.all([
+          checkStripeWebhookAndRefresh(),
+          checkCalendarWebhookAndRefresh(),
+        ]);
+        if (stripeChanged) {
+          await runTerminalDataRefresh({ reason: 'webhook' });
+        }
       } catch {
         /* ignore */
       }
@@ -149,7 +155,7 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
       }
     };
     document.addEventListener('visibilitychange', onVis);
-    const interval = setInterval(checkWebhook, 90000);
+    const interval = setInterval(checkWebhook, 45_000);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVis);

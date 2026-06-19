@@ -23,6 +23,15 @@ import {
   filterMonthlyCoachingPeriodsForDashboardRange,
   type CalendarTrendSummary,
 } from '@/lib/dashboardTimeRange';
+import { normalizeCalendarSyncedBookings } from '@/lib/calendarBookingsSplit';
+import { runCalendarCheckInSync } from '@/lib/calendarSync';
+import {
+  CALENDAR_DB_REFETCH_INTERVAL_MS,
+  CALENDAR_PROVIDER_SYNC_INTERVAL_MS,
+  CALENDAR_PROVIDER_SYNC_STALE_MS,
+} from '@/lib/calendarPollConstants';
+
+const CALENDAR_BOOKINGS_LIMITS = { upcoming_limit: 150, past_limit: 150 };
 
 type BookingsTab = 'upcoming' | 'past';
 type CalendarProvider = 'calcom' | 'calendly' | null;
@@ -162,22 +171,21 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     if (!provider) return false;
     try {
       const data = await apiClient.getCalendarSyncedBookings({
-        upcoming_limit: 150,
-        past_limit: 150,
-        provider,
+        ...CALENDAR_BOOKINGS_LIMITS,
+        past_since: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
       });
-      setSyncedUpcoming(data.upcoming || []);
-      setSyncedPast(data.past || []);
+      const normalized = normalizeCalendarSyncedBookings(data, CALENDAR_BOOKINGS_LIMITS);
+      setSyncedUpcoming(normalized.upcoming);
+      setSyncedPast(normalized.past);
       setLastSyncedAt(data.server_time || null);
-      // Persist for instant loads on tab open / refresh.
       if (typeof sessionStorage !== 'undefined') {
         const org = orgIdFromAccessToken();
         sessionStorage.setItem(
-          `calendar_synced_bookings_${provider}_${org}`,
+          `calendar_synced_bookings_all_${org}`,
           JSON.stringify({
             server_time: data.server_time || null,
-            upcoming: data.upcoming || [],
-            past: data.past || [],
+            upcoming: normalized.upcoming,
+            past: normalized.past,
             saved_at_ms: Date.now(),
           })
         );
@@ -188,7 +196,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     }
   };
 
-  const refreshSyncedCalendar = async (opts?: { silent?: boolean }) => {
+  const refreshSyncedCalendar = async (opts?: { silent?: boolean; force?: boolean }) => {
     const provider = connectedProviderRef.current;
     if (!provider) return;
 
@@ -198,19 +206,15 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
         setBookingsError(null);
       }
       const bookingParams = {
-        upcoming_limit: 150,
-        past_limit: 150,
-        provider,
+        ...CALENDAR_BOOKINGS_LIMITS,
+        past_since: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString(),
       } as const;
       try {
-        // Mount effect calls refetchSyncedBookings() for immediate DB rows; avoid an extra GET here
-        // while POST /check-ins/sync runs (reduces DB pool pressure on the API).
-        await apiClient.syncCheckIns();
-        // Mark last successful provider sync (used to avoid doing this every tab open).
+        await runCalendarCheckInSync({ force: opts?.force });
         try {
           if (typeof sessionStorage !== 'undefined') {
             const org = orgIdFromAccessToken();
-            sessionStorage.setItem(`calendar_last_sync_ms_${provider}_${org}`, String(Date.now()));
+            sessionStorage.setItem(`calendar_last_sync_ms_all_${org}`, String(Date.now()));
           }
         } catch {
           // ignore storage errors
@@ -222,19 +226,20 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
           await new Promise((r) => setTimeout(r, 1500));
           data = await apiClient.getCalendarSyncedBookings(bookingParams);
         }
-        setSyncedUpcoming(data.upcoming || []);
-        setSyncedPast(data.past || []);
+        const normalized = normalizeCalendarSyncedBookings(data, CALENDAR_BOOKINGS_LIMITS);
+        setSyncedUpcoming(normalized.upcoming);
+        setSyncedPast(normalized.past);
         setLastSyncedAt(data.server_time || null);
         // Persist for instant loads on tab open / refresh.
         try {
           if (typeof sessionStorage !== 'undefined') {
             const org = orgIdFromAccessToken();
             sessionStorage.setItem(
-              `calendar_synced_bookings_${provider}_${org}`,
+              `calendar_synced_bookings_all_${org}`,
               JSON.stringify({
                 server_time: data.server_time || null,
-                upcoming: data.upcoming || [],
-                past: data.past || [],
+                upcoming: normalized.upcoming,
+                past: normalized.past,
                 saved_at_ms: Date.now(),
               })
             );
@@ -282,7 +287,7 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
       })
       .finally(() => setCloseRateRefreshing(false));
     try {
-      await refreshSyncedCalendar();
+      await refreshSyncedCalendar({ force: true });
       // refreshSyncedCalendar clears bookingsError on a recovered DB read; show the toast only when the
       // primary sync didn't surface a new error.
       setBookingsJustRefreshedAt(Date.now());
@@ -305,66 +310,41 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     setLastSyncedAt(null);
     setBookingsError(null);
 
-    if (connectedProvider === 'calcom') {
-      // 1) Instant paint from last known DB rows (session cache)
+    if (connectedProvider) {
       try {
         if (typeof sessionStorage !== 'undefined') {
           const org = orgIdFromAccessToken();
-          const raw = sessionStorage.getItem(`calendar_synced_bookings_calcom_${org}`);
+          const raw =
+            sessionStorage.getItem(`calendar_synced_bookings_all_${org}`) ||
+            sessionStorage.getItem(`calendar_synced_bookings_${connectedProvider}_${org}`);
           if (raw) {
-            const parsed = JSON.parse(raw) as { server_time?: string | null; upcoming?: CalendarSyncedBookingRow[]; past?: CalendarSyncedBookingRow[] };
-            if (Array.isArray(parsed?.upcoming)) setSyncedUpcoming(parsed.upcoming);
-            if (Array.isArray(parsed?.past)) setSyncedPast(parsed.past);
+            const parsed = JSON.parse(raw) as {
+              server_time?: string | null;
+              upcoming?: CalendarSyncedBookingRow[];
+              past?: CalendarSyncedBookingRow[];
+            };
+            const normalized = normalizeCalendarSyncedBookings(
+              { upcoming: parsed.upcoming || [], past: parsed.past || [] },
+              CALENDAR_BOOKINGS_LIMITS
+            );
+            setSyncedUpcoming(normalized.upcoming);
+            setSyncedPast(normalized.past);
             if (typeof parsed?.server_time === 'string') setLastSyncedAt(parsed.server_time);
           }
         }
       } catch {
         // ignore cache parse errors
       }
-      // 2) Revalidate from DB quickly
       void refetchSyncedBookings();
-      // 3) Heavy provider sync only when stale (or user hits Refresh)
       const t = setTimeout(() => {
         try {
           if (typeof sessionStorage === 'undefined') return void refreshSyncedCalendar({ silent: true });
           const org = orgIdFromAccessToken();
-          const lastMsStr = sessionStorage.getItem(`calendar_last_sync_ms_calcom_${org}`);
+          const lastMsStr =
+            sessionStorage.getItem(`calendar_last_sync_ms_all_${org}`) ||
+            sessionStorage.getItem(`calendar_last_sync_ms_${connectedProvider}_${org}`);
           const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
-          const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > 10 * 60 * 1000;
-          if (stale) void refreshSyncedCalendar({ silent: true });
-        } catch {
-          void refreshSyncedCalendar({ silent: true });
-        }
-      }, 250);
-      setEventTypesRefreshKey((k) => k + 1);
-      return () => clearTimeout(t);
-    }
-    if (connectedProvider === 'calendly') {
-      // 1) Instant paint from last known DB rows (session cache)
-      try {
-        if (typeof sessionStorage !== 'undefined') {
-          const org = orgIdFromAccessToken();
-          const raw = sessionStorage.getItem(`calendar_synced_bookings_calendly_${org}`);
-          if (raw) {
-            const parsed = JSON.parse(raw) as { server_time?: string | null; upcoming?: CalendarSyncedBookingRow[]; past?: CalendarSyncedBookingRow[] };
-            if (Array.isArray(parsed?.upcoming)) setSyncedUpcoming(parsed.upcoming);
-            if (Array.isArray(parsed?.past)) setSyncedPast(parsed.past);
-            if (typeof parsed?.server_time === 'string') setLastSyncedAt(parsed.server_time);
-          }
-        }
-      } catch {
-        // ignore cache parse errors
-      }
-      // 2) Revalidate from DB quickly
-      void refetchSyncedBookings();
-      // 3) Heavy provider sync only when stale (or user hits Refresh)
-      const t = setTimeout(() => {
-        try {
-          if (typeof sessionStorage === 'undefined') return void refreshSyncedCalendar({ silent: true });
-          const org = orgIdFromAccessToken();
-          const lastMsStr = sessionStorage.getItem(`calendar_last_sync_ms_calendly_${org}`);
-          const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
-          const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > 10 * 60 * 1000;
+          const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > CALENDAR_PROVIDER_SYNC_STALE_MS;
           if (stale) void refreshSyncedCalendar({ silent: true });
         } catch {
           void refreshSyncedCalendar({ silent: true });
@@ -378,10 +358,30 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
     }
   }, [connectedProvider]);
 
-  // Poll DB only (no provider re-sync) — full sync is heavy and was starving Terminal + other tabs.
+  // Poll DB only — provider re-sync on its own interval to avoid starving Terminal.
   useEffect(() => {
     if (!connectedProvider) return;
-    const id = setInterval(() => void refetchSyncedBookings(), 45000);
+    const id = setInterval(() => void refetchSyncedBookings(), CALENDAR_DB_REFETCH_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [connectedProvider]);
+
+  useEffect(() => {
+    if (!connectedProvider) return;
+    const id = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      try {
+        if (typeof sessionStorage === 'undefined') return;
+        const org = orgIdFromAccessToken();
+        const lastMsStr =
+          sessionStorage.getItem(`calendar_last_sync_ms_all_${org}`) ||
+          sessionStorage.getItem(`calendar_last_sync_ms_${connectedProvider}_${org}`);
+        const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
+        const stale = !Number.isFinite(lastMs) || Date.now() - lastMs > CALENDAR_PROVIDER_SYNC_STALE_MS;
+        if (stale) void refreshSyncedCalendar({ silent: true });
+      } catch {
+        void refreshSyncedCalendar({ silent: true });
+      }
+    }, CALENDAR_PROVIDER_SYNC_INTERVAL_MS);
     return () => clearInterval(id);
   }, [connectedProvider]);
 

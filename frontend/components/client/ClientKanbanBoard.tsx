@@ -42,7 +42,9 @@ import {
   removePipelineClient,
   setPipelineClients,
   subscribePipelineClients,
+  pipelineClientsEqual,
 } from '@/lib/pipelineStore';
+import { ORG_CHANGED_EVENT, orgIdFromAccessToken } from '@/lib/orgScope';
 import ClientCard, { MERGE_DROP_ID, SLOT_DROP_ID } from './ClientCard';
 import ClientDetailDrawer from './ClientDetailDrawer';
 
@@ -121,6 +123,7 @@ export default function ClientKanbanBoard({
   const [balanceDueFilter, setBalanceDueFilter] = useState(false);
   const hasCalledOnLoadComplete = useRef(false);
   const pipelineLoadStartedRef = useRef(false);
+  const orgIdRef = useRef(orgIdFromAccessToken());
   const shouldAnimateColumns = useRef(hydratePipelineClients().length === 0);
   const [createFormData, setCreateFormData] = useState({
     first_name: '',
@@ -163,6 +166,8 @@ export default function ClientKanbanBoard({
   const selectedClientIdRef = useRef<string | null>(null);
   const loadInFlightRef = useRef<Promise<Client[] | undefined> | null>(null);
   const tagsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Suppress store → board echo while board → store sync runs (avoids update depth loop). */
+  const syncingToStoreRef = useRef(false);
 
   useEffect(() => {
     if (!filtersDropdownOpen) return;
@@ -227,6 +232,13 @@ export default function ClientKanbanBoard({
   // Load board when the pipeline tab is first opened (always fetch — do not skip due to stale cache/store).
   useEffect(() => {
     if (!isActive) return;
+    const currentOrg = orgIdFromAccessToken();
+    if (orgIdRef.current !== currentOrg) {
+      orgIdRef.current = currentOrg;
+      pipelineLoadStartedRef.current = false;
+      clientsRef.current = [];
+      setClients([]);
+    }
     if (pipelineLoadStartedRef.current) return;
     pipelineLoadStartedRef.current = true;
     void loadClients(true, true, false, false).catch((err) => {
@@ -235,9 +247,28 @@ export default function ClientKanbanBoard({
   }, [isActive]);
 
   useEffect(() => {
+    const onOrgChanged = () => {
+      orgIdRef.current = orgIdFromAccessToken();
+      pipelineLoadStartedRef.current = false;
+      clientsRef.current = [];
+      setClients([]);
+      if (isActive) {
+        pipelineLoadStartedRef.current = true;
+        void loadClients(true, true, false, false).catch((err) => {
+          console.error('[KanbanBoard] Reload after org switch failed:', err);
+        });
+      }
+    };
+    window.addEventListener(ORG_CHANGED_EVENT, onOrgChanged);
+    return () => window.removeEventListener(ORG_CHANGED_EVENT, onOrgChanged);
+  }, [isActive]);
+
+  useEffect(() => {
     return subscribePipelineClients(() => {
+      if (syncingToStoreRef.current) return;
       const store = getPipelineClients();
       if (store.length === 0) return;
+      if (pipelineClientsEqual(clientsRef.current, store)) return;
       clientsRef.current = store;
       setClients([...store]);
     });
@@ -245,7 +276,11 @@ export default function ClientKanbanBoard({
 
   useEffect(() => {
     if (!isActive) return;
+    const store = getPipelineClients();
+    if (pipelineClientsEqual(clients, store)) return;
+    syncingToStoreRef.current = true;
     setPipelineClients(clients);
+    syncingToStoreRef.current = false;
   }, [clients, isActive]);
 
   useEffect(() => {
@@ -754,7 +789,7 @@ export default function ClientKanbanBoard({
       }
 
       // 2) Calendar (Cal.com / Calendly) attendees → check-ins → warm leads on the board
-      await apiClient.syncCheckIns();
+      await apiClient.syncCheckIns({ applyPipelineRules: false });
 
       // Reload list once; skip embedded check-in sync (already ran above).
       await loadClients(true, true, true, false, true, true);

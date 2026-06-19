@@ -9,6 +9,7 @@ import {
   CALENDAR_BOOKINGS_UPDATED_EVENT,
   clearCalendarIntegrationStatusCache,
   getSeenCalendarDataMs,
+  getSeenStripeDataMs,
   invalidateStripeAndTerminalAfterWebhook,
   invalidateTerminalAfterCalendarWebhook,
   STRIPE_DATA_UPDATED_EVENT,
@@ -71,6 +72,25 @@ function notifyTerminalWidgetsRefreshed(): void {
   window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
   window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
   window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
+}
+
+function notifyStripeDataChanged(seenMs: number): void {
+  invalidateStripeAndTerminalAfterWebhook(seenMs);
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+  window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
+}
+
+/** Poll after Stripe webhook — invalidate caches and notify widgets even when full sync is rate-limited. */
+export async function checkStripeWebhookAndRefresh(): Promise<boolean> {
+  try {
+    const { last_updated_ms } = await apiClient.getStripeLastUpdated();
+    if (last_updated_ms == null || getSeenStripeDataMs() >= last_updated_ms) return false;
+    notifyStripeDataChanged(last_updated_ms);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Poll after Cal.com / Calendly webhook — DB already has the row; no provider pull needed. */

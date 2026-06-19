@@ -10,6 +10,7 @@ import {
   setPipelineClients,
   subscribePipelineClients,
 } from '@/lib/pipelineStore';
+import { ORG_CHANGED_EVENT, orgIdFromAccessToken } from '@/lib/orgScope';
 import type { Client } from '@/types/client';
 
 interface PipelineSnapshotProps {
@@ -46,12 +47,18 @@ export default function PipelineSnapshot({
   const [counts, setCounts] = useState<Record<string, number>>(hydrateSnapshotCounts);
   const hasCalledOnLoadComplete = useRef(false);
   const loadInFlightRef = useRef<Promise<void> | null>(null);
+  const orgIdRef = useRef(orgIdFromAccessToken());
 
   const syncCountsFromStore = useCallback(() => {
     setCounts(hydrateSnapshotCounts());
   }, []);
 
   const ensurePipelineClients = useCallback(async (forceRefresh = false) => {
+    const currentOrg = orgIdFromAccessToken();
+    if (orgIdRef.current !== currentOrg) {
+      orgIdRef.current = currentOrg;
+      forceRefresh = true;
+    }
     hydratePipelineStoreFromCache();
     if (!forceRefresh && getPipelineClients().length > 0) {
       syncCountsFromStore();
@@ -92,6 +99,15 @@ export default function PipelineSnapshot({
     if (!isActive) return;
     void ensurePipelineClients();
   }, [isActive, ensurePipelineClients]);
+
+  useEffect(() => {
+    const onOrgChanged = () => {
+      orgIdRef.current = orgIdFromAccessToken();
+      void ensurePipelineClients(true);
+    };
+    window.addEventListener(ORG_CHANGED_EVENT, onOrgChanged);
+    return () => window.removeEventListener(ORG_CHANGED_EVENT, onOrgChanged);
+  }, [ensurePipelineClients]);
 
   useEffect(() => {
     const onClientsUpdated = () => syncCountsFromStore();

@@ -121,7 +121,7 @@ export default function TerminalBookingsTable() {
             type="button"
             onClick={() => {
               setEventTypesRefreshKey((k) => k + 1);
-              void refreshSyncedCalendar();
+              void refreshSyncedCalendar({ force: true });
             }}
             disabled={bookingsLoading}
             className="inline-flex items-center gap-1.5 px-3 py-1 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 disabled:opacity-60"
@@ -219,8 +219,20 @@ export default function TerminalBookingsTable() {
                     </td>
                     <td className="px-3 py-2 text-sm">
                       {row.is_sales_call ? (
-                        <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">
-                          Sales
+                        <span className="inline-flex flex-wrap items-center gap-1">
+                          <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">
+                            Sales
+                          </span>
+                          {row.sale_closed === true && (
+                            <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">
+                              Closed
+                            </span>
+                          )}
+                          {row.sale_closed === false && (
+                            <span className="px-2 py-0.5 rounded text-xs bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                              Open
+                            </span>
+                          )}
                         </span>
                       ) : (
                         'Check-in'

@@ -16,6 +16,7 @@ import {
   invalidateStripeAndTerminalAfterWebhook,
   MANUAL_PAYMENT_CREATED_EVENT,
   STRIPE_DATA_UPDATED_EVENT,
+  TERMINAL_DATA_REFRESHED_EVENT,
 } from '@/lib/cache';
 import EmailComposer from '@/components/brevo/EmailComposer';
 import ManualPaymentDetailModal from '@/components/terminal/ManualPaymentDetailModal';
@@ -127,6 +128,9 @@ const financeTableScrollClass =
 
 const financeTableStickyHeadClass =
   'sticky top-0 z-10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm';
+
+const transactionsInlinePanelClass =
+  'mb-4 rounded-lg border border-blue-200/70 dark:border-blue-500/30 bg-blue-50/80 dark:bg-blue-950/30 p-4 shadow-sm';
 
 interface TerminalFinanceCollapsiblesProps {
   /** Bookings column height (lg layout) — when tall enough, tables show all rows without scroll. */
@@ -257,9 +261,11 @@ export default function TerminalFinanceCollapsibles({
     };
     window.addEventListener(STRIPE_DATA_UPDATED_EVENT, handler);
     window.addEventListener(MANUAL_PAYMENT_CREATED_EVENT, handler);
+    window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
     return () => {
       window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, handler);
       window.removeEventListener(MANUAL_PAYMENT_CREATED_EVENT, handler);
+      window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
     };
   }, [loadFailed, loadPayments]);
 
@@ -295,9 +301,13 @@ export default function TerminalFinanceCollapsibles({
   };
 
   const handleOpenAssignModal = async (paymentId: string) => {
+    setSelectedManualPayment(null);
+    setShowManualPaymentModal(false);
+    setManualPaymentError(null);
     setAssigningPayment(paymentId);
     setSearchQuery('');
     setAssignError(null);
+    setAssignConfirmClient(null);
     setLoadingClients(true);
     try {
       const allClients = await apiClient.getClients();
@@ -308,6 +318,35 @@ export default function TerminalFinanceCollapsibles({
     } finally {
       setLoadingClients(false);
     }
+  };
+
+  const openManualPaymentCreate = () => {
+    setSelectedManualPayment(null);
+    setShowAssignModal(false);
+    setAssigningPayment(null);
+    setAssignConfirmClient(null);
+    setSearchQuery('');
+    setAssignError(null);
+    setShowManualPaymentModal(true);
+  };
+
+  const openManualPaymentEdit = (payment: Payment) => {
+    setShowManualPaymentModal(false);
+    setManualPaymentError(null);
+    setShowAssignModal(false);
+    setAssigningPayment(null);
+    setAssignConfirmClient(null);
+    setSearchQuery('');
+    setAssignError(null);
+    setSelectedManualPayment(payment);
+  };
+
+  const closeAssignPanel = () => {
+    setShowAssignModal(false);
+    setAssigningPayment(null);
+    setAssignConfirmClient(null);
+    setSearchQuery('');
+    setAssignError(null);
   };
 
   const handleAssignPayment = async (clientId: string) => {
@@ -534,7 +573,7 @@ export default function TerminalFinanceCollapsibles({
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
-              setShowManualPaymentModal(true);
+              openManualPaymentCreate();
             }}
             className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md shrink-0"
           >
@@ -542,6 +581,230 @@ export default function TerminalFinanceCollapsibles({
           </button>
         </summary>
         <div className="px-4 pb-4 border-t border-white/10 pt-3">
+          {showManualPaymentModal && (
+            <div className={transactionsInlinePanelClass}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Add manual payment</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowManualPaymentModal(false);
+                    setManualPaymentError(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+              <form onSubmit={(e) => void handleCreateManualPayment(e)} className="space-y-3">
+                {manualPaymentError && (
+                  <p className="text-sm text-red-600 dark:text-red-400">{manualPaymentError}</p>
+                )}
+                <ClientSearchCombobox
+                  clients={manualPaymentClients}
+                  loading={manualPaymentClientsLoading}
+                  clientId={manualPaymentForm.clientId}
+                  onClientIdChange={(id) => setManualPaymentForm((f) => ({ ...f, clientId: id }))}
+                  resetKey={showManualPaymentModal}
+                  inputId="manual-payment-client-search"
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Amount ($)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0.01"
+                      required
+                      value={manualPaymentForm.amount}
+                      onChange={(e) => setManualPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                      className="w-full rounded-md glass-input sm:text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Payment date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={manualPaymentForm.payment_date}
+                      onChange={(e) => setManualPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
+                      className="w-full rounded-md glass-input sm:text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Payment method (optional)
+                  </label>
+                  <select
+                    value={manualPaymentForm.payment_method}
+                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, payment_method: e.target.value }))}
+                    className="w-full rounded-md glass-input sm:text-sm"
+                  >
+                    <option value="">Select method…</option>
+                    <option value="cash">Cash</option>
+                    <option value="check">Check</option>
+                    <option value="bank_transfer">Bank Transfer</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description (optional)
+                  </label>
+                  <textarea
+                    value={manualPaymentForm.description}
+                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, description: e.target.value }))}
+                    className="w-full rounded-md glass-input sm:text-sm"
+                    rows={2}
+                    placeholder="Payment notes…"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Receipt URL (optional)
+                  </label>
+                  <input
+                    type="url"
+                    value={manualPaymentForm.receipt_url}
+                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, receipt_url: e.target.value }))}
+                    className="w-full rounded-md glass-input sm:text-sm"
+                    placeholder="https://…"
+                  />
+                </div>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowManualPaymentModal(false);
+                      setManualPaymentError(null);
+                    }}
+                    className="px-3 py-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingManualPayment || manualPaymentClientsLoading}
+                    className="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {submittingManualPayment ? 'Adding…' : 'Add payment'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {selectedManualPayment && (
+            <ManualPaymentDetailModal
+              payment={selectedManualPayment}
+              isOpen
+              variant="inline"
+              onClose={() => setSelectedManualPayment(null)}
+              onSaved={async () => {
+                dispatchManualPaymentCreated();
+                setPaymentsPage(1);
+                await loadPayments(1);
+              }}
+              onDeleted={async () => {
+                dispatchManualPaymentCreated();
+                setPaymentsPage(1);
+                await loadPayments(1);
+              }}
+            />
+          )}
+
+          {showAssignModal && assigningPayment && (
+            <div className={transactionsInlinePanelClass}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  Assign payment to client
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeAssignPanel}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                  aria-label="Close"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {assignError && (
+                <p className="text-sm text-red-600 dark:text-red-400 mb-3">{assignError}</p>
+              )}
+
+              {assignConfirmClient ? (
+                <div className="rounded-md border border-gray-200/80 dark:border-white/10 bg-white/60 dark:bg-white/[0.04] p-3">
+                  <p className="text-sm text-gray-700 dark:text-gray-300 mb-3">
+                    Assign this payment to <strong>{assignConfirmClient.name}</strong>?
+                  </p>
+                  <div className="flex gap-2 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setAssignConfirmClient(null)}
+                      disabled={assigning}
+                      className="px-3 py-1.5 text-sm rounded border dark:border-gray-600"
+                    >
+                      Back
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleAssignPayment(assignConfirmClient.id)}
+                      disabled={assigning}
+                      className="px-3 py-1.5 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50"
+                    >
+                      {assigning ? 'Assigning…' : 'Confirm assign'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    placeholder="Search clients by name or email…"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full px-3 py-2 mb-3 rounded-md glass-input sm:text-sm"
+                  />
+                  {loadingClients ? (
+                    <p className="text-sm text-gray-500 py-4 text-center">Loading clients…</p>
+                  ) : filteredClients.length === 0 ? (
+                    <p className="text-sm text-gray-500 py-4 text-center">No clients found.</p>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto overscroll-y-contain">
+                      {filteredClients.map((client) => {
+                        const displayName =
+                          [client.first_name, client.last_name].filter(Boolean).join(' ') ||
+                          client.email ||
+                          'Unnamed client';
+                        return (
+                          <button
+                            key={client.id}
+                            type="button"
+                            onClick={() => setAssignConfirmClient({ id: client.id, name: displayName })}
+                            className="w-full text-left p-2.5 rounded-md border border-gray-200/80 dark:border-white/10 hover:bg-white/60 dark:hover:bg-white/[0.04]"
+                          >
+                            <div className="text-sm font-medium text-gray-900 dark:text-gray-100">{displayName}</div>
+                            {client.email && (
+                              <div className="text-xs text-gray-500 dark:text-gray-400">{client.email}</div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
           {paymentsLoading && payments.length === 0 && <p className="text-sm text-gray-500">Loading…</p>}
           {!paymentsLoading && payments.length === 0 && (
             <p className="text-sm text-gray-500">No recent transactions</p>
@@ -566,7 +829,7 @@ export default function TerminalFinanceCollapsibles({
                         key={p.id}
                         className={`border-b border-white/5 ${isManual ? 'cursor-pointer hover:bg-white/[0.04]' : ''}`}
                         onClick={() => {
-                          if (isManual) setSelectedManualPayment(p);
+                          if (isManual) openManualPaymentEdit(p);
                         }}
                       >
                         <td className="py-2 pr-2 whitespace-nowrap">
@@ -591,7 +854,7 @@ export default function TerminalFinanceCollapsibles({
                               type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setSelectedManualPayment(p);
+                                openManualPaymentEdit(p);
                               }}
                               className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                             >
@@ -600,7 +863,10 @@ export default function TerminalFinanceCollapsibles({
                           ) : !p.client_id ? (
                             <button
                               type="button"
-                              onClick={() => handleOpenAssignModal(p.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleOpenAssignModal(p.id);
+                              }}
                               className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
                             >
                               Assign
@@ -630,146 +896,6 @@ export default function TerminalFinanceCollapsibles({
         </div>
       </details>
 
-      {selectedManualPayment && (
-        <ManualPaymentDetailModal
-          payment={selectedManualPayment}
-          isOpen
-          onClose={() => setSelectedManualPayment(null)}
-          onSaved={async () => {
-            dispatchManualPaymentCreated();
-            setPaymentsPage(1);
-            await loadPayments(1);
-          }}
-          onDeleted={async () => {
-            dispatchManualPaymentCreated();
-            setPaymentsPage(1);
-            await loadPayments(1);
-          }}
-        />
-      )}
-
-      {showManualPaymentModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Add manual payment</h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowManualPaymentModal(false);
-                    setManualPaymentError(null);
-                  }}
-                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                  aria-label="Close"
-                >
-                  ✕
-                </button>
-              </div>
-              <form onSubmit={(e) => void handleCreateManualPayment(e)} className="space-y-4">
-                {manualPaymentError && (
-                  <p className="text-sm text-red-600 dark:text-red-400">{manualPaymentError}</p>
-                )}
-                <ClientSearchCombobox
-                  clients={manualPaymentClients}
-                  loading={manualPaymentClientsLoading}
-                  clientId={manualPaymentForm.clientId}
-                  onClientIdChange={(id) => setManualPaymentForm((f) => ({ ...f, clientId: id }))}
-                  resetKey={showManualPaymentModal}
-                  inputId="manual-payment-client-search"
-                />
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Amount ($)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    value={manualPaymentForm.amount}
-                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, amount: e.target.value }))}
-                    className="w-full rounded-md glass-input sm:text-sm"
-                    placeholder="0.00"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Payment date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={manualPaymentForm.payment_date}
-                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, payment_date: e.target.value }))}
-                    className="w-full rounded-md glass-input sm:text-sm"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Payment method (optional)
-                  </label>
-                  <select
-                    value={manualPaymentForm.payment_method}
-                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, payment_method: e.target.value }))}
-                    className="w-full rounded-md glass-input sm:text-sm"
-                  >
-                    <option value="">Select method…</option>
-                    <option value="cash">Cash</option>
-                    <option value="check">Check</option>
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="other">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Description (optional)
-                  </label>
-                  <textarea
-                    value={manualPaymentForm.description}
-                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, description: e.target.value }))}
-                    className="w-full rounded-md glass-input sm:text-sm"
-                    rows={3}
-                    placeholder="Payment notes…"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Receipt URL (optional)
-                  </label>
-                  <input
-                    type="url"
-                    value={manualPaymentForm.receipt_url}
-                    onChange={(e) => setManualPaymentForm((f) => ({ ...f, receipt_url: e.target.value }))}
-                    className="w-full rounded-md glass-input sm:text-sm"
-                    placeholder="https://…"
-                  />
-                </div>
-                <div className="flex justify-end gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowManualPaymentModal(false);
-                      setManualPaymentError(null);
-                    }}
-                    className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submittingManualPayment || manualPaymentClientsLoading}
-                    className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {submittingManualPayment ? 'Adding…' : 'Add payment'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showEmailComposer && recoveryPayment && (
         <EmailComposer
           recipients={
@@ -790,100 +916,6 @@ export default function TerminalFinanceCollapsibles({
           initialHtmlContent={getRecoveryEmailTemplate(recoveryPayment).htmlContent}
           initialTextContent={getRecoveryEmailTemplate(recoveryPayment).textContent}
         />
-      )}
-
-      {showAssignModal && assigningPayment && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                  Assign payment to client
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowAssignModal(false);
-                    setAssigningPayment(null);
-                    setAssignConfirmClient(null);
-                    setSearchQuery('');
-                    setAssignError(null);
-                  }}
-                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                >
-                  ✕
-                </button>
-              </div>
-
-              {assignError && (
-                <p className="text-sm text-red-600 dark:text-red-400 mb-3">{assignError}</p>
-              )}
-
-              {assignConfirmClient ? (
-                <div className="mb-4 p-4 rounded-lg border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50">
-                  <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
-                    Assign this payment to <strong>{assignConfirmClient.name}</strong>?
-                  </p>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setAssignConfirmClient(null)}
-                      disabled={assigning}
-                      className="px-3 py-2 text-sm rounded border dark:border-gray-600"
-                    >
-                      Back
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAssignPayment(assignConfirmClient.id)}
-                      disabled={assigning}
-                      className="px-3 py-2 text-sm text-white bg-blue-600 hover:bg-blue-700 rounded disabled:opacity-50"
-                    >
-                      {assigning ? 'Assigning…' : 'Confirm assign'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <input
-                    type="text"
-                    placeholder="Search clients by name or email…"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full px-3 py-2 mb-4 border border-gray-300 dark:border-gray-600 rounded-lg dark:bg-gray-700"
-                  />
-                  {loadingClients ? (
-                    <p className="text-sm text-gray-500 py-6 text-center">Loading clients…</p>
-                  ) : filteredClients.length === 0 ? (
-                    <p className="text-sm text-gray-500 py-6 text-center">No clients found.</p>
-                  ) : (
-                    <div className="space-y-2 max-h-80 overflow-y-auto">
-                      {filteredClients.map((client) => {
-                        const displayName =
-                          [client.first_name, client.last_name].filter(Boolean).join(' ') ||
-                          client.email ||
-                          'Unnamed client';
-                        return (
-                          <button
-                            key={client.id}
-                            type="button"
-                            onClick={() => setAssignConfirmClient({ id: client.id, name: displayName })}
-                            className="w-full text-left p-3 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700/50"
-                          >
-                            <div className="font-medium text-gray-900 dark:text-gray-100">{displayName}</div>
-                            {client.email && (
-                              <div className="text-xs text-gray-500 dark:text-gray-400">{client.email}</div>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

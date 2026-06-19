@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
+import { isOrgAdminRole } from '@/lib/tabAccess';
 import type { BrevoStatus, CalComStatus, CalendlyStatus } from '@/types/integration';
 
 type IntegrationModal = 'brevo' | 'fathom' | 'stripe' | 'calcom' | 'calendly' | 'whop' | null;
@@ -163,8 +164,7 @@ export default function IntegrationsPanel() {
         apiClient.getBrevoStatus().catch(() => null),
       ]);
       setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
-      const role = String(user?.role || 'member').toLowerCase().trim();
-      setCanManageIntegrations(role === 'admin' || role === 'owner');
+      setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
       setBrevoSummary(brevo);
       await refreshIntegrationSummaries();
     } catch (err: unknown) {

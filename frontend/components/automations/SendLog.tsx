@@ -82,6 +82,22 @@ export default function SendLog() {
     [load]
   );
 
+  const onApprove = useCallback(
+    async (job: AutomationEmailJob) => {
+      setBusyId(job.id);
+      try {
+        await apiClient.updateAutomationJobState(job.id, 'ready');
+        await load();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Approve failed';
+        setError(msg);
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [load]
+  );
+
   const onCancel = useCallback(
     async (job: AutomationEmailJob) => {
       setBusyId(job.id);
@@ -176,6 +192,16 @@ export default function SendLog() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
+                      {j.state === 'awaiting_approval' ? (
+                        <button
+                          type="button"
+                          onClick={() => onApprove(j)}
+                          disabled={busyId === j.id}
+                          className="rounded-md border border-emerald-300 dark:border-emerald-500 text-xs px-2 py-0.5 hover:bg-emerald-100 dark:hover:bg-emerald-900/20"
+                        >
+                          Approve
+                        </button>
+                      ) : null}
                       {j.state === 'failed' ? (
                         <button
                           type="button"

@@ -112,19 +112,20 @@ export default function TerminalKpiRow() {
 
   const hasLoadedOnce = useRef(false);
 
-  const loadKpis = useCallback(async (opts?: { silent?: boolean }) => {
+  const loadKpis = useCallback(async (opts?: { silent?: boolean; forceRefresh?: boolean }) => {
     if (!opts?.silent && !hasLoadedOnce.current) setLoading(true);
     setLoadError(null);
 
     const sumParams = financesSummaryApiParams(kpiTimeRange);
     const tlParams = financesTimelineApiParams(kpiTimeRange);
     const stripeRange = stripeSummaryRange(kpiTimeRange);
+    const bustTerminalCache = opts?.forceRefresh === true || opts?.silent === true;
 
     const [finRes, tlRes, stripeRes, terminalRes] = await Promise.allSettled([
       apiClient.getFinancesSummary(true, sumParams),
       apiClient.getFinancesRevenueTimeline(tlParams.days, 'day', tlParams.scope ?? null),
       apiClient.getStripeSummary(stripeRange, true),
-      apiClient.getTerminalSummary(false),
+      apiClient.getTerminalSummary(bustTerminalCache),
     ]);
 
     let finSum: FinancesCombinedSummary | null = null;
@@ -175,7 +176,7 @@ export default function TerminalKpiRow() {
   }, [loadKpis]);
 
   useEffect(() => {
-    const handler = () => void loadKpis({ silent: true });
+    const handler = () => void loadKpis({ silent: true, forceRefresh: true });
     window.addEventListener(STRIPE_DATA_UPDATED_EVENT, handler);
     window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
     window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
@@ -194,7 +195,7 @@ export default function TerminalKpiRow() {
     setSyncError(null);
     try {
       const result = await runTerminalDataRefresh({ reason: 'manual', force: true });
-      await loadKpis();
+      await loadKpis({ forceRefresh: true });
       if (!result.ok) {
         setSyncError('Some integrations failed to sync. Metrics may be partial.');
       }
@@ -205,13 +206,16 @@ export default function TerminalKpiRow() {
     }
   };
 
-  const loadCalendarTrendSummary = useCallback(async () => {
+  const loadCalendarTrendSummary = useCallback(async (forceRefresh?: boolean) => {
     if (!connectedProvider) {
       setCalendarTrendSummary(null);
       return;
     }
     try {
-      const row = await apiClient.getCalendarTrendSummary(calendarTrendSummaryApiParams(kpiTimeRange));
+      const row = await apiClient.getCalendarTrendSummary(
+        calendarTrendSummaryApiParams(kpiTimeRange),
+        forceRefresh
+      );
       setCalendarTrendSummary(mapCalendarTrendSummaryFromApi(row));
     } catch {
       if (syncedUpcoming.length > 0 || syncedPast.length > 0) {
@@ -244,7 +248,7 @@ export default function TerminalKpiRow() {
   }, [connectedProvider, loadCalendarTrendSummary, syncedUpcoming.length, syncedPast.length]);
 
   useEffect(() => {
-    const handler = () => void loadCalendarTrendSummary();
+    const handler = () => void loadCalendarTrendSummary(true);
     window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
     return () => window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
   }, [loadCalendarTrendSummary]);

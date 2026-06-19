@@ -89,8 +89,8 @@ export default function App({ Component, pageProps }: AppProps) {
       }
     };
 
-    // Run keep-alive immediately on mount (if conditions are met)
-    keepSessionAlive();
+    // Defer keep-alive so the initial dashboard auth check is not competing for /auth/me.
+    const bootTimer = setTimeout(keepSessionAlive, 3000);
 
     // Set up interval to keep session alive every 20 minutes
     // Token expires in 24 hours; keep-alive validates token is still valid
@@ -106,6 +106,7 @@ export default function App({ Component, pageProps }: AppProps) {
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
+      clearTimeout(bootTimer);
       if (keepAliveIntervalRef.current) {
         clearInterval(keepAliveIntervalRef.current);
       }

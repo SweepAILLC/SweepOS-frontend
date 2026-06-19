@@ -12,26 +12,10 @@ import {
   dispatchCalendarIntegrationChanged,
   invalidateCachesAfterManualPayment,
 } from './cache';
+import { dispatchOrgChanged, orgIdFromAccessToken } from './orgScope';
+import { flushPipelinePersistence, trackPipelinePersistence } from './pipelinePersistence';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
-
-/** JWT org_id for cache scoping — prevents stale client rows after org switch (fixes DELETE 404). */
-function orgIdFromAccessToken(): string {
-  if (typeof window === 'undefined') return 'anon';
-  const token = Cookies.get('access_token');
-  if (!token) return 'anon';
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return 'anon';
-    const base64Url = parts[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-    const json = JSON.parse(atob(padded)) as { org_id?: string };
-    return json.org_id != null ? String(json.org_id) : 'anon';
-  } catch {
-    return 'anon';
-  }
-}
 
 /** Cache key for GET /clients — scoped by org so board/list never mixes tenants. */
 function clientsListCacheKey(lifecycleState?: string): string {
@@ -121,9 +105,15 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, delayMs = 150
 export interface FathomSyncResponse {
   skipped?: boolean;
   reason?: string;
+  started?: boolean;
+  background?: boolean;
+  message?: string;
   ingested?: number;
   processed?: number;
   meetings_seen?: number;
+  ingested_unlinked?: number;
+  relinked_to_clients?: number;
+  ingest_errors?: number;
   skipped_no_client_match?: number;
   call_insights_queued?: number;
   pending_insight_record_ids?: string[];
@@ -617,19 +607,21 @@ class ApiClient {
   }
 
   async switchOrganization(orgId: string) {
+    await flushPipelinePersistence();
     const data = await withRetry(async () => {
       const response = await this.client.post('/auth/switch-organization', { org_id: orgId });
       return response.data;
     });
     if (data.access_token) {
-      Cookies.set('access_token', data.access_token, { 
+      Cookies.set('access_token', data.access_token, {
         expires: 1,
         sameSite: COOKIE_SAME_SITE,
         secure: window.location.protocol === 'https:',
-        path: '/'
+        path: '/',
       });
       clearCalendarIntegrationStatusCache();
       clearSessionCaches();
+      dispatchOrgChanged(orgId);
     }
     return data;
   }
@@ -764,32 +756,69 @@ class ApiClient {
   }
 
   async updateClient(id: string, data: any) {
-    const response = await this.client.patch(`/clients/${id}`, data);
-    let updated = response.data as Client | undefined;
-    if (updated?.id && data && typeof data === 'object') {
-      if ('offer_enrollment' in data && updated.offer_enrollment === undefined) {
-        updated = { ...updated, offer_enrollment: data.offer_enrollment };
-      }
-      if ('meta' in data && updated.meta === undefined) {
-        updated = { ...updated, meta: data.meta };
-      }
-    }
     const cacheKey = clientsListCacheKey();
     const cached = cache.get<unknown[]>(cacheKey);
-    if (cached != null && updated?.id) {
+    let rollbackList: Client[] | null = null;
+    const touchesLifecycle =
+      data && typeof data === 'object' && 'lifecycle_state' in data && data.lifecycle_state != null;
+
+    if (cached != null && touchesLifecycle) {
       const list = sanitizeClientsList(cached);
-      cache.set(
-        cacheKey,
-        list.map((c) => (c.id === id ? updated : c)),
-        TERMINAL_CACHE_TTL_MS,
-      );
-    } else {
-      invalidateClientsListCache();
+      const row = list.find((c) => c.id === id);
+      if (row) {
+        rollbackList = list;
+        const optimistic = { ...row, ...data, lifecycle_state: data.lifecycle_state } as Client;
+        cache.set(
+          cacheKey,
+          list.map((c) => (c.id === id ? optimistic : c)),
+          TERMINAL_CACHE_TTL_MS,
+        );
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+        }
+      }
     }
-    if (typeof window !== 'undefined' && updated?.id) {
-      window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+
+    const run = async (): Promise<Client | undefined> => {
+      const response = await this.client.patch(`/clients/${id}`, data);
+      let updated = response.data as Client | undefined;
+      if (updated?.id && data && typeof data === 'object') {
+        if ('offer_enrollment' in data && updated.offer_enrollment === undefined) {
+          updated = { ...updated, offer_enrollment: data.offer_enrollment };
+        }
+        if ('meta' in data && updated.meta === undefined) {
+          updated = { ...updated, meta: data.meta };
+        }
+      }
+      const freshCached = cache.get<unknown[]>(cacheKey);
+      if (freshCached != null && updated?.id) {
+        const list = sanitizeClientsList(freshCached);
+        cache.set(
+          cacheKey,
+          list.map((c) => (c.id === id ? updated : c)),
+          TERMINAL_CACHE_TTL_MS,
+        );
+      } else if (updated?.id) {
+        invalidateClientsListCache();
+      }
+      if (typeof window !== 'undefined' && updated?.id) {
+        window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+      }
+      return updated;
+    };
+
+    try {
+      const tracked = touchesLifecycle ? trackPipelinePersistence(run()) : run();
+      return await tracked;
+    } catch (error) {
+      if (rollbackList) {
+        cache.set(cacheKey, rollbackList, TERMINAL_CACHE_TTL_MS);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent(TERMINAL_CLIENTS_UPDATED_EVENT));
+        }
+      }
+      throw error;
     }
-    return updated;
   }
 
   async mergeClients(clientIds: string[]) {
@@ -998,7 +1027,7 @@ class ApiClient {
    */
   async syncFathomMeetings(): Promise<FathomSyncResponse> {
     const response = await this.client.post('/integrations/fathom/sync', null, {
-      timeout: 120000,
+      timeout: 30000,
     });
     return response.data;
   }
@@ -1303,7 +1332,10 @@ class ApiClient {
 
   /** Monthly combined cash + calendar rates for unified Terminal dashboard. */
   async getTerminalMonthlyTrends(forceRefresh?: boolean) {
-    if (!forceRefresh) {
+    if (forceRefresh) {
+      cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+      terminalMonthlyTrendsInflight = null;
+    } else {
       const cached = cache.get<TerminalMonthlyTrendsPayload>(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
       if (cached != null) return cached;
     }
@@ -1339,10 +1371,17 @@ class ApiClient {
   }
 
   /** Scoped show-up / close-rate KPIs from full synced check-in history (not capped like bookings list). */
-  async getCalendarTrendSummary(params?: { scope?: 'mtd' | 'all'; range_days?: number }) {
+  async getCalendarTrendSummary(
+    params?: { scope?: 'mtd' | 'all'; range_days?: number },
+    bypassCache?: boolean
+  ) {
     const cacheKey = `calendar_trend_summary_${orgIdFromAccessToken()}_${JSON.stringify(params || {})}`;
-    const cached = cache.get<CalendarTrendSummary>(cacheKey);
-    if (cached != null) return cached;
+    if (!bypassCache) {
+      const cached = cache.get<CalendarTrendSummary>(cacheKey);
+      if (cached != null) return cached;
+    } else {
+      cache.delete(cacheKey);
+    }
 
     const data = await withRetry(
       async () => {

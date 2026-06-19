@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import Link from 'next/link';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
 import { ListSkeleton, PremiumReveal } from '@/components/ui/PremiumMotion';
+import { isBookingUpcoming } from '@/lib/calendarBookingsSplit';
 
 function formatDate(dateString: string) {
   const date = new Date(dateString);
@@ -48,9 +49,8 @@ export default function UpcomingAppointmentsList() {
   const { connectedProvider, statusLoading, syncedUpcoming, bookingsLoading } = useTerminalCalendar();
 
   const appointments = useMemo(() => {
-    const now = Date.now();
     return syncedUpcoming
-      .filter((row) => row.start_time && !row.cancelled && new Date(row.start_time).getTime() >= now)
+      .filter((row) => row.start_time && !row.cancelled && isBookingUpcoming(row))
       .sort((a, b) => new Date(a.start_time!).getTime() - new Date(b.start_time!).getTime())
       .slice(0, 2)
       .map((row) => ({

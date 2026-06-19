@@ -131,20 +131,26 @@ export function computeCalendarTrendSummaryFromRows(
   const w = getCalendarTrendsActivityWindow(tr, now);
   const nowMs = now.getTime();
 
+  const boundaryMs = (r: CalendarSyncedBookingRow) => {
+    const raw = r.end_time || r.start_time;
+    if (!raw) return null;
+    const t = new Date(raw).getTime();
+    return Number.isFinite(t) ? t : null;
+  };
+
   const pastRows = past.filter((r) => {
-    if (!r.start_time) return false;
-    const t = new Date(r.start_time).getTime();
-    if (t >= nowMs) return false;
+    const t = boundaryMs(r);
+    if (t == null || t >= nowMs) return false;
     if (tr === 'all') return true;
     return t >= w.pastStart.getTime();
   });
 
   const upcomingRows = upcoming.filter((r) => {
-    if (!r.start_time) return false;
-    const t = new Date(r.start_time).getTime();
-    if (t < nowMs) return false;
+    const t = boundaryMs(r);
+    if (t == null || t < nowMs) return false;
     if (tr === 'all') return true;
-    return t >= w.upcomingStart.getTime() && t <= w.upcomingEnd.getTime();
+    const startMs = r.start_time ? new Date(r.start_time).getTime() : t;
+    return startMs >= w.upcomingStart.getTime() && startMs <= w.upcomingEnd.getTime();
   });
 
   const salesCalls = pastRows.filter((r) => r.is_sales_call && !r.cancelled);

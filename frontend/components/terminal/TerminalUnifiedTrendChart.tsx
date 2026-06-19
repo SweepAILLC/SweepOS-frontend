@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import type { RectangleProps } from 'recharts';
 import { apiClient } from '@/lib/api';
-import { TERMINAL_DATA_REFRESHED_EVENT } from '@/lib/cache';
+import { CALENDAR_BOOKINGS_UPDATED_EVENT, TERMINAL_DATA_REFRESHED_EVENT } from '@/lib/cache';
 import type { HealthTrendPeriod } from '@/types/admin';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { chartRevealBudgetMs } from '@/lib/premiumMotion';
@@ -235,15 +235,17 @@ export default function TerminalUnifiedTrendChart() {
 
     const onRefresh = () => {
       void apiClient
-        .getTerminalMonthlyTrends()
+        .getTerminalMonthlyTrends(true)
         .then((d) => setPeriods(Array.isArray(d?.periods) ? d.periods : []))
         .catch(() => {});
     };
     window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, onRefresh);
+    window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, onRefresh);
 
     return () => {
       cancelled = true;
       window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, onRefresh);
+      window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, onRefresh);
     };
   }, []);
 

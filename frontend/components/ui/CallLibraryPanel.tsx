@@ -249,6 +249,17 @@ export default function CallLibraryPanel() {
     return () => window.clearTimeout(t);
   }, [itemsSorted, load]);
 
+  // Webhook-driven imports: poll while the tab is visible so new calls appear without manual refresh.
+  useEffect(() => {
+    const tick = () => {
+      if (document.visibilityState === 'visible') {
+        void load();
+      }
+    };
+    const interval = window.setInterval(tick, 20_000);
+    return () => window.clearInterval(interval);
+  }, [load]);
+
   // After a sync that ingested new calls, poll until reports show up (or timeout).
   useEffect(() => {
     if (!postSyncPollUntilMs) return;

@@ -16,13 +16,21 @@ import {
   CALENDAR_BOOKINGS_UPDATED_EVENT,
   CALENDAR_INTEGRATION_CHANGED_EVENT,
   TERMINAL_DATA_REFRESHED_EVENT,
+  cache,
   invalidateTerminalAfterCalendarWebhook,
   setSeenCalendarDataMs,
 } from '@/lib/cache';
 import { runCalendarCheckInSync } from '@/lib/calendarSync';
 import {
+  CALENDAR_DEFERRED_PROVIDER_SYNC_MS,
+  CALENDAR_DB_REFETCH_INTERVAL_MS,
+  CALENDAR_PROVIDER_SYNC_INTERVAL_MS,
+  CALENDAR_PROVIDER_SYNC_STALE_MS,
+  CALENDAR_WEBHOOK_MARKER_INTERVAL_MS,
+} from '@/lib/calendarPollConstants';
+import { normalizeCalendarSyncedBookings } from '@/lib/calendarBookingsSplit';
+import {
   checkCalendarWebhookAndRefresh,
-  isTerminalRefreshInFlight,
   isTerminalSyncOnLoadPending,
 } from '@/lib/terminalRefresh';
 import type { CalComStatus, CalendlyStatus } from '@/types/integration';
@@ -30,24 +38,36 @@ import type { CalComStatus, CalendlyStatus } from '@/types/integration';
 export type CalendarProvider = 'calcom' | 'calendly' | null;
 
 /** Terminal bookings table — smaller payload for faster first paint. */
-const TERMINAL_UPCOMING_LIMIT = 50;
-const TERMINAL_PAST_LIMIT = 60;
+const TERMINAL_UPCOMING_LIMIT = 150;
+const TERMINAL_PAST_LIMIT = 150;
 const TERMINAL_PAST_SINCE_MS = 365 * 24 * 60 * 60 * 1000;
-const SYNC_STALE_MS = 10 * 60 * 1000;
-const PROVIDER_SYNC_INTERVAL_MS = 10 * 60 * 1000;
-const DEFERRED_PROVIDER_SYNC_MS = 6000;
+const SYNC_STALE_MS = CALENDAR_PROVIDER_SYNC_STALE_MS;
+const PROVIDER_SYNC_INTERVAL_MS = CALENDAR_PROVIDER_SYNC_INTERVAL_MS;
+const DEFERRED_PROVIDER_SYNC_MS = CALENDAR_DEFERRED_PROVIDER_SYNC_MS;
 
-function terminalBookingsFetchParams(provider: 'calcom' | 'calendly') {
+function terminalBookingsFetchParams() {
   return {
     upcoming_limit: TERMINAL_UPCOMING_LIMIT,
     past_limit: TERMINAL_PAST_LIMIT,
     past_since: new Date(Date.now() - TERMINAL_PAST_SINCE_MS).toISOString(),
-    provider,
   };
 }
 
+function terminalBookingsLimits() {
+  return { upcoming_limit: TERMINAL_UPCOMING_LIMIT, past_limit: TERMINAL_PAST_LIMIT };
+}
+
+function bookingsDataFingerprint(
+  upcoming: CalendarSyncedBookingRow[],
+  past: CalendarSyncedBookingRow[]
+): string {
+  const rowKey = (r: CalendarSyncedBookingRow) =>
+    `${r.id}|${r.start_time}|${r.display_status}|${r.sale_closed}|${r.cancelled}`;
+  return `${upcoming.length}:${past.length}:${upcoming.map(rowKey).join(';')}:${past.map(rowKey).join(';')}`;
+}
+
 function shouldDeferProviderSync(): boolean {
-  return isTerminalSyncOnLoadPending() || isTerminalRefreshInFlight();
+  return isTerminalSyncOnLoadPending();
 }
 
 function orgIdFromAccessToken(): string {
@@ -66,14 +86,14 @@ function orgIdFromAccessToken(): string {
   }
 }
 
-function storageKey(provider: CalendarProvider, suffix: string) {
+function storageKey(suffix: string) {
   const org = orgIdFromAccessToken();
-  return `calendar_${suffix}_${provider}_${org}`;
+  return `calendar_${suffix}_all_${org}`;
 }
 
-function isProviderSyncStale(provider: CalendarProvider): boolean {
-  if (!provider || typeof sessionStorage === 'undefined') return true;
-  const lastMsStr = sessionStorage.getItem(storageKey(provider, 'last_sync_ms'));
+function isProviderSyncStale(): boolean {
+  if (typeof sessionStorage === 'undefined') return true;
+  const lastMsStr = sessionStorage.getItem(storageKey('last_sync_ms'));
   const lastMs = lastMsStr ? parseInt(lastMsStr, 10) : 0;
   return !Number.isFinite(lastMs) || Date.now() - lastMs > SYNC_STALE_MS;
 }
@@ -90,7 +110,7 @@ interface TerminalCalendarContextValue {
   bookingsError: string | null;
   refetchSyncedBookings: () => Promise<boolean>;
   /** Pull from Cal.com/Calendly APIs into DB, then reload canonical rows. */
-  refreshSyncedCalendar: (opts?: { silent?: boolean }) => Promise<void>;
+  refreshSyncedCalendar: (opts?: { silent?: boolean; force?: boolean }) => Promise<void>;
 }
 
 const TerminalCalendarContext = createContext<TerminalCalendarContextValue | null>(null);
@@ -114,19 +134,30 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
   const connectedProviderRef = useRef<CalendarProvider>(connectedProvider);
   connectedProviderRef.current = connectedProvider;
   const calendarRefreshChainRef = useRef<Promise<void>>(Promise.resolve());
+  const lastBookingsFingerprintRef = useRef<string | null>(null);
 
-  const hydrateFromSession = useCallback((provider: CalendarProvider) => {
-    if (!provider || typeof sessionStorage === 'undefined') return;
+  const hydrateFromSession = useCallback(() => {
+    if (typeof sessionStorage === 'undefined') return;
     try {
-      const raw = sessionStorage.getItem(storageKey(provider, 'synced_bookings'));
+      const raw = sessionStorage.getItem(storageKey('synced_bookings'));
       if (!raw) return;
       const parsed = JSON.parse(raw) as {
         server_time?: string | null;
         upcoming?: CalendarSyncedBookingRow[];
         past?: CalendarSyncedBookingRow[];
       };
-      if (Array.isArray(parsed?.upcoming)) setSyncedUpcoming(parsed.upcoming);
-      if (Array.isArray(parsed?.past)) setSyncedPast(parsed.past);
+      if (Array.isArray(parsed?.upcoming) || Array.isArray(parsed?.past)) {
+        const normalized = normalizeCalendarSyncedBookings(
+          { upcoming: parsed.upcoming || [], past: parsed.past || [] },
+          terminalBookingsLimits()
+        );
+        setSyncedUpcoming(normalized.upcoming);
+        setSyncedPast(normalized.past);
+        lastBookingsFingerprintRef.current = bookingsDataFingerprint(
+          normalized.upcoming,
+          normalized.past
+        );
+      }
       if (typeof parsed?.server_time === 'string') setLastSyncedAt(parsed.server_time);
     } catch {
       /* ignore */
@@ -134,11 +165,11 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
   }, []);
 
   const persistToSession = useCallback(
-    (provider: CalendarProvider, data: Awaited<ReturnType<typeof apiClient.getCalendarSyncedBookings>>) => {
-      if (!provider || typeof sessionStorage === 'undefined') return;
+    (data: Awaited<ReturnType<typeof apiClient.getCalendarSyncedBookings>>) => {
+      if (typeof sessionStorage === 'undefined') return;
       try {
         sessionStorage.setItem(
-          storageKey(provider, 'synced_bookings'),
+          storageKey('synced_bookings'),
           JSON.stringify({
             server_time: data.server_time || null,
             upcoming: data.upcoming || [],
@@ -157,11 +188,20 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
     const provider = connectedProviderRef.current;
     if (!provider) return false;
     try {
-      const data = await apiClient.getCalendarSyncedBookings(terminalBookingsFetchParams(provider));
-      setSyncedUpcoming(data.upcoming || []);
-      setSyncedPast(data.past || []);
+      const data = await apiClient.getCalendarSyncedBookings(terminalBookingsFetchParams());
+      const normalized = normalizeCalendarSyncedBookings(data, terminalBookingsLimits());
+      const upcoming = normalized.upcoming;
+      const past = normalized.past;
+      const fingerprint = bookingsDataFingerprint(upcoming, past);
+      const changed = fingerprint !== lastBookingsFingerprintRef.current;
+      lastBookingsFingerprintRef.current = fingerprint;
+      setSyncedUpcoming(upcoming);
+      setSyncedPast(past);
       setLastSyncedAt(data.server_time || null);
-      persistToSession(provider, data);
+      persistToSession({ ...data, upcoming, past });
+      if (changed && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
+      }
       return true;
     } catch {
       return false;
@@ -169,7 +209,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
   }, [persistToSession]);
 
   const refreshSyncedCalendar = useCallback(
-    async (opts?: { silent?: boolean }) => {
+    async (opts?: { silent?: boolean; force?: boolean }) => {
       const provider = connectedProviderRef.current;
       if (!provider) return;
 
@@ -179,20 +219,27 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
           setBookingsError(null);
         }
         try {
-          await runCalendarCheckInSync();
+          await runCalendarCheckInSync({
+            applyPipelineRules: false,
+            force: opts?.force,
+          });
           if (typeof sessionStorage !== 'undefined') {
-            sessionStorage.setItem(storageKey(provider, 'last_sync_ms'), String(Date.now()));
+            sessionStorage.setItem(storageKey('last_sync_ms'), String(Date.now()));
           }
-          const data = await apiClient.getCalendarSyncedBookings(terminalBookingsFetchParams(provider));
-          setSyncedUpcoming(data.upcoming || []);
-          setSyncedPast(data.past || []);
+          const data = await apiClient.getCalendarSyncedBookings(terminalBookingsFetchParams());
+          const normalized = normalizeCalendarSyncedBookings(data, terminalBookingsLimits());
+          const upcoming = normalized.upcoming;
+          const past = normalized.past;
+          lastBookingsFingerprintRef.current = bookingsDataFingerprint(upcoming, past);
+          setSyncedUpcoming(upcoming);
+          setSyncedPast(past);
           setLastSyncedAt(data.server_time || null);
-          persistToSession(provider, data);
+          persistToSession({ ...data, upcoming, past });
           try {
             const { last_updated_ms } = await apiClient.getCalendarLastUpdated();
             if (last_updated_ms != null) invalidateTerminalAfterCalendarWebhook(last_updated_ms);
           } catch {
-            /* ignore */
+            cache.deleteByPrefix('calendar_trend_summary_');
           }
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
@@ -267,7 +314,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
       setLastSyncedAt(null);
       return;
     }
-    hydrateFromSession(connectedProvider);
+    hydrateFromSession();
 
     const seedSeenMarker = async () => {
       try {
@@ -282,7 +329,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
 
     const staleSyncTimer = setTimeout(() => {
       if (shouldDeferProviderSync()) return;
-      if (isProviderSyncStale(connectedProvider)) {
+      if (isProviderSyncStale()) {
         void refreshSyncedCalendar({ silent: true });
       }
     }, DEFERRED_PROVIDER_SYNC_MS);
@@ -295,15 +342,15 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
       void checkCalendarWebhookAndRefresh();
     };
 
-    const pollId = setInterval(pollCalendarWebhook, 12_000);
+    const pollId = setInterval(pollCalendarWebhook, CALENDAR_WEBHOOK_MARKER_INTERVAL_MS);
     const dbRefetchId = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       void refetchSyncedBookings();
-    }, 60_000);
+    }, CALENDAR_DB_REFETCH_INTERVAL_MS);
     const providerSyncId = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (shouldDeferProviderSync()) return;
-      if (isProviderSyncStale(connectedProvider)) {
+      if (isProviderSyncStale()) {
         void refreshSyncedCalendar({ silent: true });
       }
     }, PROVIDER_SYNC_INTERVAL_MS);
@@ -312,7 +359,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
       if (document.visibilityState === 'visible') {
         void pollCalendarWebhook();
         void refetchSyncedBookings();
-        if (!shouldDeferProviderSync() && isProviderSyncStale(connectedProvider)) {
+        if (!shouldDeferProviderSync() && isProviderSyncStale()) {
           void refreshSyncedCalendar({ silent: true });
         }
       }
