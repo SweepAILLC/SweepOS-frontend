@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Client, ClientPaymentsResponse } from '@/types/client';
 import { apiClient } from '@/lib/api';
@@ -15,7 +15,7 @@ import {
   normalizeLifecycleColumn,
   withNormalizedLifecycle,
 } from '@/lib/pipelineColumns';
-import { isProgramProgressVisible } from '@/lib/clientProgram';
+import { isProgramProgressVisible, buildOptimisticClientFromTimerFields } from '@/lib/clientProgram';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
@@ -92,6 +92,18 @@ export default function ClientDetailDrawer({
   const fieldBlurSave = () => {
     void saveClientFields();
   };
+
+  const pushTimerOptimistic = useCallback(
+    (snapshot: typeof formData) => {
+      if (!client || !onClientSaved) return;
+      onClientSaved(
+        withNormalizedLifecycle(buildOptimisticClientFromTimerFields(client, snapshot)),
+      );
+    },
+    [client, onClientSaved],
+  );
+
+  const TIMER_FORM_KEYS = ['program_start_date', 'program_end_date', 'follow_up_due_date'] as const;
 
   useEffect(() => {
     if (isOpen) setShowCheckInCalendar(false);
@@ -235,9 +247,8 @@ export default function ClientDetailDrawer({
   const saveClientFields = async (data?: typeof formData) => {
     if (!client || savingFields || advancingStage) return;
     const snapshot = data ?? formDataRef.current;
-    setSavingFields(true);
-    try {
-      const updateData: Record<string, unknown> = {};
+
+    const updateData: Record<string, unknown> = {};
 
       const setIfChanged = (key: keyof typeof snapshot, value: unknown, current: unknown) => {
         const normalized = value === '' ? null : value;
@@ -298,7 +309,6 @@ export default function ClientDetailDrawer({
               nextMeta.follow_up_due_at = dateInputToFollowUpIso(nextInput);
             } catch {
               alert('Invalid follow-up date');
-              setSavingFields(false);
               return;
             }
           } else {
@@ -312,14 +322,32 @@ export default function ClientDetailDrawer({
         return;
       }
 
-      const updated = await apiClient.updateClient(client.id, updateData);
-      if (updated) onClientSaved?.(withNormalizedLifecycle(updated));
-    } catch (error) {
-      console.error('Failed to update client:', error);
-      alert('Failed to update client. Please try again.');
-    } finally {
-      setSavingFields(false);
-    }
+      const previous = client;
+      const hasTimerUpdate =
+        'program_start_date' in updateData ||
+        'program_end_date' in updateData ||
+        'meta' in updateData;
+
+      if (hasTimerUpdate) {
+        const optimistic = buildOptimisticClientFromTimerFields(client, snapshot);
+        for (const [key, value] of Object.entries(updateData)) {
+          if (key === 'meta' || key === 'program_start_date' || key === 'program_end_date') continue;
+          (optimistic as Record<string, unknown>)[key] = value;
+        }
+        onClientSaved?.(withNormalizedLifecycle(optimistic));
+      }
+
+      setSavingFields(true);
+      try {
+        const updated = await apiClient.updateClient(client.id, updateData);
+        if (updated) onClientSaved?.(withNormalizedLifecycle(updated));
+      } catch (error) {
+        console.error('Failed to update client:', error);
+        if (hasTimerUpdate) onClientSaved?.(previous);
+        alert('Failed to update client. Please try again.');
+      } finally {
+        setSavingFields(false);
+      }
   };
 
   const handleAdvanceStage = async () => {
@@ -705,7 +733,11 @@ export default function ClientDetailDrawer({
                                         follow_up_due_date: prev.follow_up_due_date,
                                       })
                                     : action;
-                                return { ...prev, ...patch };
+                                const next = { ...prev, ...patch };
+                                if (TIMER_FORM_KEYS.some((k) => k in patch)) {
+                                  pushTimerOptimistic(next);
+                                }
+                                return next;
                               });
                             }}
                             fieldBlurSave={fieldBlurSave}

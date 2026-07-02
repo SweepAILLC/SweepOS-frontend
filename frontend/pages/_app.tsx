@@ -7,7 +7,7 @@ import { LoadingProvider } from '@/contexts/LoadingContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import GlobalLoadingOverlay from '@/components/ui/GlobalLoadingOverlay';
 import Cookies from 'js-cookie';
-import { apiClient } from '@/lib/api';
+import { apiClient, isSweepSessionAuthFailure } from '@/lib/api';
 import { clearSessionCaches } from '@/lib/cache';
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -17,8 +17,7 @@ export default function App({ Component, pageProps }: AppProps) {
     // Global error handler to catch unhandled promise rejections (like auth errors)
     const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
       const error = event.reason;
-      // Check if it's an auth error (401/403)
-      if (error?.response?.status === 401 || error?.response?.status === 403) {
+      if (isSweepSessionAuthFailure(error)) {
         // Suppress the error - it's already handled by the API interceptor
         event.preventDefault();
         clearSessionCaches();

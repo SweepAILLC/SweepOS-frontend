@@ -1,7 +1,7 @@
 'use client';
 
 import type { Client, ClientPaymentsResponse } from '@/types/client';
-import { isProgramProgressVisible } from '@/lib/clientProgram';
+import { isProgramProgressVisible, resolveProgramTimelineFromInputs } from '@/lib/clientProgram';
 import type { LeadFollowUpBar } from '@/lib/leadFollowUp';
 import OfferEnrollmentSection from './OfferEnrollmentSection';
 
@@ -70,6 +70,12 @@ export default function ClientProfileRail({
   onClientSaved,
   onReloadPayments,
 }: ClientProfileRailProps) {
+  const timelineFromForm = resolveProgramTimelineFromInputs(
+    formData.program_start_date,
+    formData.program_end_date,
+  );
+  const displayClient: Client = { ...client, ...timelineFromForm };
+
   return (
     <div className="space-y-5 py-4 px-4 sm:px-5">
       <div>
@@ -202,17 +208,19 @@ export default function ClientProfileRail({
               Auto offboarding at 75%, dead when expired
             </p>
           </div>
-          {client.program_duration_days ? (
+          {client.program_duration_days || timelineFromForm.program_duration_days ? (
             <div>
               <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Duration</dt>
-              <dd className="text-sm text-gray-900 dark:text-gray-100">{client.program_duration_days} days</dd>
+              <dd className="text-sm text-gray-900 dark:text-gray-100">
+                {(timelineFromForm.program_duration_days ?? client.program_duration_days) ?? 0} days
+              </dd>
             </div>
           ) : null}
-          {!isLead && isProgramProgressVisible(client) ? (
+          {!isLead && isProgramProgressVisible(displayClient) ? (
             <div>
               <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1">Progress</dt>
               {(() => {
-                const pct = client.program_progress_percent ?? 0;
+                const pct = displayClient.program_progress_percent ?? 0;
                 return (
                   <>
                     <div className="flex justify-between text-xs mb-1">

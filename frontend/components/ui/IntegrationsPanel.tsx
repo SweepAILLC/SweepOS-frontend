@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, type ReactNode } from 'react';
-import { apiClient } from '@/lib/api';
+import { apiClient, type FathomStatusResponse } from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
@@ -104,6 +104,7 @@ export default function IntegrationsPanel() {
   const [calcomSummary, setCalcomSummary] = useState<CalComStatus | null>(null);
   const [calendlySummary, setCalendlySummary] = useState<CalendlyStatus | null>(null);
   const [whopSummary, setWhopSummary] = useState<{ connected: boolean; company_id?: string | null } | null>(null);
+  const [fathomStatus, setFathomStatus] = useState<FathomStatusResponse | null>(null);
 
   const [stripeApiKey, setStripeApiKey] = useState('');
   const [stripeBusy, setStripeBusy] = useState(false);
@@ -158,14 +159,16 @@ export default function IntegrationsPanel() {
     try {
       setLoading(true);
       setError(null);
-      const [settings, user, brevo] = await Promise.all([
+      const [settings, user, brevo, fStatus] = await Promise.all([
         apiClient.getUserSettings(),
         apiClient.getCurrentUser(),
         apiClient.getBrevoStatus().catch(() => null),
+        apiClient.getFathomStatus().catch(() => null),
       ]);
       setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
       setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
       setBrevoSummary(brevo);
+      setFathomStatus(fStatus);
       await refreshIntegrationSummaries();
     } catch (err: unknown) {
       const msg =
@@ -205,19 +208,13 @@ export default function IntegrationsPanel() {
       await apiClient.updateUserSettings({
         fathom_api_key: fathomApiKey || undefined,
       });
-      // Also set up the webhook (API-key based) so new meetings arrive automatically.
-      // This requires BACKEND_PUBLIC_URL configured server-side.
-      try {
-        await apiClient.setupFathomWebhook();
-        setSuccess('Fathom settings saved. Webhook created — new meetings will sync automatically.');
-      } catch (e: unknown) {
-        const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-        setSuccess('Fathom settings saved.');
-        if (d) {
-          setError(`Webhook setup failed: ${d}`);
-        }
-      }
-      await load();
+      const hadCalls = (fathomStatus?.total_calls ?? 0) > 0;
+      setSuccess(
+        hadCalls
+          ? 'Fathom API key saved. Your existing calls are unchanged — use Sync Fathom now to pull new meetings.'
+          : 'Fathom API key saved. Use Sync Fathom now to import past meetings; new calls will sync automatically after that.'
+      );
+      void apiClient.getFathomStatus().then(setFathomStatus).catch(() => null);
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
@@ -445,7 +442,8 @@ export default function IntegrationsPanel() {
   }
 
   const brevoConnected = brevoSummary?.connected === true;
-  const fathomConfigured = fathomApiKey.trim().length > 0;
+  const fathomConfigured = fathomApiKey.trim().length > 0 || fathomStatus?.configured === true;
+  const fathomWebhookActive = fathomStatus?.webhook_active === true;
   const calcomConnected = calcomSummary?.connected === true;
   const calendlyConnected = calendlySummary?.connected === true;
   const whopConnected = whopSummary?.connected === true;
@@ -501,10 +499,14 @@ export default function IntegrationsPanel() {
             </div>
             <p
               className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
-                fathomConfigured ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+                fathomWebhookActive
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : fathomConfigured
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-zinc-500 dark:text-zinc-400'
               }`}
             >
-              {fathomConfigured ? 'Key saved' : 'Not configured'}
+              {fathomWebhookActive ? 'Connected' : fathomConfigured ? 'Key saved' : 'Not configured'}
             </p>
           </div>
         </button>
@@ -620,8 +622,8 @@ export default function IntegrationsPanel() {
               steps={[
                 <>
                   Open{' '}
-                  <a href="https://app.usefathom.com" target="_blank" rel="noopener noreferrer" className={linkClass}>
-                    app.usefathom.com
+                  <a href="https://fathom.video" target="_blank" rel="noopener noreferrer" className={linkClass}>
+                    fathom.video
                   </a>{' '}
                   and sign in with the same account you use for Fathom meetings.
                 </>,
@@ -652,7 +654,7 @@ export default function IntegrationsPanel() {
                   autoComplete="off"
                 />
                 <p className={`mt-1.5 ${mutedClass}`}>
-                  <a href="https://app.usefathom.com/settings/api" target="_blank" rel="noopener noreferrer" className={linkClass}>
+                  <a href="https://fathom.video/settings/api" target="_blank" rel="noopener noreferrer" className={linkClass}>
                     Get your API key
                   </a>{' '}
                   (Fathom → Settings → API).
@@ -663,6 +665,30 @@ export default function IntegrationsPanel() {
                   </p>
                 )}
               </div>
+              {fathomStatus && fathomConfigured && (
+                <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-2.5 space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-block h-2 w-2 rounded-full ${
+                        fathomWebhookActive ? 'bg-emerald-500' : 'bg-amber-500'
+                      }`}
+                    />
+                    <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
+                      {fathomWebhookActive
+                        ? 'Auto-sync active — new calls sync automatically'
+                        : 'Webhook not registered — click Save to activate auto-sync'}
+                    </span>
+                  </div>
+                  {(fathomStatus.total_calls ?? 0) > 0 && (
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 pl-4">
+                      {fathomStatus.total_calls} call{fathomStatus.total_calls === 1 ? '' : 's'} synced
+                      {fathomStatus.latest_call_at
+                        ? ` · latest ${new Date(fathomStatus.latest_call_at).toLocaleDateString()}`
+                        : ''}
+                    </p>
+                  )}
+                </div>
+              )}
               <FathomSyncSection variant="modal" />
               {canManageIntegrations && (
                 <button

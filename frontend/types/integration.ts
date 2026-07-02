@@ -363,6 +363,8 @@ export interface TerminalSummaryForWidgets {
 export interface FinancesSourceSlice {
   last_30_days_revenue: number;
   last_mtd_revenue: number;
+  last_30_days_order_count?: number;
+  last_mtd_order_count?: number;
 }
 
 export interface FinancesCombinedSummary {
@@ -372,6 +374,8 @@ export interface FinancesCombinedSummary {
   stripe: FinancesSourceSlice;
   whop: FinancesSourceSlice;
   manual?: FinancesSourceSlice;
+  prior_period_revenue?: number | null;
+  prior_period_order_count?: number | null;
 }
 
 export interface FinancesTimelinePoint {

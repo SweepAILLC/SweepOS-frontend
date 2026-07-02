@@ -101,6 +101,14 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, delayMs = 150
   throw new Error('withRetry: unreachable');
 }
 
+export interface FathomStatusResponse {
+  configured: boolean;
+  webhook_active: boolean;
+  webhook_url?: string | null;
+  total_calls: number;
+  latest_call_at?: string | null;
+}
+
 /** Response from POST /integrations/fathom/sync */
 export interface FathomSyncResponse {
   skipped?: boolean;
@@ -340,6 +348,56 @@ export function gradeFromHealthScore(score: number): string {
 // For cross-origin (e.g. frontend on Vercel, API on Render): set to 'none' so cookies are sent
 const COOKIE_SAME_SITE = (process.env.NEXT_PUBLIC_COOKIE_SAME_SITE as 'lax' | 'strict' | 'none') || 'lax';
 
+/** Extract FastAPI `detail` from an Axios error for auth-vs-integration classification. */
+function httpErrorDetail(error: AxiosError): string {
+  const detail = (error.response?.data as { detail?: unknown } | undefined)?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((e) => (typeof e === 'object' && e && 'msg' in e ? String((e as { msg: string }).msg) : JSON.stringify(e))).join(', ');
+  }
+  if (detail != null) return JSON.stringify(detail);
+  return '';
+}
+
+/** True when a 401/403 reflects an invalid Sweep JWT / org access — not a third-party integration. */
+export function isSweepSessionAuthFailure(error: AxiosError): boolean {
+  const status = error.response?.status;
+  if (status !== 401 && status !== 403) return false;
+
+  const requestUrl = String(error.config?.url ?? error.config?.baseURL ?? '');
+
+  if (
+    requestUrl.includes('stripe/connect-direct') ||
+    requestUrl.includes('brevo/connect-direct') ||
+    requestUrl.includes('calcom/connect-direct') ||
+    requestUrl.includes('calendly/connect-direct')
+  ) {
+    return false;
+  }
+
+  const detail = httpErrorDetail(error).toLowerCase();
+
+  // Integration routes proxy Cal.com/Stripe/etc.; upstream 401/403 must not clear the session.
+  if (requestUrl.includes('/integrations/')) {
+    return (
+      detail.includes('invalid authentication') ||
+      detail.includes('user not found') ||
+      detail.includes('does not have access to this organization') ||
+      detail === 'not authenticated'
+    );
+  }
+
+  if (status === 401) return true;
+
+  return (
+    detail.includes('invalid authentication') ||
+    detail.includes('user not found') ||
+    detail.includes('does not have access to this organization') ||
+    detail === 'not authenticated' ||
+    detail.includes('credentials')
+  );
+}
+
 // ----- Automation engine types ------------------------------------------------
 export type AutomationPlaybook =
   | 'pre_sale_post_booking'
@@ -526,39 +584,23 @@ class ApiClient {
     // Add response interceptor to handle errors
     this.client.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401 || error.response?.status === 403) {
-          // Don't treat 401/403 from integration connect-direct as session expiry: show error in UI instead of logging out
-          const requestUrl = String(error.config?.url ?? error.config?.baseURL ?? '');
-          const isIntegrationConnect =
-            requestUrl.includes('stripe/connect-direct') ||
-            requestUrl.includes('brevo/connect-direct') ||
-            requestUrl.includes('calcom/connect-direct') ||
-            requestUrl.includes('calendly/connect-direct');
-          if (isIntegrationConnect) {
-            return Promise.reject(error);
-          }
-          // Unauthorized/Forbidden - session expired or invalid credentials
+      (error: AxiosError) => {
+        if (isSweepSessionAuthFailure(error)) {
           clearSessionCaches();
           Cookies.remove('access_token');
-          
+
           if (typeof window !== 'undefined') {
             const currentPath = window.location.pathname;
-            // Don't redirect if we're already on the login page (prevents redirect loops)
-            if (currentPath !== '/login') {
-              // Suppress console errors for auth failures
-              // Redirect immediately without throwing to prevent runtime errors
+            if (currentPath !== '/login' && currentPath !== '/select-organization') {
               setTimeout(() => {
                 window.location.href = '/login';
               }, 0);
-              // Return a resolved promise with a dummy response to prevent error propagation
-              // This prevents runtime errors from showing up in the console
               return Promise.resolve({
                 data: null,
-                status: 401,
+                status: error.response?.status ?? 401,
                 statusText: 'Unauthorized',
                 headers: {},
-                config: error.config
+                config: error.config,
               });
             }
           }
@@ -911,12 +953,26 @@ class ApiClient {
   }
 
   // Check-ins
-  async syncCheckIns(opts?: { applyPipelineRules?: boolean }) {
-    const params =
-      opts?.applyPipelineRules === false ? { apply_pipeline_rules: false } : undefined;
+  async syncCheckIns(opts?: { applyPipelineRules?: boolean; forceLifecycle?: boolean }) {
+    const params: Record<string, boolean> = {};
+    if (opts?.applyPipelineRules === false) {
+      params.apply_pipeline_rules = false;
+    }
+    if (opts?.forceLifecycle === true) {
+      params.force_lifecycle = true;
+    }
     const response = await this.client.post('/clients/check-ins/sync', null, {
       timeout: 180000,
-      params,
+      params: Object.keys(params).length > 0 ? params : undefined,
+    });
+    return response.data;
+  }
+
+  /** Re-evaluate pipeline columns for every client (backfill after rule changes). */
+  async reconcileClientLifecycles(force = true) {
+    const response = await this.client.post('/clients/automation/reconcile-lifecycle', null, {
+      timeout: 120000,
+      params: { force },
     });
     return response.data;
   }
@@ -1038,6 +1094,11 @@ class ApiClient {
    */
   async setupFathomWebhook(): Promise<{ success?: boolean; destination_url?: string; webhook_id?: string }> {
     const response = await this.client.post('/integrations/fathom/webhook/setup', null, { timeout: 60000 });
+    return response.data;
+  }
+
+  async getFathomStatus(): Promise<FathomStatusResponse> {
+    const response = await this.client.get('/integrations/fathom/status');
     return response.data;
   }
 

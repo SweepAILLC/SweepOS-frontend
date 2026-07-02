@@ -108,6 +108,9 @@ export default function SelectOrganization() {
       sessionStorage.removeItem('login_email');
       sessionStorage.removeItem('login_password');
       
+      // Small delay to ensure cookie is set before redirect (matches login.tsx)
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      
       // Redirect to dashboard
       window.location.href = '/';
     } catch (err: any) {

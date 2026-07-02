@@ -23,13 +23,15 @@ import {
   calendarTrendSummaryApiParams,
   mapCalendarTrendSummaryFromApi,
   computeCalendarTrendSummaryFromRows,
-  computeCalendarPastCountTrendPct,
   computeCalendarUpcomingCountTrendPct,
   computeCalendarCloseRateTrendPp,
   computeCalendarShowUpRateTrendPp,
   computeAvgRevenuePerCustomerTrend,
   computeFinancesTimelineTrend,
   combinedCashForRange,
+  combinedAovForRange,
+  combinedOrderCountForRange,
+  computeCombinedAovTrendPct,
   fallbackCashForRange,
   stripeSummaryRange,
 } from '@/lib/dashboardTimeRange';
@@ -253,11 +255,6 @@ export default function TerminalKpiRow() {
     return () => window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
   }, [loadCalendarTrendSummary]);
 
-  const calendarPastTrendPct = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarPastCountTrendPct(syncedUpcoming, syncedPast, kpiTimeRange);
-  }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
-
   const calendarCloseRateTrendPp = useMemo(() => {
     if (!connectedProvider) return null;
     return computeCalendarCloseRateTrendPp(syncedUpcoming, syncedPast, kpiTimeRange);
@@ -281,6 +278,21 @@ export default function TerminalKpiRow() {
         kpiTimeRange
       ),
     [financesTimeline, stripeSummary?.total_customers, kpiTimeRange]
+  );
+
+  const aovTrendPct = useMemo(
+    () => (financesSummary ? computeCombinedAovTrendPct(financesSummary, kpiTimeRange) : null),
+    [financesSummary, kpiTimeRange]
+  );
+
+  const aovValue = useMemo(
+    () => (financesSummary ? combinedAovForRange(financesSummary, kpiTimeRange) : null),
+    [financesSummary, kpiTimeRange]
+  );
+
+  const aovOrderCount = useMemo(
+    () => (financesSummary ? combinedOrderCountForRange(financesSummary, kpiTimeRange) : 0),
+    [financesSummary, kpiTimeRange]
   );
 
   const rangeLabel = dashboardPeriodLabel(kpiTimeRange);
@@ -415,16 +427,19 @@ export default function TerminalKpiRow() {
               ),
             },
             {
-              key: 'past',
+              key: 'aov',
               tile: (
                 <KpiTile
-                  label={`Past meetings (${rangeLabelLower})`}
-                  value={
-                    connectedProvider && calendarTrendSummary
-                      ? String(calendarTrendSummary.pastCount)
-                      : '—'
+                  label={`AOV (${rangeLabelLower})`}
+                  value={aovValue != null ? formatCurrency(aovValue) : '—'}
+                  trendPct={aovTrendPct}
+                  sub={
+                    aovOrderCount > 0
+                      ? `${aovOrderCount} payment${aovOrderCount === 1 ? '' : 's'} · Stripe + Whop + Manual`
+                      : financesSummary
+                        ? 'Stripe + Whop + Manual'
+                        : undefined
                   }
-                  trendPct={calendarPastTrendPct}
                 />
               ),
             },

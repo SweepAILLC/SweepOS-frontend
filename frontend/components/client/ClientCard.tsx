@@ -8,11 +8,9 @@ import { insightChipClass } from '@/lib/callInsightChips';
 import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import { isProgramProgressVisible } from '@/lib/clientProgram';
 
-const SLOT_HEIGHT_PX = 20;
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
-const SLOT_DROP_ID = (id: string) => `slot-${id}`;
 
-export { MERGE_DROP_ID, SLOT_DROP_ID };
+export { MERGE_DROP_ID };
 
 interface ClientCardProps {
   client: Client;
@@ -20,8 +18,10 @@ interface ClientCardProps {
   onDelete?: (client: Client) => void;
   /** When another card is dragged over this card as merge target */
   isMergeTarget?: boolean;
-  /** When another card is dragged over the slot above this card (insert between) */
-  showSlotLineAbove?: boolean;
+  isSelected?: boolean;
+  /** Dimmed while another selected card in the batch is being dragged */
+  isInDragBatch?: boolean;
+  onToggleSelect?: () => void;
   /** Opportunity tags from call insights (subset shown) */
   insightTags?: string[];
   /** Cold / warm lead columns: show follow-up timer instead of program progress */
@@ -33,7 +33,9 @@ function ClientCard({
   onClick,
   onDelete,
   isMergeTarget = false,
-  showSlotLineAbove = false,
+  isSelected = false,
+  isInDragBatch = false,
+  onToggleSelect,
   insightTags = undefined,
   isLeadColumn = false,
 }: ClientCardProps) {
@@ -51,7 +53,6 @@ function ClientCard({
 
   const followUpBar = useMemo(() => (isLeadColumn ? computeLeadFollowUpBar(client) : null), [isLeadColumn, client]);
 
-  const slotDroppable = useDroppable({ id: SLOT_DROP_ID(sortableId) });
   const mergeDroppable = useDroppable({ id: MERGE_DROP_ID(sortableId) });
 
   const {
@@ -66,7 +67,7 @@ function ClientCard({
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging ? 0.5 : isInDragBatch ? 0.35 : 1,
   };
 
   /** Primary line: name if set, else primary email, else first additional email — never hide email-only leads. */
@@ -86,11 +87,22 @@ function ClientCard({
   }, [client.email, displayTitle]);
 
   const handleClick = useCallback((e: React.MouseEvent) => {
-    // Prevent click if dragging
     if (isDragging) return;
     e.stopPropagation();
+    if (onToggleSelect && (e.metaKey || e.ctrlKey)) {
+      onToggleSelect();
+      return;
+    }
     onClick();
-  }, [isDragging, onClick]);
+  }, [isDragging, onClick, onToggleSelect]);
+
+  const handleSelectChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      e.stopPropagation();
+      onToggleSelect?.();
+    },
+    [onToggleSelect],
+  );
 
   const handleDelete = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -101,22 +113,33 @@ function ClientCard({
 
   return (
     <div className="relative">
-      {/* Slot: drop zone for "insert above" – space between cards; larger for easier drag target */}
-      <div
-        ref={slotDroppable.setNodeRef}
-        className={`transition-all duration-150 rounded ${showSlotLineAbove ? 'bg-primary-500/30 ring-2 ring-primary-500 ring-inset' : 'hover:bg-gray-500/10 dark:hover:bg-gray-400/10'}`}
-        style={{ minHeight: SLOT_HEIGHT_PX }}
-      />
       <div
         ref={setNodeRef}
         style={style}
         {...attributes}
         className={`glass-card neon-glow p-3 cursor-pointer hover:shadow-lg transition-all relative group ${
           isMergeTarget ? 'ring-2 ring-primary-500 ring-offset-2 ring-offset-gray-900 dark:ring-offset-gray-950 bg-primary-500/10' : ''
-        }`}
+        } ${isSelected ? 'ring-2 ring-primary-400/80 bg-primary-500/10' : ''}`}
       >
         {/* Merge drop zone – covers card so pointer hits merge-* when over card */}
         <div ref={mergeDroppable.setNodeRef} className="absolute inset-0 rounded pointer-events-none" aria-hidden />
+        {onToggleSelect ? (
+          <label
+            className={`absolute top-2 left-2 z-10 flex cursor-pointer items-center transition-opacity ${
+              isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            }`}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              type="checkbox"
+              checked={isSelected}
+              onChange={handleSelectChange}
+              onClick={(e) => e.stopPropagation()}
+              className="h-3.5 w-3.5 rounded border-gray-400 text-primary-600 focus:ring-primary-500"
+              aria-label={`Select ${displayTitle}`}
+            />
+          </label>
+        ) : null}
         {/* Action buttons - top right */}
         <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 z-10">
         {/* Delete button */}

@@ -11,7 +11,7 @@ type TerminalTimeRangeContextValue = {
 const TerminalTimeRangeContext = createContext<TerminalTimeRangeContextValue | null>(null);
 
 export function TerminalTimeRangeProvider({ children }: { children: ReactNode }) {
-  const [timeRange, setTimeRange] = useState<DashboardTimeRange>(30);
+  const [timeRange, setTimeRange] = useState<DashboardTimeRange>('mtd');
   return (
     <TerminalTimeRangeContext.Provider value={{ timeRange, setTimeRange }}>
       {children}

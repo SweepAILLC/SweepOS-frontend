@@ -3,6 +3,7 @@
  * Matches Finances dashboard: MTD, rolling N days, last year (365), or all-time scope.
  */
 import type { CalendarSyncedBookingRow, CalendarTrendSummary as CalendarTrendSummaryApi } from '@/lib/api';
+import type { FinancesCombinedSummary } from '@/types/integration';
 
 export type DashboardTimeRange = number | 'mtd' | 'all';
 
@@ -380,6 +381,45 @@ export function combinedCashForRange(
 ): number {
   if (tr === 'mtd') return summary.combined.last_mtd_revenue ?? 0;
   return summary.combined.last_30_days_revenue ?? 0;
+}
+
+export function combinedOrderCountForRange(
+  summary: {
+    combined: {
+      last_30_days_order_count?: number;
+      last_mtd_order_count?: number;
+    };
+  },
+  tr: DashboardTimeRange
+): number {
+  if (tr === 'mtd') return summary.combined.last_mtd_order_count ?? 0;
+  return summary.combined.last_30_days_order_count ?? 0;
+}
+
+/** Average order value = combined cash / payment count for the selected range. */
+export function combinedAovForRange(
+  summary: Parameters<typeof combinedCashForRange>[0] & Parameters<typeof combinedOrderCountForRange>[0],
+  tr: DashboardTimeRange
+): number | null {
+  const orders = combinedOrderCountForRange(summary, tr);
+  if (orders <= 0) return null;
+  return combinedCashForRange(summary, tr) / orders;
+}
+
+/** % change in AOV vs the prior window of equal length. */
+export function computeCombinedAovTrendPct(
+  summary: FinancesCombinedSummary,
+  tr: DashboardTimeRange
+): number | null {
+  if (tr === 'all') return null;
+  const curOrders = combinedOrderCountForRange(summary, tr);
+  const priorOrders = summary.prior_period_order_count ?? 0;
+  const priorRevenue = summary.prior_period_revenue ?? 0;
+  if (curOrders <= 0 || priorOrders <= 0) return null;
+  const curAov = combinedCashForRange(summary, tr) / curOrders;
+  const priorAov = priorRevenue / priorOrders;
+  if (priorAov === 0) return curAov === 0 ? 0 : null;
+  return ((curAov - priorAov) / Math.abs(priorAov)) * 100;
 }
 
 /** Fallback when GET /integrations/finances/summary is unavailable. */
