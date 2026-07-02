@@ -330,11 +330,14 @@ export default function ClientDetailDrawer({
 
       if (hasTimerUpdate) {
         const optimistic = buildOptimisticClientFromTimerFields(client, snapshot);
-        for (const [key, value] of Object.entries(updateData)) {
-          if (key === 'meta' || key === 'program_start_date' || key === 'program_end_date') continue;
-          (optimistic as Record<string, unknown>)[key] = value;
-        }
-        onClientSaved?.(withNormalizedLifecycle(optimistic));
+        const fieldUpdates = Object.fromEntries(
+          Object.entries(updateData).filter(
+            ([key]) => key !== 'meta' && key !== 'program_start_date' && key !== 'program_end_date',
+          ),
+        );
+        onClientSaved?.(
+          withNormalizedLifecycle({ ...optimistic, ...fieldUpdates } as Client),
+        );
       }
 
       setSavingFields(true);

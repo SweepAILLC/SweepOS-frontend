@@ -488,7 +488,7 @@ export default function ClientKanbanBoard({
   const applyOptimisticClientMerge = useCallback(
     (optimisticKept: Client, removedIds: string[]) => {
       const removedSet = new Set(removedIds);
-      removePipelineClient(...removedIds);
+      for (const id of removedIds) removePipelineClient(id);
       patchPipelineClient(optimisticKept);
       const next = clientsRef.current
         .filter((c) => !removedSet.has(c.id))
@@ -1045,15 +1045,15 @@ export default function ClientKanbanBoard({
       patchPipelineClient(plan.optimisticKept);
     }
     setCallInsightTags((prev) => {
-      const allRemoved = new Set(mergePlans.flatMap((p) => p.removedIds));
-      if (![...allRemoved].some((id) => id in prev)) return prev;
+      const allRemoved = mergePlans.flatMap((p) => p.removedIds);
+      if (!allRemoved.some((id) => id in prev)) return prev;
       const next = { ...prev };
       for (const id of allRemoved) delete next[id];
       return next;
     });
     setHealthScores((prev) => {
-      const allRemoved = new Set(mergePlans.flatMap((p) => p.removedIds));
-      if (![...allRemoved].some((id) => id in prev)) return prev;
+      const allRemoved = mergePlans.flatMap((p) => p.removedIds);
+      if (!allRemoved.some((id) => id in prev)) return prev;
       const next = { ...prev };
       for (const id of allRemoved) delete next[id];
       return next;
