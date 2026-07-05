@@ -8,7 +8,7 @@ import {
   STRIPE_DATA_UPDATED_EVENT,
   TERMINAL_DATA_REFRESHED_EVENT,
 } from '@/lib/cache';
-import { runTerminalDataRefresh } from '@/lib/terminalRefresh';
+import { runTerminalDataRefresh, notifyTerminalChartsRefreshed } from '@/lib/terminalRefresh';
 import type {
   StripeSummary,
   FinancesCombinedSummary,
@@ -198,6 +198,7 @@ export default function TerminalKpiRow() {
     try {
       const result = await runTerminalDataRefresh({ reason: 'manual', force: true });
       await loadKpis({ forceRefresh: true });
+      notifyTerminalChartsRefreshed();
       if (!result.ok) {
         setSyncError('Some integrations failed to sync. Metrics may be partial.');
       }
@@ -252,7 +253,11 @@ export default function TerminalKpiRow() {
   useEffect(() => {
     const handler = () => void loadCalendarTrendSummary(true);
     window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
-    return () => window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
+    window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
+    return () => {
+      window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, handler);
+      window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, handler);
+    };
   }, [loadCalendarTrendSummary]);
 
   const calendarCloseRateTrendPp = useMemo(() => {

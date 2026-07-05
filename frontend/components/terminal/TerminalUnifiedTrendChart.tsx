@@ -14,7 +14,7 @@ import {
 } from 'recharts';
 import type { RectangleProps } from 'recharts';
 import { apiClient } from '@/lib/api';
-import { CALENDAR_BOOKINGS_UPDATED_EVENT, TERMINAL_DATA_REFRESHED_EVENT } from '@/lib/cache';
+import { CALENDAR_BOOKINGS_UPDATED_EVENT, STRIPE_DATA_UPDATED_EVENT, TERMINAL_CHART_REFRESH_EVENT, TERMINAL_DATA_REFRESHED_EVENT } from '@/lib/cache';
 import type { HealthTrendPeriod } from '@/types/admin';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { chartRevealBudgetMs } from '@/lib/premiumMotion';
@@ -214,40 +214,49 @@ export default function TerminalUnifiedTrendChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const revealFrameRef = useRef<number | null>(null);
   const revealClipId = useRef(`terminal-trend-reveal-${Math.random().toString(36).slice(2, 9)}`);
+  const fetchGenRef = useRef(0);
+
+  const reloadTrends = useCallback((opts?: { forceRefresh?: boolean; animate?: boolean }) => {
+    const gen = ++fetchGenRef.current;
+    const force = opts?.forceRefresh === true;
+    if (opts?.animate) {
+      setAnimateChart(true);
+      setRevealProgress(0);
+      setRevealKey((k) => k + 1);
+    }
+    return apiClient
+      .getTerminalMonthlyTrends(force)
+      .then((d) => {
+        if (gen !== fetchGenRef.current) return;
+        setPeriods(Array.isArray(d?.periods) ? d.periods : []);
+      })
+      .catch(() => {
+        if (gen !== fetchGenRef.current) return;
+        setPeriods([]);
+      })
+      .finally(() => {
+        if (gen !== fetchGenRef.current) return;
+        setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    void reloadTrends();
 
-    const fetchTrends = () =>
-      apiClient
-        .getTerminalMonthlyTrends()
-        .then((d) => {
-          if (!cancelled) setPeriods(Array.isArray(d?.periods) ? d.periods : []);
-        })
-        .catch(() => {
-          if (!cancelled) setPeriods([]);
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-
-    fetchTrends();
-
-    const onRefresh = () => {
-      void apiClient
-        .getTerminalMonthlyTrends(true)
-        .then((d) => setPeriods(Array.isArray(d?.periods) ? d.periods : []))
-        .catch(() => {});
-    };
+    const onRefresh = () => void reloadTrends({ forceRefresh: true, animate: true });
     window.addEventListener(TERMINAL_DATA_REFRESHED_EVENT, onRefresh);
+    window.addEventListener(TERMINAL_CHART_REFRESH_EVENT, onRefresh);
     window.addEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, onRefresh);
+    window.addEventListener(STRIPE_DATA_UPDATED_EVENT, onRefresh);
 
     return () => {
-      cancelled = true;
+      fetchGenRef.current += 1;
       window.removeEventListener(TERMINAL_DATA_REFRESHED_EVENT, onRefresh);
+      window.removeEventListener(TERMINAL_CHART_REFRESH_EVENT, onRefresh);
       window.removeEventListener(CALENDAR_BOOKINGS_UPDATED_EVENT, onRefresh);
+      window.removeEventListener(STRIPE_DATA_UPDATED_EVENT, onRefresh);
     };
-  }, []);
+  }, [reloadTrends]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;

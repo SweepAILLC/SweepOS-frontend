@@ -26,7 +26,7 @@ import {
   canAccessTab,
   canAccessTerminalPriorities,
   defaultTabPermissions,
-  BOTTOM_NAV_TAB_IDS,
+  MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
 } from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
@@ -294,12 +294,12 @@ export default function Dashboard() {
     }
   }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
-  // Members must not stay on admin-only footer tabs (URL/localStorage). Must run before any early return (Rules of Hooks).
+  // Members must not stay on admin-only footer tabs (URL/localStorage). Settings stays open for logout/org switch.
   useEffect(() => {
     if (loading) return;
     const roleLower = String(userRole || 'member').toLowerCase().trim();
     if (roleLower !== 'member') return;
-    if (BOTTOM_NAV_TAB_IDS.includes(activeTab)) {
+    if (MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS.includes(activeTab)) {
       setActiveTab('terminal');
       setGlobalLoading(false);
     }

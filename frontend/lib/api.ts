@@ -1399,22 +1399,23 @@ class ApiClient {
     } else {
       const cached = cache.get<TerminalMonthlyTrendsPayload>(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
       if (cached != null) return cached;
+      if (terminalMonthlyTrendsInflight) return terminalMonthlyTrendsInflight;
     }
 
-    if (!terminalMonthlyTrendsInflight) {
-      terminalMonthlyTrendsInflight = this.client
-        .get('/clients/terminal/monthly-trends', { timeout: 60000 })
-        .then((response) => {
-          const data = response.data as TerminalMonthlyTrendsPayload;
-          cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
-          return data;
-        })
-        .finally(() => {
+    const req = this.client
+      .get('/clients/terminal/monthly-trends', { timeout: 60000 })
+      .then((response) => {
+        const data = response.data as TerminalMonthlyTrendsPayload;
+        cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+        return data;
+      })
+      .finally(() => {
+        if (terminalMonthlyTrendsInflight === req) {
           terminalMonthlyTrendsInflight = null;
-        });
-    }
-
-    return terminalMonthlyTrendsInflight;
+        }
+      });
+    terminalMonthlyTrendsInflight = req;
+    return req;
   }
 
   /** Manual check-ins for the calendar grid (date range YYYY-MM-DD). */

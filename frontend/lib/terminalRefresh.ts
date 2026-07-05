@@ -13,6 +13,7 @@ import {
   invalidateStripeAndTerminalAfterWebhook,
   invalidateTerminalAfterCalendarWebhook,
   STRIPE_DATA_UPDATED_EVENT,
+  TERMINAL_CHART_REFRESH_EVENT,
   TERMINAL_DATA_REFRESHED_EVENT,
 } from '@/lib/cache';
 
@@ -74,6 +75,13 @@ function notifyTerminalWidgetsRefreshed(): void {
   window.dispatchEvent(new CustomEvent(TERMINAL_DATA_REFRESHED_EVENT));
 }
 
+/** After KPI refresh finishes — bust trend cache and tell the unified chart to refetch. */
+export function notifyTerminalChartsRefreshed(): void {
+  cache.delete(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS);
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
+}
+
 function notifyStripeDataChanged(seenMs: number): void {
   invalidateStripeAndTerminalAfterWebhook(seenMs);
   if (typeof window === 'undefined') return;
@@ -124,8 +132,14 @@ async function executeTerminalRefresh(): Promise<TerminalRefreshResult> {
 
   if (calcom?.connected || calendly?.connected) {
     try {
-      await runCalendarCheckInSync({ applyPipelineRules: false });
+      await runCalendarCheckInSync({ applyPipelineRules: false, force: true });
       result.calendar = true;
+      try {
+        const { last_updated_ms } = await apiClient.getCalendarLastUpdated();
+        if (last_updated_ms != null) invalidateTerminalAfterCalendarWebhook(last_updated_ms);
+      } catch {
+        cache.deleteByPrefix('calendar_trend_summary_');
+      }
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
       }

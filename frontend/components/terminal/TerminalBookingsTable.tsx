@@ -145,7 +145,7 @@ export default function TerminalBookingsTable() {
         provider={connectedProvider}
         refreshKey={eventTypesRefreshKey}
         compact
-        onSalesCallChanged={() => void refreshSyncedCalendar()}
+        onSalesCallChanged={() => void refreshSyncedCalendar({ force: true })}
         className="mb-4 pb-4 border-b border-gray-200/80 dark:border-white/10 shrink-0"
       />
 

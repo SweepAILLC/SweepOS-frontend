@@ -8,12 +8,16 @@ export {
   legacyTabOpensPipeline,
 } from '@/lib/tabs';
 
-/** Sidebar footer tabs — org admin/owner only (not members). */
-export const BOTTOM_NAV_TAB_IDS: TabId[] = [
+/** Sidebar footer tabs — settings is available to every user; others are org admin/owner only. */
+export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = [
   'automations',
   'intelligence',
   'integrations',
   'users',
+];
+
+export const BOTTOM_NAV_TAB_IDS: TabId[] = [
+  ...MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
   'settings',
 ];
 
@@ -22,11 +26,12 @@ export function isOrgAdminRole(userRole: string): boolean {
   return roleLower === 'admin' || roleLower === 'owner';
 }
 
-/** Footer nav: admin/owner role plus per-tab permissions. */
+/** Footer nav: settings for everyone; other footer tabs require admin/owner role. */
 export function canAccessBottomNavTab(
   tab: TabId,
   ctx: { userRole: string; tabPermissions: Record<string, boolean> }
 ): boolean {
+  if (tab === 'settings') return true;
   if (!isOrgAdminRole(ctx.userRole)) return false;
   return canAccessTab(tab, { isOwner: false, userRole: ctx.userRole, tabPermissions: ctx.tabPermissions });
 }
@@ -70,8 +75,7 @@ export function canAccessTab(
     return false;
   }
   if (tab === 'settings') {
-    if (!isOrgAdminRole(ctx.userRole)) return false;
-    return ctx.tabPermissions.settings !== false;
+    return true;
   }
   if (tab === 'users') {
     if (roleLower === 'member') return false;

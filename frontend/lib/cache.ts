@@ -228,6 +228,9 @@ export function dispatchCalendarIntegrationChanged(): void {
 /** Terminal dashboard finished sync + cache invalidation — refetch charts and KPIs. */
 export const TERMINAL_DATA_REFRESHED_EVENT = 'terminalDataRefreshed';
 
+/** Monthly trend chart should refetch (after KPI refresh completes with new data). */
+export const TERMINAL_CHART_REFRESH_EVENT = 'terminalChartRefresh';
+
 /** Manual payment recorded — refresh terminal summary, KPI row, and cash widgets. */
 export const MANUAL_PAYMENT_CREATED_EVENT = 'manualPaymentCreated';
 

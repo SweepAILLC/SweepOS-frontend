@@ -31,6 +31,8 @@ export function runCalendarCheckInSync(opts?: {
     }
   };
 
-  syncChain = syncChain.then(task).catch(() => {});
-  return syncChain;
+  const run = syncChain.then(() => task());
+  // Keep the chain alive for later callers, but surface errors to the current caller.
+  syncChain = run.catch(() => {});
+  return run;
 }
