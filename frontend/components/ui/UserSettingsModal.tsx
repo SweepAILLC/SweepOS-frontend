@@ -61,8 +61,9 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
       });
       const orgId = user?.org_id != null ? String(user.org_id) : null;
       setCurrentOrgId(orgId);
-      if (settings.email) {
-        const orgs = await apiClient.getUserOrganizations(settings.email);
+      const orgEmail = user?.email || settings.email;
+      if (orgEmail) {
+        const orgs = await apiClient.getUserOrganizations(orgEmail);
         setOrganizations(Array.isArray(orgs) ? orgs.map((o: any) => ({
           id: String(o.id),
           name: o.name || 'Unnamed',
