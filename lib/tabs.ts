@@ -6,8 +6,8 @@ export type TabId =
   | 'funnels'
   | 'content_studio'
   | 'call_library'
+  | 'resources'
   | 'integrations'
-  | 'users'
   | 'owner'
   | 'calcom'
   | 'intelligence'
@@ -21,8 +21,8 @@ export const VALID_TAB_IDS: TabId[] = [
   'funnels',
   'content_studio',
   'call_library',
+  'resources',
   'integrations',
-  'users',
   'owner',
   'calcom',
   'intelligence',
@@ -37,8 +37,8 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
   funnels: 'Funnels',
   content_studio: 'Marketing Intel',
   call_library: 'Call Library',
+  resources: 'Resources',
   integrations: 'Integrations',
-  users: 'Users',
   owner: 'Owner',
   calcom: 'Calendar',
   intelligence: 'Intelligence',

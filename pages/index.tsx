@@ -8,13 +8,13 @@ import PipelineDashboard from '@/components/pipeline/PipelineDashboard';
 import FunnelListPanel from '@/components/FunnelListPanel';
 import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
 import AdminPanel from '@/components/AdminPanel';
-import UsersPanel from '@/components/UsersPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import SettingsPanel from '@/components/ui/SettingsPanel';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
 import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
+import ResourcesPanel from '@/components/ui/ResourcesPanel';
 import AutomationsTab from '@/components/automations/AutomationsTab';
 import {
   resolveLegacyTab,
@@ -128,7 +128,7 @@ export default function Dashboard() {
         const user = await apiClient.getCurrentUser();
         if (!isMounted) return;
 
-        const userIsOwner = user.role === 'owner';
+        const userIsOwner = String(user.role || '').toLowerCase().trim() === 'owner';
         setIsOwner(userIsOwner);
         const normalizedRole = String(user.role || 'member').toLowerCase().trim();
         setUserRole(normalizedRole);
@@ -415,21 +415,19 @@ export default function Dashboard() {
           )
         )}
 
+        {activeTab === 'resources' && (
+          hasTabAccess('resources') ? (
+            <ResourcesPanel isOwner={isOwner} />
+          ) : (
+            <RestrictedTabView tabName="resources" />
+          )
+        )}
+
         {activeTab === 'integrations' && (
           hasTabAccess('integrations') ? (
             <IntegrationsPanel />
           ) : (
             <RestrictedTabView tabName="integrations" />
-          )
-        )}
-
-        {activeTab === 'users' && (
-          hasTabAccess('users') ? (
-            <div>
-              <UsersPanel />
-            </div>
-          ) : (
-            <RestrictedTabView tabName="users" />
           )
         )}
 

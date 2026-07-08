@@ -89,6 +89,46 @@ function SquareModalShell({
   );
 }
 
+function FathomWebhookStatusRow({
+  status,
+  registering,
+}: {
+  status: FathomStatusResponse | null;
+  registering: boolean;
+}) {
+  if (!status?.configured && !registering) return null;
+
+  let dotClass = 'bg-zinc-400';
+  let label = 'Not configured';
+  if (registering) {
+    dotClass = 'bg-sky-500 animate-pulse';
+    label = 'Registering webhook…';
+  } else if (status?.webhook_active || status?.webhook_status === 'active') {
+    dotClass = 'bg-emerald-500';
+    label = 'Auto-sync active — new calls sync automatically';
+  } else if (status?.configured) {
+    dotClass = 'bg-amber-500';
+    label = 'Webhook not registered — click Save to register auto-sync';
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-2.5 space-y-1">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+        <span className="text-xs font-medium text-gray-800 dark:text-gray-200">{label}</span>
+      </div>
+      {(status?.total_calls ?? 0) > 0 && !registering && (
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 pl-[1.125rem]">
+          {status?.total_calls} call{status?.total_calls === 1 ? '' : 's'} synced
+          {status?.latest_call_at
+            ? ` · latest ${new Date(status.latest_call_at).toLocaleDateString()}`
+            : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function IntegrationsPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
@@ -96,6 +136,7 @@ export default function IntegrationsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [fathomApiKey, setFathomApiKey] = useState('');
+  const [initialFathomKey, setInitialFathomKey] = useState('');
   const [canManageIntegrations, setCanManageIntegrations] = useState(false);
   const [modal, setModal] = useState<IntegrationModal>(null);
   const [brevoSummary, setBrevoSummary] = useState<BrevoStatus | null>(null);
@@ -105,6 +146,7 @@ export default function IntegrationsPanel() {
   const [calendlySummary, setCalendlySummary] = useState<CalendlyStatus | null>(null);
   const [whopSummary, setWhopSummary] = useState<{ connected: boolean; company_id?: string | null } | null>(null);
   const [fathomStatus, setFathomStatus] = useState<FathomStatusResponse | null>(null);
+  const [fathomWebhookRegistering, setFathomWebhookRegistering] = useState(false);
 
   const [stripeApiKey, setStripeApiKey] = useState('');
   const [stripeBusy, setStripeBusy] = useState(false);
@@ -165,7 +207,11 @@ export default function IntegrationsPanel() {
         apiClient.getBrevoStatus().catch(() => null),
         apiClient.getFathomStatus().catch(() => null),
       ]);
-      setFathomApiKey(typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '');
+      {
+        const loadedKey = typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '';
+        setFathomApiKey(loadedKey);
+        setInitialFathomKey(loadedKey);
+      }
       setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
       setBrevoSummary(brevo);
       setFathomStatus(fStatus);
@@ -199,30 +245,74 @@ export default function IntegrationsPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modal]);
 
+  const refreshFathomStatus = useCallback(async () => {
+    try {
+      const status = await apiClient.getFathomStatus();
+      setFathomStatus(status);
+      return status;
+    } catch {
+      return null;
+    }
+  }, []);
+
   const handleFathomSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
+
+    const keyInForm = fathomApiKey.trim();
+    const configured = fathomStatus?.configured === true;
+    if (!keyInForm && !configured) {
+      setError('Enter your Fathom API key.');
+      return;
+    }
+
+    const keyChanged = keyInForm !== initialFathomKey.trim();
+    const webhookActive =
+      fathomStatus?.webhook_active === true || fathomStatus?.webhook_status === 'active';
+
+    // Nothing to do: key unchanged and webhook already registered.
+    if (!keyChanged && webhookActive) {
+      setSuccess('Fathom is already connected. No changes needed.');
+      return;
+    }
+
     try {
       setSaving(true);
-      await apiClient.updateUserSettings({
-        fathom_api_key: fathomApiKey || undefined,
-      });
-      const hadCalls = (fathomStatus?.total_calls ?? 0) > 0;
-      setSuccess(
-        hadCalls
-          ? 'Fathom API key saved. Your existing calls are unchanged — use Sync Fathom now to pull new meetings.'
-          : 'Fathom API key saved. Use Sync Fathom now to import past meetings; new calls will sync automatically after that.'
-      );
-      void apiClient.getFathomStatus().then(setFathomStatus).catch(() => null);
+      setFathomWebhookRegistering(true);
+      if (keyInForm && keyChanged) {
+        await apiClient.updateUserSettings({
+          fathom_api_key: keyInForm,
+        });
+        setInitialFathomKey(keyInForm);
+      }
+      // Force a fresh webhook only when the key changed; otherwise reconcile idempotently.
+      const setup = await apiClient.setupFathomWebhook({ force: keyChanged });
+      const status = await refreshFathomStatus();
+      if (status?.webhook_active) {
+        setSuccess(
+          (status.total_calls ?? 0) > 0
+            ? 'Fathom webhook registered. New calls will sync automatically.'
+            : 'Fathom webhook registered. Use Sync Fathom now to import past meetings.'
+        );
+      } else if (setup?.registration_skipped && setup?.reason === 'non_public_destination') {
+        setSuccess(
+          setup.message ||
+            'Fathom API key saved. Webhook registration is skipped in local dev unless BACKEND_PUBLIC_URL is a public HTTPS URL.'
+        );
+      } else {
+        setError('Webhook registration did not complete. Verify your API key and try Save again.');
+      }
     } catch (err: unknown) {
       const msg =
         (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
         (err as Error)?.message ||
-        'Failed to save';
+        'Failed to save Fathom settings';
       setError(String(msg));
+      void refreshFathomStatus();
     } finally {
       setSaving(false);
+      setFathomWebhookRegistering(false);
     }
   };
 
@@ -443,7 +533,9 @@ export default function IntegrationsPanel() {
 
   const brevoConnected = brevoSummary?.connected === true;
   const fathomConfigured = fathomApiKey.trim().length > 0 || fathomStatus?.configured === true;
-  const fathomWebhookActive = fathomStatus?.webhook_active === true;
+  const fathomWebhookActive =
+    !fathomWebhookRegistering &&
+    (fathomStatus?.webhook_active === true || fathomStatus?.webhook_status === 'active');
   const calcomConnected = calcomSummary?.connected === true;
   const calendlyConnected = calendlySummary?.connected === true;
   const whopConnected = whopSummary?.connected === true;
@@ -499,14 +591,22 @@ export default function IntegrationsPanel() {
             </div>
             <p
               className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
-                fathomWebhookActive
-                  ? 'text-emerald-700 dark:text-emerald-400'
-                  : fathomConfigured
-                    ? 'text-amber-700 dark:text-amber-400'
-                    : 'text-zinc-500 dark:text-zinc-400'
+                fathomWebhookRegistering
+                  ? 'text-sky-700 dark:text-sky-400'
+                  : fathomWebhookActive
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : fathomConfigured
+                      ? 'text-amber-700 dark:text-amber-400'
+                      : 'text-zinc-500 dark:text-zinc-400'
               }`}
             >
-              {fathomWebhookActive ? 'Connected' : fathomConfigured ? 'Key saved' : 'Not configured'}
+              {fathomWebhookRegistering
+                ? 'Registering…'
+                : fathomWebhookActive
+                  ? 'Connected'
+                  : fathomConfigured
+                    ? 'Key saved'
+                    : 'Not configured'}
             </p>
           </div>
         </button>
@@ -634,7 +734,7 @@ export default function IntegrationsPanel() {
                   Find the <strong>API</strong> section. If you do not have a key yet, create one; if you already have one, use <strong>Copy</strong> so you do not mistype it.
                 </>,
                 <>
-                  Paste that key into the field below and press Save. Only admins and owners can change this for your workspace.
+                  Paste that key into the field below and press <strong>Save</strong>. You can press Save again anytime to re-register the auto-sync webhook (green status light).
                 </>,
               ]}
             />
@@ -665,38 +765,17 @@ export default function IntegrationsPanel() {
                   </p>
                 )}
               </div>
-              {fathomStatus && fathomConfigured && (
-                <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-2.5 space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`inline-block h-2 w-2 rounded-full ${
-                        fathomWebhookActive ? 'bg-emerald-500' : 'bg-amber-500'
-                      }`}
-                    />
-                    <span className="text-xs font-medium text-gray-800 dark:text-gray-200">
-                      {fathomWebhookActive
-                        ? 'Auto-sync active — new calls sync automatically'
-                        : 'Webhook not registered — click Save to activate auto-sync'}
-                    </span>
-                  </div>
-                  {(fathomStatus.total_calls ?? 0) > 0 && (
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 pl-4">
-                      {fathomStatus.total_calls} call{fathomStatus.total_calls === 1 ? '' : 's'} synced
-                      {fathomStatus.latest_call_at
-                        ? ` · latest ${new Date(fathomStatus.latest_call_at).toLocaleDateString()}`
-                        : ''}
-                    </p>
-                  )}
-                </div>
+              {(fathomStatus?.configured || fathomWebhookRegistering) && (
+                <FathomWebhookStatusRow status={fathomStatus} registering={fathomWebhookRegistering} />
               )}
               <FathomSyncSection variant="modal" />
               {canManageIntegrations && (
                 <button
                   type="submit"
-                  disabled={saving}
+                  disabled={saving || fathomWebhookRegistering}
                   className="w-full rounded-lg border-2 border-zinc-800 bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white shadow hover:bg-zinc-800 disabled:opacity-50 dark:border-zinc-300 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
                 >
-                  {saving ? 'Saving…' : 'Save Fathom settings'}
+                  {saving || fathomWebhookRegistering ? 'Saving…' : 'Save Fathom settings'}
                 </button>
               )}
             </form>

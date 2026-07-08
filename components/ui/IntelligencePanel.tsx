@@ -116,7 +116,7 @@ type SectionId =
   | 'offers'
   | 'sales'
   | 'marketing'
-  | 'assets';
+  ;
 
 const MAX_WRITING_SAMPLES = 12;
 
@@ -132,7 +132,6 @@ const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
   { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, downsells, upsells, and referral offer' },
   { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
   { id: 'marketing', title: 'Marketing', subtitle: 'How you attract and nurture prospects' },
-  { id: 'assets', title: 'Resource Library', subtitle: 'Links the AI can reference in drafts' },
 ];
 
 const WRITING_STYLE_OPTIONS = [
@@ -477,7 +476,6 @@ export default function IntelligencePanel({
                   }
                   case 'sales': return !!(profile.sales_framework || profile.sales_tactics);
                   case 'marketing': return !!(profile.marketing_strategy || profile.marketing_channels);
-                  case 'assets': return (profile.asset_links || []).length > 0;
                   default: return false;
                 }
               })();
@@ -1412,67 +1410,7 @@ export default function IntelligencePanel({
               </>
             )}
 
-            {/* ── Assets ── */}
-            {activeSection === 'assets' && (
-              <>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Resource Library</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Links to sales pages, case studies, lead magnets, testimonials, pricing — anything the AI should reference when drafting emails or suggesting tactics.
-                  </p>
-                </div>
-
-                <div className="space-y-3">
-                  {(profile.asset_links || []).map((link, idx) => (
-                    <div key={idx} className="flex items-start gap-2">
-                      <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        <input
-                          type="text"
-                          value={link.label}
-                          onChange={(e) => updateAssetLink(idx, 'label', e.target.value)}
-                          placeholder="Label (e.g. Sales page)"
-                          className="px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                        />
-                        <input
-                          type="url"
-                          value={link.url}
-                          onChange={(e) => updateAssetLink(idx, 'url', e.target.value)}
-                          placeholder="https://..."
-                          className="px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeAssetLink(idx)}
-                        className="mt-1 p-1.5 text-gray-400 hover:text-red-500 transition-colors"
-                        title="Remove"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </div>
-                  ))}
-
-                  <button
-                    type="button"
-                    onClick={addAssetLink}
-                    className="inline-flex items-center gap-1.5 text-sm text-violet-600 dark:text-violet-400 hover:underline"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                    Add link
-                  </button>
-
-                  {(profile.asset_links || []).length === 0 && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
-                      No resources yet. Add links to your sales page, testimonials page, lead magnet, pricing, or anything else the AI should be able to reference.
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
+            {/* Resource Library moved to the dedicated Resources tab */}
 
             {/* Save bar */}
             <div className="flex items-center gap-3 pt-4 border-t border-gray-200 dark:border-white/10">

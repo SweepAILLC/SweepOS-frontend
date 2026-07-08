@@ -104,9 +104,24 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts = 2, delayMs = 150
 export interface FathomStatusResponse {
   configured: boolean;
   webhook_active: boolean;
+  webhook_status?: 'active' | 'not_registered' | 'not_configured';
   webhook_url?: string | null;
   total_calls: number;
   latest_call_at?: string | null;
+}
+
+export interface FathomWebhookSetupResponse {
+  success?: boolean;
+  background?: boolean;
+  started?: boolean;
+  webhook_active?: boolean;
+  webhook_id?: string | null;
+  destination_url?: string;
+  requested_destination_url?: string;
+  registration_skipped?: boolean;
+  reason?: string;
+  message?: string;
+  error?: string;
 }
 
 /** Response from POST /integrations/fathom/sync */
@@ -226,6 +241,7 @@ export interface ContentStudioStageConcept {
   id: string;
   format: 'long' | 'short';
   title: string;
+  hook: string;
   bullets: string[];
   why_for_icp: string;
   funnel_path_to_sale: string;
@@ -797,6 +813,38 @@ class ApiClient {
     return response.data;
   }
 
+  async importClients(payload: {
+    rows: Array<{
+      email: string;
+      first_name?: string;
+      last_name?: string;
+      phone?: string;
+      instagram?: string;
+      notes?: string;
+      pipeline_column?: string;
+      program_start_date?: string;
+      program_duration_days?: number;
+    }>;
+    default_pipeline_column?: string;
+    run_lifecycle_reconcile?: boolean;
+    source_filename?: string;
+  }) {
+    const response = await this.client.post('/clients/import', payload, {
+      timeout: 120000,
+    });
+    invalidateClientsListCache();
+    return response.data as {
+      success: boolean;
+      created_count: number;
+      updated_count: number;
+      skipped_count: number;
+      failed_count: number;
+      failed_rows: Array<{ row_index: number; email?: string; error: string }>;
+      imported_client_ids: string[];
+      lifecycle_adjusted_count: number;
+    };
+  }
+
   async updateClient(id: string, data: any) {
     const cacheKey = clientsListCacheKey();
     const cached = cache.get<unknown[]>(cacheKey);
@@ -1092,8 +1140,11 @@ class ApiClient {
    * Create a Fathom webhook (API key required) that POSTs new meeting content to this backend.
    * Backend uses BACKEND_PUBLIC_URL + per-org webhook secret to verify signatures.
    */
-  async setupFathomWebhook(): Promise<{ success?: boolean; destination_url?: string; webhook_id?: string }> {
-    const response = await this.client.post('/integrations/fathom/webhook/setup', null, { timeout: 60000 });
+  async setupFathomWebhook(opts?: { force?: boolean }): Promise<FathomWebhookSetupResponse> {
+    const response = await this.client.post('/integrations/fathom/webhook/setup', null, {
+      params: opts?.force ? { force: true } : undefined,
+      timeout: 60000,
+    });
     return response.data;
   }
 
@@ -2377,6 +2428,14 @@ class ApiClient {
     return response.data as { requeued: number };
   }
 
+  /** Re-queue rows stuck in pending (bulk upload / starved background jobs). */
+  async retryCallLibraryStuckPending(): Promise<{ requeued: number }> {
+    const response = await this.client.post('/call-library/retry-stuck-pending', null, {
+      timeout: 60000,
+    });
+    return response.data as { requeued: number };
+  }
+
   // Tab Permissions
   async getMyTabPermissions() {
     const response = await this.client.get('/users/tabs/access');
@@ -2452,6 +2511,153 @@ class ApiClient {
   ): Promise<AutomationPreviewResponse> {
     const response = await this.client.post('/automations/preview', body, { timeout: 60000 });
     return response.data as AutomationPreviewResponse;
+  }
+
+  // ----- Resources tab -------------------------------------------------------
+
+  async listDocs(): Promise<Array<{
+    resource_id: string;
+    category: string;
+    title: string;
+    description: string;
+    powered_by: string | null;
+    is_custom: boolean;
+    is_builtin: boolean;
+    updated_at: string | null;
+  }>> {
+    const response = await this.client.get('/resources/docs');
+    return response.data as Array<{
+      resource_id: string;
+      category: string;
+      title: string;
+      description: string;
+      powered_by: string | null;
+      is_custom: boolean;
+      is_builtin: boolean;
+      updated_at: string | null;
+    }>;
+  }
+
+  async getDoc(resourceId: string): Promise<{
+    resource_id: string;
+    category: string;
+    title: string;
+    description: string;
+    content: string;
+    powered_by: string | null;
+    is_custom: boolean;
+    is_builtin: boolean;
+    updated_at: string | null;
+  }> {
+    const response = await this.client.get(`/resources/docs/${resourceId}`);
+    return response.data as {
+      resource_id: string;
+      category: string;
+      title: string;
+      description: string;
+      content: string;
+      powered_by: string | null;
+      is_custom: boolean;
+      is_builtin: boolean;
+      updated_at: string | null;
+    };
+  }
+
+  async upsertDoc(
+    resourceId: string,
+    body: {
+      category: string;
+      title: string;
+      description: string;
+      content: string;
+      powered_by?: string | null;
+    }
+  ): Promise<{ resource_id: string; title: string; content: string }> {
+    const response = await this.client.put(`/resources/docs/${resourceId}`, body);
+    return response.data as { resource_id: string; title: string; content: string };
+  }
+
+  async createDoc(body: {
+    category: string;
+    title: string;
+    description: string;
+    content: string;
+    powered_by?: string | null;
+  }): Promise<{ resource_id: string; title: string; content: string }> {
+    const response = await this.client.post('/resources/docs', body);
+    return response.data as { resource_id: string; title: string; content: string };
+  }
+
+  async deleteDoc(resourceId: string): Promise<{ resource_id: string; deleted: boolean }> {
+    const response = await this.client.delete(`/resources/docs/${resourceId}`);
+    return response.data as { resource_id: string; deleted: boolean };
+  }
+
+  // ----- Org Resource Library ------------------------------------------------
+
+  async listOrgLibrary(): Promise<Array<{
+    id: string;
+    kind: 'text' | 'markdown' | 'image' | 'video_url' | 'url';
+    title: string;
+    description: string;
+    tags: string[];
+    content_text: string | null;
+    content_url: string | null;
+    content_b64: string | null;
+    content_mime: string | null;
+    updated_at: string | null;
+    created_at: string | null;
+  }>> {
+    const response = await this.client.get('/resources/library');
+    return response.data as Array<{
+      id: string;
+      kind: 'text' | 'markdown' | 'image' | 'video_url' | 'url';
+      title: string;
+      description: string;
+      tags: string[];
+      content_text: string | null;
+      content_url: string | null;
+      content_b64: string | null;
+      content_mime: string | null;
+      updated_at: string | null;
+      created_at: string | null;
+    }>;
+  }
+
+  async createOrgLibraryItem(body: {
+    kind: 'text' | 'markdown' | 'image' | 'video_url' | 'url';
+    title: string;
+    description: string;
+    tags: string[];
+    content_text?: string | null;
+    content_url?: string | null;
+    content_b64?: string | null;
+    content_mime?: string | null;
+  }): Promise<{ id: string }> {
+    const response = await this.client.post('/resources/library', body);
+    return response.data as { id: string };
+  }
+
+  async updateOrgLibraryItem(
+    id: string,
+    body: {
+      kind: 'text' | 'markdown' | 'image' | 'video_url' | 'url';
+      title: string;
+      description: string;
+      tags: string[];
+      content_text?: string | null;
+      content_url?: string | null;
+      content_b64?: string | null;
+      content_mime?: string | null;
+    }
+  ): Promise<{ id: string }> {
+    const response = await this.client.put(`/resources/library/${id}`, body);
+    return response.data as { id: string };
+  }
+
+  async deleteOrgLibraryItem(id: string): Promise<{ id: string; deleted: boolean }> {
+    const response = await this.client.delete(`/resources/library/${id}`);
+    return response.data as { id: string; deleted: boolean };
   }
 
   async getOutreachInbox(

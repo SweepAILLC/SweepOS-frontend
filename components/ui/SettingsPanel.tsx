@@ -5,8 +5,9 @@ import { apiClient } from '@/lib/api';
 import { clearSessionCaches } from '@/lib/cache';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
+import UsersPanel from '@/components/UsersPanel';
 
-type SettingsSection = 'appearance' | 'accounts' | 'profile' | 'privacy';
+type SettingsSection = 'appearance' | 'accounts' | 'team' | 'profile' | 'privacy';
 
 interface OrgOption {
   id: string;
@@ -14,9 +15,10 @@ interface OrgOption {
   is_primary: boolean;
 }
 
-const SIDEBAR_ITEMS: { id: SettingsSection; label: string }[] = [
+const SIDEBAR_ITEMS: { id: SettingsSection; label: string; adminOnly?: boolean }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'accounts', label: 'Accounts' },
+  { id: 'team', label: 'Team', adminOnly: true },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
@@ -32,6 +34,7 @@ export default function SettingsPanel() {
   const [section, setSection] = useState<SettingsSection>('appearance');
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string>('member');
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
   const [leavingOrgId, setLeavingOrgId] = useState<string | null>(null);
 
@@ -63,6 +66,7 @@ export default function SettingsPanel() {
       });
       const orgId = user?.org_id != null ? String(user.org_id) : null;
       setCurrentOrgId(orgId);
+      setCurrentUserRole(user?.role || 'member');
       const orgEmail = user?.email || settings.email;
       if (orgEmail) {
         const orgs = await apiClient.getUserOrganizations(orgEmail);
@@ -212,12 +216,17 @@ export default function SettingsPanel() {
     );
   }
 
+  const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner';
+  const visibleSidebarItems = SIDEBAR_ITEMS.filter(
+    (item) => !item.adminOnly || isAdminOrOwner
+  );
+
   return (
     <div className="flex flex-col sm:flex-row gap-6 min-h-0 min-w-0">
       {/* Sidebar */}
       <aside className="flex-shrink-0 w-full sm:w-56 lg:w-64">
         <nav className="glass-card p-2 space-y-0.5">
-          {SIDEBAR_ITEMS.map((item) => (
+          {visibleSidebarItems.map((item) => (
             <button
               key={item.id}
               type="button"
@@ -336,6 +345,10 @@ export default function SettingsPanel() {
                 </ul>
               )}
             </div>
+          )}
+
+          {section === 'team' && isAdminOrOwner && (
+            <UsersPanel />
           )}
 
           {section === 'profile' && (

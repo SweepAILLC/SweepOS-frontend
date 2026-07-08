@@ -13,7 +13,6 @@ export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = [
   'automations',
   'intelligence',
   'integrations',
-  'users',
 ];
 
 export const BOTTOM_NAV_TAB_IDS: TabId[] = [
@@ -45,11 +44,11 @@ export function defaultTabPermissions(): Record<string, boolean> {
     finances: true,
     performance: true,
     funnels: true,
-    users: true,
     calcom: true,
     integrations: true,
     content_studio: true,
     call_library: true,
+    resources: true,
     intelligence: true,
     automations: true,
     clients: true,
@@ -76,11 +75,6 @@ export function canAccessTab(
   }
   if (tab === 'settings') {
     return true;
-  }
-  if (tab === 'users') {
-    if (roleLower === 'member') return false;
-    if (roleLower !== 'admin' && roleLower !== 'owner') return false;
-    return ctx.tabPermissions[tab] !== false;
   }
   if (tab === 'finances') {
     const v =
