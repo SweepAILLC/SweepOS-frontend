@@ -439,6 +439,17 @@ export default function ContentStudioPanel() {
                                 {concept.title}
                               </p>
 
+                              {concept.hook ? (
+                                <div className="rounded-lg bg-violet-500/10 border border-violet-500/20 px-2.5 py-2">
+                                  <span className="block text-[10px] font-semibold uppercase tracking-wide text-violet-500 dark:text-violet-400 mb-0.5">
+                                    Hook
+                                  </span>
+                                  <p className="text-xs font-medium text-violet-900 dark:text-violet-200 leading-snug">
+                                    “{concept.hook}”
+                                  </p>
+                                </div>
+                              ) : null}
+
                               {concept.bullets.length ? (
                                 <ul className="list-disc list-inside space-y-1 text-xs text-gray-700 dark:text-gray-300 leading-relaxed">
                                   {concept.bullets.map((b, i) => (

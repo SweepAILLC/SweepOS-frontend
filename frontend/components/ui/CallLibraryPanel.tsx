@@ -99,6 +99,27 @@ function ClosedDealBadge({
   );
 }
 
+function callLibraryStatusMessage(
+  status: string,
+  failureReason?: string | null,
+): string {
+  if (status === 'complete') return '';
+  if (failureReason === 'orphan_fathom_record') {
+    return 'Source call is no longer in your Fathom data. Run Sync Fathom to re-import, or remove this row.';
+  }
+  if (failureReason === 'no_content') {
+    return 'No transcript or summary was available for this call.';
+  }
+  if (failureReason === 'llm_failed') {
+    return 'Analysis failed. Use Refresh to retry.';
+  }
+  if (failureReason === 'budget_deferred') {
+    return 'Analysis is queued — waiting for the LLM rate limit window.';
+  }
+  if (failureReason) return failureReason;
+  return 'Report not available yet. It will appear automatically when analysis completes.';
+}
+
 export default function CallLibraryPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
@@ -170,11 +191,18 @@ export default function CallLibraryPanel() {
       const beforeIds = new Set(itemIdSet);
       const syncRes = await apiClient.syncFathomMeetings();
       let llmRetried = 0;
+      let stuckRetried = 0;
       try {
         const r = await apiClient.retryCallLibraryLlmFailed();
         llmRetried = Number(r?.requeued ?? 0);
       } catch (e) {
         console.warn('[CallLibrary] retry LLM failed reports:', e);
+      }
+      try {
+        const r = await apiClient.retryCallLibraryStuckPending();
+        stuckRetried = Number(r?.requeued ?? 0);
+      } catch (e) {
+        console.warn('[CallLibrary] retry stuck pending reports:', e);
       }
       await load();
 
@@ -192,8 +220,8 @@ export default function CallLibraryPanel() {
       const skippedNoClient = Number((syncRes as { skipped_no_client_match?: number }).skipped_no_client_match ?? 0);
 
       const llmNote =
-        llmRetried > 0
-          ? ` Re-queued ${llmRetried} failed analysis${llmRetried === 1 ? '' : 'es'} (LLM retry).`
+        llmRetried > 0 || stuckRetried > 0
+          ? ` Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
           : '';
 
       if (!ingested) {
@@ -205,11 +233,13 @@ export default function CallLibraryPanel() {
         } else {
           parts.push('No new calls available.');
         }
-        if (llmRetried > 0) {
-          parts.push(`Re-queued ${llmRetried} failed analysis${llmRetried === 1 ? '' : 'es'} (LLM retry).`);
+        if (llmRetried > 0 || stuckRetried > 0) {
+          parts.push(
+            `Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
+          );
         }
         setRefreshNote(parts.join(' '));
-        setPostSyncPollUntilMs(llmRetried > 0 ? Date.now() + 60_000 : null);
+        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : null);
         return;
       }
 
@@ -219,10 +249,10 @@ export default function CallLibraryPanel() {
       let note = '';
       if (newAppeared) {
         note = `Found ${ingested} new call${ingested === 1 ? '' : 's'}.`;
-        setPostSyncPollUntilMs(llmRetried > 0 ? Date.now() + 60_000 : null);
+        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : Date.now() + 45_000);
       } else {
         note = `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`;
-        setPostSyncPollUntilMs(Date.now() + (llmRetried > 0 ? 60_000 : 45_000));
+        setPostSyncPollUntilMs(Date.now() + (llmRetried + stuckRetried > 0 ? 90_000 : 45_000));
       }
       note += llmNote;
       setRefreshNote(note.trim());
@@ -649,7 +679,7 @@ export default function CallLibraryPanel() {
 
                   {selectedItem.status !== 'complete' ? (
                     <div className="px-4 py-4 text-sm text-amber-800 dark:text-amber-200 bg-amber-500/10">
-                      {selectedItem.failure_reason || 'Report not available yet. It will appear automatically when analysis completes.'}
+                      {callLibraryStatusMessage(selectedItem.status, selectedItem.failure_reason)}
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
@@ -736,6 +766,279 @@ export default function CallLibraryPanel() {
                           })()}
                         </section>
                       ) : null}
+
+                      {/* Discovery Audit */}
+                      {selectedItem.report.discovery_audit &&
+                        typeof selectedItem.report.discovery_audit === 'object' &&
+                        (() => {
+                          const da = selectedItem.report.discovery_audit as Record<string, unknown>;
+                          const ds = typeof da.discovery_score === 'number' ? da.discovery_score : null;
+                          if (ds === null && !da.discovery_summary) return null;
+                          const scoreColor =
+                            ds === null ? 'text-gray-400' :
+                            ds >= 75 ? 'text-emerald-400' :
+                            ds >= 50 ? 'text-amber-400' : 'text-rose-400';
+                          const scoreBg =
+                            ds === null ? 'bg-gray-500/10 border-gray-500/20' :
+                            ds >= 75 ? 'bg-emerald-500/10 border-emerald-500/20' :
+                            ds >= 50 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-rose-500/10 border-rose-500/20';
+
+                          const DIMS: Array<{key: string; label: string; hasGoals?: boolean}> = [
+                            { key: 'pain_identification', label: 'Pain Identification' },
+                            { key: 'pain_impact', label: 'Pain Impact / Daily Life' },
+                            { key: 'tangible_goals', label: 'Tangible Goals', hasGoals: true },
+                            { key: 'intangible_goals', label: 'Intangible Goals', hasGoals: true },
+                            { key: 'rapport_trust_authority', label: 'Rapport, Trust & Authority' },
+                          ];
+
+                          return (
+                            <section>
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400">
+                                  Discovery Audit
+                                </h4>
+                                {ds !== null && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${scoreBg} ${scoreColor}`}>
+                                    {Math.round(ds)}/100
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="space-y-3">
+                                {DIMS.map(({ key, label, hasGoals }) => {
+                                  const dim = da[key] as Record<string, unknown> | undefined;
+                                  if (!dim) return null;
+                                  const dimScore = typeof dim.score === 'number' ? dim.score : null;
+                                  const dimColor =
+                                    dimScore === null ? 'text-gray-400' :
+                                    dimScore >= 8 ? 'text-emerald-400' :
+                                    dimScore >= 6 ? 'text-amber-400' : 'text-rose-400';
+                                  const goals = hasGoals && Array.isArray(dim.goals_uncovered) ? dim.goals_uncovered as string[] : [];
+                                  return (
+                                    <div key={key} className="rounded-lg bg-gray-50 dark:bg-gray-800/40 border border-gray-200/50 dark:border-white/6 p-3 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</span>
+                                        {dimScore !== null && (
+                                          <span className={`text-xs font-bold ${dimColor}`}>{dimScore}/10</span>
+                                        )}
+                                      </div>
+                                      {goals.length > 0 && (
+                                        <ul className="flex flex-wrap gap-1">
+                                          {goals.map((g, i) => (
+                                            <li key={i} className="text-[10px] bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded px-1.5 py-0.5">{g}</li>
+                                          ))}
+                                        </ul>
+                                      )}
+                                      {dim.summary ? (
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
+                                      ) : null}
+                                      {dim.quote ? (
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-indigo-400/40 pl-2">"{String(dim.quote)}"</p>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+
+                              {da.discovery_summary ? (
+                                <div className="mt-3 rounded-lg bg-indigo-500/5 border border-indigo-500/15 px-3 py-2.5">
+                                  <p className="text-xs font-semibold text-indigo-400 mb-1 uppercase tracking-wide">Discovery Verdict</p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{String(da.discovery_summary)}</p>
+                                </div>
+                              ) : null}
+                            </section>
+                          );
+                        })()}
+
+                      {/* Pitching Audit */}
+                      {selectedItem.report.pitching_audit &&
+                        typeof selectedItem.report.pitching_audit === 'object' &&
+                        (() => {
+                          const pa = selectedItem.report.pitching_audit as Record<string, unknown>;
+                          const ps = typeof pa.pitch_score === 'number' ? pa.pitch_score : null;
+                          if (ps === null && !pa.pitch_summary) return null;
+                          const scoreColor =
+                            ps === null ? 'text-gray-400' :
+                            ps >= 75 ? 'text-emerald-400' :
+                            ps >= 50 ? 'text-amber-400' : 'text-rose-400';
+                          const scoreBg =
+                            ps === null ? 'bg-gray-500/10 border-gray-500/20' :
+                            ps >= 75 ? 'bg-emerald-500/10 border-emerald-500/20' :
+                            ps >= 50 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-rose-500/10 border-rose-500/20';
+                          const DIMS: Array<{ key: string; label: string }> = [
+                            { key: 'pain_weaving', label: 'Pain Weaving' },
+                            { key: 'natural_solution_framing', label: 'Natural Solution Framing' },
+                            { key: 'goal_bridge', label: 'Goal Bridge' },
+                            { key: 'positioning_clarity', label: 'Positioning Clarity' },
+                            { key: 'credibility_in_context', label: 'Credibility in Context' },
+                          ];
+                          return (
+                            <section>
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-400">
+                                  Pitching Audit
+                                </h4>
+                                {ps !== null && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${scoreBg} ${scoreColor}`}>
+                                    {Math.round(ps)}/100
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-3">
+                                {DIMS.map(({ key, label }) => {
+                                  const dim = pa[key] as Record<string, unknown> | undefined;
+                                  if (!dim) return null;
+                                  const dimScore = typeof dim.score === 'number' ? dim.score : null;
+                                  const dimColor =
+                                    dimScore === null ? 'text-gray-400' :
+                                    dimScore >= 8 ? 'text-emerald-400' :
+                                    dimScore >= 6 ? 'text-amber-400' : 'text-rose-400';
+                                  return (
+                                    <div key={key} className="rounded-lg bg-gray-50 dark:bg-gray-800/40 border border-gray-200/50 dark:border-white/6 p-3 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</span>
+                                        {dimScore !== null && (
+                                          <span className={`text-xs font-bold ${dimColor}`}>{dimScore}/10</span>
+                                        )}
+                                      </div>
+                                      {dim.summary ? (
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
+                                      ) : null}
+                                      {dim.quote ? (
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-blue-400/40 pl-2">"{String(dim.quote)}"</p>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {pa.pitch_summary ? (
+                                <div className="mt-3 rounded-lg bg-blue-500/5 border border-blue-500/15 px-3 py-2.5">
+                                  <p className="text-xs font-semibold text-blue-400 mb-1 uppercase tracking-wide">Pitch Verdict</p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{String(pa.pitch_summary)}</p>
+                                </div>
+                              ) : null}
+                            </section>
+                          );
+                        })()}
+
+                      {/* Objection Handling Audit */}
+                      {selectedItem.report.objection_handling_audit &&
+                        typeof selectedItem.report.objection_handling_audit === 'object' &&
+                        (() => {
+                          const oa = selectedItem.report.objection_handling_audit as Record<string, unknown>;
+                          const os = typeof oa.objection_score === 'number' ? oa.objection_score : null;
+                          if (os === null && !oa.objection_summary && !Array.isArray(oa.objections)) return null;
+                          const scoreColor =
+                            os === null ? 'text-gray-400' :
+                            os >= 75 ? 'text-emerald-400' :
+                            os >= 50 ? 'text-amber-400' : 'text-rose-400';
+                          const scoreBg =
+                            os === null ? 'bg-gray-500/10 border-gray-500/20' :
+                            os >= 75 ? 'bg-emerald-500/10 border-emerald-500/20' :
+                            os >= 50 ? 'bg-amber-500/10 border-amber-500/20' : 'bg-rose-500/10 border-rose-500/20';
+                          const DIMS: Array<{ key: string; label: string }> = [
+                            { key: 'fear_handled_first', label: 'Fear Handled First' },
+                            { key: 'classification_accuracy', label: 'Classification Accuracy' },
+                            { key: 'sop_path_adherence', label: 'SOP Path Adherence' },
+                            { key: 'resolution_quality', label: 'Resolution Quality' },
+                          ];
+                          const OBJ_LABELS: Record<string, string> = {
+                            think_about_it: 'Need to think about it',
+                            too_expensive: 'Too expensive',
+                            bad_timing: 'Bad timing',
+                            wont_work: "Won't work / wants proof",
+                            need_partner: 'Need to speak to partner',
+                            other: 'Other',
+                          };
+                          const objections = Array.isArray(oa.objections) ? oa.objections as Record<string, unknown>[] : [];
+                          return (
+                            <section>
+                              <div className="flex items-center justify-between mb-3">
+                                <h4 className="text-xs font-semibold uppercase tracking-wide text-amber-500 dark:text-amber-400">
+                                  Objection Handling Audit
+                                </h4>
+                                {os !== null && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold border ${scoreBg} ${scoreColor}`}>
+                                    {Math.round(os)}/100
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-3">
+                                {DIMS.map(({ key, label }) => {
+                                  const dim = oa[key] as Record<string, unknown> | undefined;
+                                  if (!dim) return null;
+                                  const dimScore = typeof dim.score === 'number' ? dim.score : null;
+                                  const dimColor =
+                                    dimScore === null ? 'text-gray-400' :
+                                    dimScore >= 8 ? 'text-emerald-400' :
+                                    dimScore >= 6 ? 'text-amber-400' : 'text-rose-400';
+                                  return (
+                                    <div key={key} className="rounded-lg bg-gray-50 dark:bg-gray-800/40 border border-gray-200/50 dark:border-white/6 p-3 space-y-1.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</span>
+                                        {dimScore !== null && (
+                                          <span className={`text-xs font-bold ${dimColor}`}>{dimScore}/10</span>
+                                        )}
+                                      </div>
+                                      {dim.summary ? (
+                                        <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {objections.length > 0 && (
+                                <div className="mt-3 space-y-2">
+                                  <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Objections on call</p>
+                                  {objections.map((obj, i) => {
+                                    const label = OBJ_LABELS[String(obj.objection_label || 'other')] || 'Other';
+                                    const cls = String(obj.classification || 'mixed');
+                                    const handled = Boolean(obj.handled_well);
+                                    return (
+                                      <div key={i} className="rounded-lg border border-gray-200/50 dark:border-white/6 bg-gray-50 dark:bg-gray-800/30 p-3 space-y-1.5">
+                                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                                          <span className="text-xs font-semibold text-gray-800 dark:text-gray-200">{label}</span>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-500/10 text-gray-400 border border-gray-500/20 capitalize">{cls}</span>
+                                            <span className={`text-[10px] px-1.5 py-0.5 rounded border ${handled ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-rose-500/10 text-rose-400 border-rose-500/20'}`}>
+                                              {handled ? 'Handled well' : 'Missed'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                        {obj.surface_quote ? (
+                                          <p className="text-[11px] italic text-gray-500">"{String(obj.surface_quote)}"</p>
+                                        ) : null}
+                                        {Array.isArray(obj.steps_hit) && (obj.steps_hit as string[]).length > 0 && (
+                                          <div className="flex flex-wrap gap-1">
+                                            {(obj.steps_hit as string[]).map((s, j) => (
+                                              <span key={j} className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">{s}</span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {Array.isArray(obj.steps_missed) && (obj.steps_missed as string[]).length > 0 && (
+                                          <div className="flex flex-wrap gap-1">
+                                            {(obj.steps_missed as string[]).map((s, j) => (
+                                              <span key={j} className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20">{s}</span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {obj.summary ? (
+                                          <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(obj.summary)}</p>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                              {oa.objection_summary ? (
+                                <div className="mt-3 rounded-lg bg-amber-500/5 border border-amber-500/15 px-3 py-2.5">
+                                  <p className="text-xs font-semibold text-amber-400 mb-1 uppercase tracking-wide">Objection Verdict</p>
+                                  <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">{String(oa.objection_summary)}</p>
+                                </div>
+                              ) : null}
+                            </section>
+                          );
+                        })()}
 
                       <section>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400 mb-2">

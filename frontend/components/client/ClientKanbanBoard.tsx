@@ -48,6 +48,7 @@ import {
 } from '@/lib/pipelineStore';
 import { ORG_CHANGED_EVENT, orgIdFromAccessToken } from '@/lib/orgScope';
 import ClientCard, { MERGE_DROP_ID } from './ClientCard';
+import ClientCreateModal from './ClientCreateModal';
 import ClientDetailDrawer from './ClientDetailDrawer';
 
 function mergeClientRow(existing: Client, incoming: Client): Client {
@@ -220,7 +221,7 @@ export default function ClientKanbanBoard({
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [activeColumn, setActiveColumn] = useState<ColumnId | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   /** Empty = no tag filter. Non-empty = show clients that have any selected insight tag (OR). */
   const [selectedInsightTags, setSelectedInsightTags] = useState<Set<string>>(() => new Set());
@@ -230,27 +231,7 @@ export default function ClientKanbanBoard({
   const pipelineLoadStartedRef = useRef(false);
   const orgIdRef = useRef(orgIdFromAccessToken());
   const shouldAnimateColumns = useRef(hydratePipelineClients().length === 0);
-  const [createFormData, setCreateFormData] = useState({
-    first_name: '',
-    last_name: '',
-    email: '',
-    phone: '',
-    instagram: '',
-    lifecycle_state: 'nurturing' as ColumnId,
-    notes: '',
-  });
-
-  const resetCreateForm = () => {
-    setCreateFormData({
-      first_name: '',
-      last_name: '',
-      email: '',
-      phone: '',
-      instagram: '',
-      lifecycle_state: 'nurturing',
-      notes: '',
-    });
-  };
+  // createFormData / resetCreateForm / creating removed — lives in ClientCreateModal now
   const [syncingRefreshing, setSyncingRefreshing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [dragOverId, setDragOverId] = useState<string | null>(null);
@@ -371,16 +352,9 @@ export default function ClientKanbanBoard({
     }
     if (pipelineLoadStartedRef.current) return;
     pipelineLoadStartedRef.current = true;
-    void (async () => {
-      try {
-        await apiClient.reconcileClientLifecycles(true);
-      } catch (reconcileErr) {
-        console.warn('[KanbanBoard] Lifecycle reconcile failed (board will still load):', reconcileErr);
-      }
-      await loadClients(true, true, false, false).catch((err) => {
-        console.error('[KanbanBoard] Initial load failed:', err);
-      });
-    })();
+    void loadClients(true, true, false, false).catch((err) => {
+      console.error('[KanbanBoard] Initial load failed:', err);
+    });
   }, [isActive]);
 
   useEffect(() => {
@@ -391,16 +365,9 @@ export default function ClientKanbanBoard({
       setClients([]);
       if (isActive) {
         pipelineLoadStartedRef.current = true;
-        void (async () => {
-          try {
-            await apiClient.reconcileClientLifecycles(true);
-          } catch (reconcileErr) {
-            console.warn('[KanbanBoard] Lifecycle reconcile after org switch failed:', reconcileErr);
-          }
-          await loadClients(true, true, false, false).catch((err) => {
-            console.error('[KanbanBoard] Reload after org switch failed:', err);
-          });
-        })();
+        void loadClients(true, true, false, false).catch((err) => {
+          console.error('[KanbanBoard] Reload after org switch failed:', err);
+        });
       }
     };
     window.addEventListener(ORG_CHANGED_EVENT, onOrgChanged);
@@ -1319,43 +1286,17 @@ export default function ClientKanbanBoard({
     }
   };
 
-  const handleCreateClient = async () => {
-    if (!createFormData.first_name && !createFormData.last_name && !createFormData.email) {
-      alert('Please provide at least a name or email');
-      return;
-    }
+  const handleClientCreated = useCallback((created: Client) => {
+    applyClientUpdate(created);
+    setIsCreateModalOpen(false);
+    setSelectedClient(created);
+    setIsDrawerOpen(true);
+  }, [applyClientUpdate]);
 
-    setCreating(true);
-    try {
-      const clientData = {
-        first_name: createFormData.first_name || undefined,
-        last_name: createFormData.last_name || undefined,
-        email: createFormData.email || undefined,
-        phone: createFormData.phone || undefined,
-        instagram: createFormData.instagram || undefined,
-        lifecycle_state: createFormData.lifecycle_state,
-        notes: createFormData.notes || undefined,
-      };
-
-      const newClient = await apiClient.createClient(clientData);
-      const created: Client = {
-        ...newClient,
-        lifecycle_state:
-          normalizeLifecycleColumn(newClient.lifecycle_state) ?? createFormData.lifecycle_state,
-      };
-
-      applyClientUpdate(created);
-      setIsCreateModalOpen(false);
-      resetCreateForm();
-      setSelectedClient(created);
-      setIsDrawerOpen(true);
-    } catch (error: any) {
-      console.error('Failed to create client:', error);
-      alert(error?.response?.data?.detail || 'Failed to create client. Please try again.');
-    } finally {
-      setCreating(false);
-    }
-  };
+  const handleImportComplete = useCallback(() => {
+    setIsCreateModalOpen(false);
+    void loadClients(true, true, true, false, true, false);
+  }, []);
 
   return (
     <>
@@ -1754,135 +1695,13 @@ export default function ClientKanbanBoard({
         }}
       />
 
-      {/* Create Client Modal */}
+      {/* Create / Import Modal */}
       {isCreateModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10 neon-glow p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Create New Client</h3>
-            
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  First Name
-                </label>
-                <input
-                  type="text"
-                  value={createFormData.first_name}
-                  onChange={(e) => setCreateFormData({ ...createFormData, first_name: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="John"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Last Name
-                </label>
-                <input
-                  type="text"
-                  value={createFormData.last_name}
-                  onChange={(e) => setCreateFormData({ ...createFormData, last_name: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="Doe"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={createFormData.email}
-                  onChange={(e) => setCreateFormData({ ...createFormData, email: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="john@example.com"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Phone
-                </label>
-                <input
-                  type="tel"
-                  value={createFormData.phone}
-                  onChange={(e) => setCreateFormData({ ...createFormData, phone: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="+1 (555) 123-4567"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Instagram
-                </label>
-                <input
-                  type="text"
-                  value={createFormData.instagram}
-                  onChange={(e) => setCreateFormData({ ...createFormData, instagram: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  placeholder="@username"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Pipeline column
-                </label>
-                <select
-                  value={createFormData.lifecycle_state}
-                  onChange={(e) =>
-                    setCreateFormData({
-                      ...createFormData,
-                      lifecycle_state: e.target.value as ColumnId,
-                    })
-                  }
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  {COLUMNS.map((col) => (
-                    <option key={col.id} value={col.id}>
-                      {col.title}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Notes
-                </label>
-                <textarea
-                  value={createFormData.notes}
-                  onChange={(e) => setCreateFormData({ ...createFormData, notes: e.target.value })}
-                  className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  rows={3}
-                  placeholder="Additional notes about this client..."
-                />
-              </div>
-            </div>
-
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => {
-                  setIsCreateModalOpen(false);
-                  resetCreateForm();
-                }}
-                className="glass-button-secondary px-4 py-2 text-sm font-medium rounded-md hover:bg-white/20"
-                disabled={creating}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreateClient}
-                disabled={creating}
-                className="glass-button neon-glow px-4 py-2 text-sm font-medium rounded-md disabled:opacity-50"
-              >
-                {creating ? 'Creating...' : 'Create Client'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ClientCreateModal
+          onClose={() => setIsCreateModalOpen(false)}
+          onClientCreated={handleClientCreated}
+          onImportComplete={handleImportComplete}
+        />
       )}
 
       {emailComposerOpen && emailRecipients.length > 0 && (

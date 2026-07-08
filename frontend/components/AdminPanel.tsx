@@ -225,7 +225,6 @@ export default function AdminPanel() {
         { tab_name: 'content_studio', enabled: true },
         { tab_name: 'call_library', enabled: true },
         { tab_name: 'integrations', enabled: true },
-        { tab_name: 'users', enabled: true },
       ]);
     } finally {
       setLoadingTabPermissions(false);
