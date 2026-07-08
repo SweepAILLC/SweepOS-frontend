@@ -768,9 +768,8 @@ export default function CallLibraryPanel() {
                       ) : null}
 
                       {/* Discovery Audit */}
-                      {selectedItem.report.discovery_audit &&
-                        typeof selectedItem.report.discovery_audit === 'object' &&
-                        (() => {
+                      {typeof selectedItem.report.discovery_audit === 'object' && selectedItem.report.discovery_audit !== null
+                        ? (() => {
                           const da = selectedItem.report.discovery_audit as Record<string, unknown>;
                           const ds = typeof da.discovery_score === 'number' ? da.discovery_score : null;
                           if (ds === null && !da.discovery_summary) return null;
@@ -833,7 +832,7 @@ export default function CallLibraryPanel() {
                                         <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
                                       ) : null}
                                       {dim.quote ? (
-                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-indigo-400/40 pl-2">"{String(dim.quote)}"</p>
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-indigo-400/40 pl-2">{`"${String(dim.quote)}"`}</p>
                                       ) : null}
                                     </div>
                                   );
@@ -848,12 +847,12 @@ export default function CallLibraryPanel() {
                               ) : null}
                             </section>
                           );
-                        })()}
+                        })()
+                        : null}
 
                       {/* Pitching Audit */}
-                      {selectedItem.report.pitching_audit &&
-                        typeof selectedItem.report.pitching_audit === 'object' &&
-                        (() => {
+                      {typeof selectedItem.report.pitching_audit === 'object' && selectedItem.report.pitching_audit !== null
+                        ? (() => {
                           const pa = selectedItem.report.pitching_audit as Record<string, unknown>;
                           const ps = typeof pa.pitch_score === 'number' ? pa.pitch_score : null;
                           if (ps === null && !pa.pitch_summary) return null;
@@ -905,7 +904,7 @@ export default function CallLibraryPanel() {
                                         <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
                                       ) : null}
                                       {dim.quote ? (
-                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-blue-400/40 pl-2">"{String(dim.quote)}"</p>
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-blue-400/40 pl-2">{`"${String(dim.quote)}"`}</p>
                                       ) : null}
                                     </div>
                                   );
@@ -919,12 +918,12 @@ export default function CallLibraryPanel() {
                               ) : null}
                             </section>
                           );
-                        })()}
+                        })()
+                        : null}
 
                       {/* Objection Handling Audit */}
-                      {selectedItem.report.objection_handling_audit &&
-                        typeof selectedItem.report.objection_handling_audit === 'object' &&
-                        (() => {
+                      {typeof selectedItem.report.objection_handling_audit === 'object' && selectedItem.report.objection_handling_audit !== null
+                        ? (() => {
                           const oa = selectedItem.report.objection_handling_audit as Record<string, unknown>;
                           const os = typeof oa.objection_score === 'number' ? oa.objection_score : null;
                           if (os === null && !oa.objection_summary && !Array.isArray(oa.objections)) return null;
@@ -1006,7 +1005,7 @@ export default function CallLibraryPanel() {
                                           </div>
                                         </div>
                                         {obj.surface_quote ? (
-                                          <p className="text-[11px] italic text-gray-500">"{String(obj.surface_quote)}"</p>
+                                          <p className="text-[11px] italic text-gray-500">{`"${String(obj.surface_quote)}"`}</p>
                                         ) : null}
                                         {Array.isArray(obj.steps_hit) && (obj.steps_hit as string[]).length > 0 && (
                                           <div className="flex flex-wrap gap-1">
@@ -1038,7 +1037,8 @@ export default function CallLibraryPanel() {
                               ) : null}
                             </section>
                           );
-                        })()}
+                        })()
+                        : null}
 
                       <section>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400 mb-2">

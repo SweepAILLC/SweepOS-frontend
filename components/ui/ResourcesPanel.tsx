@@ -652,8 +652,13 @@ function OrgLibraryItemModal({
   const handlePickImage = async (file: File | null) => {
     if (!file) return;
     const mime = file.type || 'image/png';
-    const buf = await file.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1]! : '';
     setDraft((d) => ({ ...d, content_b64: b64, content_mime: mime }));
   };
 
@@ -1089,7 +1094,7 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
   const filteredLibraryItems = useMemo(() => {
     const searchLower = search.toLowerCase().trim();
     return libraryItems.filter((it) => {
-      const tags = Array.isArray(it.tags) ? it.tags.map(String) : [];
+      const tags: string[] = Array.isArray(it.tags) ? it.tags.map(String) : [];
       const matchesTag = libraryTagFilter === 'All' || tags.includes(libraryTagFilter);
       const matchesSearch =
         !searchLower ||
