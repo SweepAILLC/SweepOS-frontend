@@ -67,6 +67,7 @@ export function canAccessTab(
 ): boolean {
   const roleLower = String(ctx.userRole || 'member').toLowerCase().trim();
   if (tab === 'owner') return ctx.isOwner;
+  if (tab === 'resources') return true;
   if (
     roleLower === 'member' &&
     (tab === 'integrations' || tab === 'intelligence' || tab === 'automations')

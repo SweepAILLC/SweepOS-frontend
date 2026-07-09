@@ -417,7 +417,7 @@ export default function Dashboard() {
 
         {activeTab === 'resources' && (
           hasTabAccess('resources') ? (
-            <ResourcesPanel isOwner={isOwner} />
+            <ResourcesPanel />
           ) : (
             <RestrictedTabView tabName="resources" />
           )
