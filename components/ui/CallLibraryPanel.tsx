@@ -189,24 +189,9 @@ export default function CallLibraryPanel() {
     setRefreshNote(null);
     setRefreshError(null);
     try {
-      // Refresh should *sync* from Fathom first, then reload the library.
-      // The backend only ingests meetings associated to client emails for this org.
+      // Refresh syncs new Fathom metadata only — it does not mass-re-run LLM analysis.
       const beforeIds = new Set(itemIdSet);
       const syncRes = await apiClient.syncFathomMeetings();
-      let llmRetried = 0;
-      let stuckRetried = 0;
-      try {
-        const r = await apiClient.retryCallLibraryLlmFailed();
-        llmRetried = Number(r?.requeued ?? 0);
-      } catch (e) {
-        console.warn('[CallLibrary] retry LLM failed reports:', e);
-      }
-      try {
-        const r = await apiClient.retryCallLibraryStuckPending();
-        stuckRetried = Number(r?.requeued ?? 0);
-      } catch (e) {
-        console.warn('[CallLibrary] retry stuck pending reports:', e);
-      }
       await load();
 
       // User-facing result summary.
@@ -222,11 +207,6 @@ export default function CallLibraryPanel() {
       const seen = Number((syncRes as { meetings_seen?: number }).meetings_seen ?? 0);
       const skippedNoClient = Number((syncRes as { skipped_no_client_match?: number }).skipped_no_client_match ?? 0);
 
-      const llmNote =
-        llmRetried > 0 || stuckRetried > 0
-          ? ` Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
-          : '';
-
       if (!ingested) {
         const parts: string[] = [];
         if (seen > 0 && skippedNoClient > 0) {
@@ -236,29 +216,23 @@ export default function CallLibraryPanel() {
         } else {
           parts.push('No new calls available.');
         }
-        if (llmRetried > 0 || stuckRetried > 0) {
-          parts.push(
-            `Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
-          );
-        }
         setRefreshNote(parts.join(' '));
-        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : null);
+        setPostSyncPollUntilMs(null);
         return;
       }
 
-      // New Fathom rows ingested — background report generation; optionally LLM retries too.
+      // New Fathom rows ingested — background report generation runs on the worker.
       const afterIds = new Set((data?.items ?? []).map((i) => i.id));
       const newAppeared = Array.from(afterIds).some((id) => !beforeIds.has(id));
-      let note = '';
       if (newAppeared) {
-        note = `Found ${ingested} new call${ingested === 1 ? '' : 's'}.`;
-        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : Date.now() + 45_000);
+        setRefreshNote(`Found ${ingested} new call${ingested === 1 ? '' : 's'}.`);
+        setPostSyncPollUntilMs(Date.now() + 45_000);
       } else {
-        note = `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`;
-        setPostSyncPollUntilMs(Date.now() + (llmRetried + stuckRetried > 0 ? 90_000 : 45_000));
+        setRefreshNote(
+          `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`
+        );
+        setPostSyncPollUntilMs(Date.now() + 45_000);
       }
-      note += llmNote;
-      setRefreshNote(note.trim());
     } catch (e: unknown) {
       setRefreshError(
         formatApiError(e, 'Could not refresh Call Library. Check your connection, confirm Fathom is connected, and try again.')
