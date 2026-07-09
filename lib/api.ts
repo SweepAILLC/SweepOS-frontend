@@ -2420,6 +2420,12 @@ class ApiClient {
     return response.data as { ok: boolean; id: string };
   }
 
+  /** Permanently delete a single call report. */
+  async deleteCallLibraryReport(reportId: string): Promise<{ ok: boolean; id: string }> {
+    const response = await this.client.delete(`/call-library/${reportId}`);
+    return response.data as { ok: boolean; id: string };
+  }
+
   /** Re-run LLM report for rows with failure_reason llm_failed (Refresh button also calls this). */
   async retryCallLibraryLlmFailed(): Promise<{ requeued: number }> {
     const response = await this.client.post('/call-library/retry-llm-failed', null, {

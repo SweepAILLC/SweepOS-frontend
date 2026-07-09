@@ -137,6 +137,7 @@ export default function CallLibraryPanel() {
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
   const itemsSorted = (data?.items ?? []).slice().sort((a, b) => {
@@ -189,17 +190,26 @@ export default function CallLibraryPanel() {
     setRefreshNote(null);
     setRefreshError(null);
     try {
-      // Refresh syncs new Fathom metadata only — it does not mass-re-run LLM analysis.
+      // Refresh syncs new Fathom metadata, then re-queues a bounded batch of
+      // failed / genuinely-stuck reports so recovery visibly progresses.
       const beforeIds = new Set(itemIdSet);
       const syncRes = await apiClient.syncFathomMeetings();
+      let requeued = 0;
+      try {
+        const r = await apiClient.retryCallLibraryStuckPending();
+        requeued = Number(r?.requeued ?? 0);
+      } catch (e) {
+        console.warn('[CallLibrary] retry stuck/failed:', e);
+      }
       await load();
 
       // User-facing result summary.
       const skipped = Boolean((syncRes as { skipped?: boolean }).skipped);
       if (skipped) {
         const reason = String((syncRes as { reason?: string }).reason || 'Sync skipped');
-        setRefreshNote(`Sync skipped: ${reason}`);
-        setPostSyncPollUntilMs(null);
+        const note = requeued > 0 ? ` Re-queued ${requeued} for analysis.` : '';
+        setRefreshNote(`Sync skipped: ${reason}.${note}`);
+        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
         return;
       }
 
@@ -216,8 +226,9 @@ export default function CallLibraryPanel() {
         } else {
           parts.push('No new calls available.');
         }
+        if (requeued > 0) parts.push(`Re-queued ${requeued} for analysis.`);
         setRefreshNote(parts.join(' '));
-        setPostSyncPollUntilMs(null);
+        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
         return;
       }
 
@@ -295,6 +306,26 @@ export default function CallLibraryPanel() {
       setRenameError(formatApiError(e, 'Could not save this name.'));
     } finally {
       setRenameSaving(false);
+    }
+  };
+
+  const deleteReport = async () => {
+    if (!selectedItem) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(`Delete "${selectedItem.call_title}"? This removes the analysis. The Fathom recording is kept.`)
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await apiClient.deleteCallLibraryReport(selectedItem.id);
+      setSelectedId(null);
+      await load();
+    } catch (e: unknown) {
+      setRefreshError(formatApiError(e, 'Could not delete this call report.'));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -651,6 +682,23 @@ export default function CallLibraryPanel() {
                           {Math.round(selectedItem.call_score)}
                         </span>
                       ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void deleteReport()}
+                        disabled={deleting}
+                        className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                        title="Delete this call report"
+                        aria-label="Delete this call report"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
 
