@@ -113,6 +113,9 @@ function callLibraryStatusMessage(
   if (failureReason === 'llm_failed') {
     return 'Analysis failed. Use Refresh to retry.';
   }
+  if (failureReason === 'llm_empty') {
+    return 'Analysis returned empty results. Use Refresh to retry.';
+  }
   if (failureReason === 'budget_deferred') {
     return 'Analysis is queued — waiting for the LLM rate limit window.';
   }
