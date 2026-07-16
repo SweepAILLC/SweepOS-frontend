@@ -27,6 +27,8 @@ export default function InviteAcceptPage() {
       setLoading(false);
       return;
     }
+    const gerr = typeof router.query.google_error === 'string' ? router.query.google_error : '';
+    if (gerr) setError(gerr);
     let cancelled = false;
     (async () => {
       try {
@@ -49,7 +51,7 @@ export default function InviteAcceptPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [token]);
+  }, [token, router.query.google_error]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -123,6 +125,29 @@ export default function InviteAcceptPage() {
               {error}
             </div>
           )}
+
+          <button
+            type="button"
+            disabled={submitting || !token || typeof token !== 'string'}
+            onClick={() => {
+              if (!token || typeof token !== 'string') return;
+              const base = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+              window.location.href = `${base}/auth/google/start?mode=invite&invite_token=${encodeURIComponent(token)}&redirect=1`;
+            }}
+            className="w-full flex justify-center items-center gap-2 py-2.5 px-4 text-sm font-medium rounded-md glass-button neon-glow disabled:opacity-50"
+          >
+            Continue with Google
+          </button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-gray-300 dark:border-gray-600" />
+            </div>
+            <div className="relative flex justify-center text-sm">
+              <span className="px-2 text-gray-500 dark:text-gray-400">or set a password</span>
+            </div>
+          </div>
+
           <div>
             <label htmlFor="password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Password
@@ -145,7 +170,7 @@ export default function InviteAcceptPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md glass-button neon-glow disabled:opacity-50"
+              className="w-full flex justify-center py-2 px-4 text-sm font-medium rounded-md border border-gray-300 dark:border-gray-600 glass-card disabled:opacity-50"
             >
               {submitting ? 'Accepting…' : 'Accept & continue'}
             </button>

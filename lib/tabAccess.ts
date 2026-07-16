@@ -99,7 +99,7 @@ export function canAccessTab(
   return ctx.tabPermissions[tab] !== false;
 }
 
-/** Priorities block inside Terminal uses legacy `performance` permission key. */
-export function canAccessTerminalPriorities(tabPermissions: Record<string, boolean>): boolean {
-  return tabPermissions.performance !== false;
+/** @deprecated Priorities panel removed. Kept for API compatibility. */
+export function canAccessTerminalPriorities(_tabPermissions: Record<string, boolean>): boolean {
+  return false;
 }

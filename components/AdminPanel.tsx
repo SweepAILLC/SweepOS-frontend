@@ -12,7 +12,6 @@ import { useLoading } from '@/contexts/LoadingContext';
 import {
   ResponsiveContainer,
   ComposedChart,
-  LineChart,
   Line,
   Bar,
   XAxis,
@@ -21,7 +20,11 @@ import {
   Tooltip,
   Legend,
 } from 'recharts';
-import { ShowUpVsCloseRateChart, ClientLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
+import {
+  ShowUpVsCloseRateChart,
+  CashAndLtvTrendChart,
+} from '@/components/owner/OwnerHealthTrendCharts';
+import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 
 /** Human-readable tab name for org tab permissions (internal keys stay snake_case). */
@@ -71,11 +74,6 @@ export default function AdminPanel() {
     [health?.health_trend_periods]
   );
 
-  const orgFinancesTrendData = useMemo(
-    () => healthTrendPeriodsWithFinancesCash(dashboardData?.monthly_health_since_onboarding ?? []),
-    [dashboardData?.monthly_health_since_onboarding]
-  );
-
   useEffect(() => {
     loadData();
   }, [activeTab]);
@@ -98,14 +96,18 @@ export default function AdminPanel() {
         setPendingInvitations(Array.isArray(invsData) ? invsData : []);
       } else if (activeTab === 'health') {
         setPlatformCalendarCloseRollup(null);
-        const [data, rollup] = await Promise.all([
+        const [data, rollup, orgsData] = await Promise.all([
           apiClient.getGlobalHealth({
             refresh: opts?.refreshHealth,
           }) as Promise<GlobalHealth>,
           apiClient.getPlatformCalendarSalesCloseRate().catch(() => null),
+          apiClient.getOrganizations().catch(() => [] as Organization[]),
         ]);
         setHealth(data);
         setPlatformCalendarCloseRollup(rollup);
+        if (Array.isArray(orgsData) && orgsData.length) {
+          setOrganizations(orgsData);
+        }
       } else if (activeTab === 'settings') {
         const data = await apiClient.getGlobalSettings();
         setSettings(data);
@@ -686,78 +688,92 @@ export default function AdminPanel() {
                 </div>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
-                <ClientLtvTrendChart data={health.health_trend_periods ?? []} />
+                <CashAndLtvTrendChart data={health.health_trend_periods ?? []} />
               </div>
-              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
-                  Combined cash trend (Finances, post-onboarding)
-                </p>
-                <div className="h-56 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={healthFinancesTrendData}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
-                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                      <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                        labelStyle={{ color: '#e5e7eb' }}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="finances_cash_usd"
-                        name="Combined ($)"
-                        stroke="#f59e0b"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                    </LineChart>
-                  </ResponsiveContainer>
+            </div>
+          </section>
+
+          {/* LLM API usage */}
+          <section>
+            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
+              LLM API usage (last 30 days)
+            </h3>
+            {health.llm_usage_last_30d ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Calls</p>
+                    <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                      {health.llm_usage_last_30d.calls.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Total tokens</p>
+                    <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                      {health.llm_usage_last_30d.total_tokens.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Prompt / completion</p>
+                    <p className="text-lg font-semibold tabular-nums text-gray-900 dark:text-gray-100">
+                      {health.llm_usage_last_30d.prompt_tokens.toLocaleString()}
+                      <span className="text-gray-400 font-normal"> / </span>
+                      {health.llm_usage_last_30d.completion_tokens.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="glass-card p-4 rounded-lg border border-amber-200/80 dark:border-amber-500/25">
+                    <p className="text-xs text-amber-800 dark:text-amber-200">Est. cost (USD)</p>
+                    <p className="text-2xl font-bold tabular-nums text-amber-900 dark:text-amber-100">
+                      ${health.llm_usage_last_30d.estimated_cost_usd.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  </div>
                 </div>
+                {(health.llm_usage_last_30d.by_org?.length ?? 0) > 0 && (
+                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+                      Top orgs by estimated cost
+                    </p>
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+                          <th className="py-2 pr-4 font-medium">Organization</th>
+                          <th className="py-2 pr-4 font-medium">Calls</th>
+                          <th className="py-2 pr-4 font-medium">Tokens</th>
+                          <th className="py-2 font-medium">Est. cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {health.llm_usage_last_30d.by_org.slice(0, 10).map((row) => (
+                          <tr
+                            key={row.org_id}
+                            className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
+                          >
+                            <td className="py-2 pr-4">{row.organization_name}</td>
+                            <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
+                            <td className="py-2 pr-4 tabular-nums">{row.total_tokens.toLocaleString()}</td>
+                            <td className="py-2 tabular-nums">
+                              ${row.estimated_cost_usd.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 xl:col-span-2">
-                <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">Client roster (cumulative vs active cohort)</p>
-                <div className="h-72 w-full min-w-0">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={health.health_trend_periods ?? []}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
-                      <XAxis dataKey="period_label" tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                      <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                          border: '1px solid rgba(255,255,255,0.1)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                        labelStyle={{ color: '#e5e7eb' }}
-                      />
-                      <Legend />
-                      <Line
-                        type="monotone"
-                        dataKey="cumulative_total_clients"
-                        name="Total client records (≤ period end)"
-                        stroke="#94a3b8"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                      <Line
-                        type="monotone"
-                        dataKey="active_clients_cohort"
-                        name="Active today, created before period end"
-                        stroke="#a855f7"
-                        strokeWidth={2}
-                        dot={{ r: 3 }}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            ) : (
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                No LLM usage recorded yet for this window.
+              </p>
+            )}
+            <div className="mt-6">
+              <ApiCostsTrendChart organizations={organizations} />
             </div>
           </section>
 
@@ -1074,6 +1090,82 @@ export default function AdminPanel() {
                 </div>
               </div>
 
+              {dashboardData.llm_usage_last_30d && (
+                <div className="bg-white dark:glass-card p-6 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm space-y-4">
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                      LLM API usage (last 30 days)
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                      Token usage and estimated cost for this organization.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-3">
+                      <p className="text-xs text-gray-500">Calls</p>
+                      <p className="text-xl font-bold tabular-nums">
+                        {dashboardData.llm_usage_last_30d.calls.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-3">
+                      <p className="text-xs text-gray-500">Tokens</p>
+                      <p className="text-xl font-bold tabular-nums">
+                        {dashboardData.llm_usage_last_30d.total_tokens.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-gray-200 dark:border-white/10 p-3">
+                      <p className="text-xs text-gray-500">Prompt / out</p>
+                      <p className="text-sm font-semibold tabular-nums">
+                        {dashboardData.llm_usage_last_30d.prompt_tokens.toLocaleString()} /{' '}
+                        {dashboardData.llm_usage_last_30d.completion_tokens.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="rounded-lg border border-amber-200/80 dark:border-amber-500/25 p-3">
+                      <p className="text-xs text-amber-800 dark:text-amber-200">Est. cost</p>
+                      <p className="text-xl font-bold tabular-nums text-amber-900 dark:text-amber-100">
+                        $
+                        {dashboardData.llm_usage_last_30d.estimated_cost_usd.toLocaleString(undefined, {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  {(dashboardData.llm_usage_last_30d.by_feature?.length ?? 0) > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-500 border-b border-gray-200 dark:border-white/10">
+                            <th className="py-2 pr-4 font-medium">Feature</th>
+                            <th className="py-2 pr-4 font-medium">Calls</th>
+                            <th className="py-2 pr-4 font-medium">Tokens</th>
+                            <th className="py-2 font-medium">Est. cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dashboardData.llm_usage_last_30d.by_feature.map((row) => (
+                            <tr
+                              key={row.feature}
+                              className="border-b border-gray-100 dark:border-white/5"
+                            >
+                              <td className="py-2 pr-4 font-mono text-xs">{row.feature}</td>
+                              <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
+                              <td className="py-2 pr-4 tabular-nums">{row.total_tokens.toLocaleString()}</td>
+                              <td className="py-2 tabular-nums">
+                                ${row.estimated_cost_usd.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {(dashboardData.monthly_health_since_onboarding?.length ?? 0) > 0 && (
                 <div className="bg-white dark:glass-card p-6 rounded-lg border border-gray-200 dark:border-white/10 shadow-sm space-y-6">
                   <div>
@@ -1127,48 +1219,11 @@ export default function AdminPanel() {
                       />
                     </div>
                     <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4">
-                      <ClientLtvTrendChart
+                      <CashAndLtvTrendChart
                         data={dashboardData.monthly_health_since_onboarding ?? []}
                         xAxisMode="tilted"
+                        heightPx={256}
                       />
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border border-gray-200 dark:border-white/10 p-4 max-w-4xl">
-                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-4">
-                      Combined cash by month (since onboarding)
-                    </p>
-                    <div className="h-64 w-full min-w-0">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ComposedChart data={orgFinancesTrendData}>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
-                          <XAxis
-                            dataKey="period_label"
-                            tick={{ fontSize: 10 }}
-                            angle={-35}
-                            textAnchor="end"
-                            height={52}
-                            className="fill-gray-600 dark:fill-gray-400"
-                          />
-                          <YAxis tick={{ fontSize: 11 }} className="fill-gray-600 dark:fill-gray-400" />
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: 'rgba(17, 24, 39, 0.95)',
-                              border: '1px solid rgba(255,255,255,0.1)',
-                              borderRadius: 8,
-                              fontSize: 12,
-                            }}
-                            labelStyle={{ color: '#e5e7eb' }}
-                          />
-                          <Legend />
-                          <Bar
-                            dataKey="finances_cash_usd"
-                            name="Combined ($)"
-                            fill="#f59e0b"
-                            radius={[4, 4, 0, 0]}
-                          />
-                        </ComposedChart>
-                      </ResponsiveContainer>
                     </div>
                   </div>
                 </div>

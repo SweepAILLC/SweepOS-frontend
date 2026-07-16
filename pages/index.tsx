@@ -209,7 +209,24 @@ export default function Dashboard() {
     // Handle query parameters after router is ready
     if (!router.isReady) return;
 
-    const { tab, stripe_connected, stripe_error, error_description, brevo_connected, brevo_error } = router.query;
+    const { tab, stripe_connected, stripe_error, error_description, brevo_connected, brevo_error, google, google_error } = router.query;
+
+    // Google account connect return → Settings > Profile (keep query for SettingsPanel toast)
+    if (google === 'connected' || (typeof google_error === 'string' && google_error)) {
+      setActiveTab('settings');
+      if (google === 'connected') {
+        setNotification({ type: 'success', message: 'Google account connected successfully.' });
+        setTimeout(() => setNotification(null), 5000);
+      } else if (typeof google_error === 'string') {
+        const msg =
+          (typeof router.query.message === 'string' && router.query.message) ||
+          google_error.replace(/_/g, ' ');
+        setNotification({ type: 'error', message: msg });
+        setTimeout(() => setNotification(null), 7000);
+      }
+      // Do not strip query here — SettingsPanel reads section/google and cleans up
+      return;
+    }
     
     // Handle OAuth callback parameters first (they may also set the tab)
     if (stripe_connected === 'true') {
@@ -279,6 +296,8 @@ export default function Dashboard() {
         const rawFid = router.query.funnelId;
         if (tabValue === 'funnels' && rawFid && typeof rawFid === 'string') {
           router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: rawFid } }, undefined, { shallow: true });
+        } else if (tabValue === 'settings' && (router.query.section || router.query.google || router.query.google_error)) {
+          // Keep settings deep-link query for SettingsPanel
         } else {
           router.replace('/', undefined, { shallow: true });
         }

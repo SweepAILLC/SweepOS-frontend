@@ -47,6 +47,12 @@ export default function SettingsPanel() {
     analytics_enabled: true,
     org_name: '',
   });
+  const [googleConnected, setGoogleConnected] = useState(false);
+  const [googleEmail, setGoogleEmail] = useState<string | null>(null);
+  const [googleOAuthAvailable, setGoogleOAuthAvailable] = useState(false);
+  const [hasPassword, setHasPassword] = useState(true);
+  const [googleBusy, setGoogleBusy] = useState(false);
+
   const loadSettings = async () => {
     try {
       setLoading(true);
@@ -64,23 +70,26 @@ export default function SettingsPanel() {
         analytics_enabled: settings.analytics_enabled ?? true,
         org_name: '',
       });
+      setGoogleConnected(!!settings.google_connected);
+      setGoogleEmail(settings.google_email || null);
+      setGoogleOAuthAvailable(!!settings.google_oauth_available);
+      setHasPassword(settings.has_password !== false);
       const orgId = user?.org_id != null ? String(user.org_id) : null;
       setCurrentOrgId(orgId);
       setCurrentUserRole(user?.role || 'member');
       const orgEmail = user?.email || settings.email;
       if (orgEmail) {
         const orgs = await apiClient.getUserOrganizations(orgEmail);
-        setOrganizations(
-          Array.isArray(orgs)
-            ? orgs.map((o: any) => ({
-                id: String(o.id),
-                name: o.name || 'Unnamed',
-                is_primary: !!o.is_primary,
-              }))
-            : []
-        );
+        const orgList = Array.isArray(orgs)
+          ? orgs.map((o: any) => ({
+              id: String(o.id),
+              name: o.name || 'Unnamed',
+              is_primary: !!o.is_primary,
+            }))
+          : [];
+        setOrganizations(orgList);
         if (orgId) {
-          const currentOrg = (orgs || []).find((o: any) => String(o.id) === String(orgId));
+          const currentOrg = orgList.find((o) => o.id === String(orgId));
           if (currentOrg) {
             setFormData((prev) => ({
               ...prev,
@@ -100,6 +109,65 @@ export default function SettingsPanel() {
   useEffect(() => {
     loadSettings();
   }, []);
+
+  // Handle return from Google connect (/?tab=settings&section=profile&google=connected)
+  useEffect(() => {
+    if (!router.isReady) return;
+    const tab = router.query.tab;
+    const sectionQ = router.query.section;
+    const google = router.query.google;
+    const googleError = router.query.google_error;
+    const message = typeof router.query.message === 'string' ? router.query.message : '';
+
+    if (tab === 'settings' || sectionQ === 'profile' || google || googleError) {
+      if (sectionQ === 'profile' || google || googleError) {
+        setSection('profile');
+      }
+    }
+    if (google === 'connected') {
+      setSuccess('Google account connected. You can sign in with Google next time.');
+      setGoogleConnected(true);
+      loadSettings();
+      // Clean query params without full reload
+      router.replace({ pathname: router.pathname, query: {} }, undefined, { shallow: true });
+    } else if (typeof googleError === 'string' && googleError) {
+      setError(message || googleError.replace(/_/g, ' '));
+      router.replace({ pathname: router.pathname, query: {} }, undefined, { shallow: true });
+    }
+  }, [router.isReady, router.query.tab, router.query.section, router.query.google, router.query.google_error]);
+
+  const handleConnectGoogle = async () => {
+    try {
+      setGoogleBusy(true);
+      setError(null);
+      const { authorization_url } = await apiClient.startGoogleConnect();
+      if (!authorization_url) {
+        throw new Error('Google connect is not available');
+      }
+      window.location.href = authorization_url;
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : err.message || 'Failed to start Google connect');
+      setGoogleBusy(false);
+    }
+  };
+
+  const handleDisconnectGoogle = async () => {
+    try {
+      setGoogleBusy(true);
+      setError(null);
+      await apiClient.disconnectGoogle();
+      setGoogleConnected(false);
+      setGoogleEmail(null);
+      setSuccess('Google account disconnected.');
+      await loadSettings();
+    } catch (err: any) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : err.message || 'Failed to disconnect Google');
+    } finally {
+      setGoogleBusy(false);
+    }
+  };
 
   const handleLogout = () => {
     clearSessionCaches();
@@ -381,9 +449,63 @@ export default function SettingsPanel() {
                   required
                 />
               </div>
+
+              <div className="max-w-md rounded-lg border border-gray-200 dark:border-white/10 p-4 space-y-3">
+                  <div>
+                    <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100">Google account</h3>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                      Connect the Google account that uses the same email as SweepOS. Existing password login keeps working.
+                    </p>
+                  </div>
+                  {!googleOAuthAvailable ? (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Google sign-in is not configured on this server. Set{' '}
+                      <code className="text-[11px]">GOOGLE_OAUTH_CLIENT_ID</code> /{' '}
+                      <code className="text-[11px]">GOOGLE_CLIENT_ID</code>, secret, and{' '}
+                      <code className="text-[11px]">GOOGLE_OAUTH_REDIRECT_URI</code> (local:{' '}
+                      <code className="text-[11px]">http://localhost:8000/auth/google/callback</code>), then restart the backend.
+                    </p>
+                  ) : googleConnected ? (
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        Connected{googleEmail ? ` as ${googleEmail}` : ''}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={googleBusy || !hasPassword}
+                        onClick={handleDisconnectGoogle}
+                        title={!hasPassword ? 'Set a password before disconnecting Google' : undefined}
+                        className="px-3 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50"
+                      >
+                        {googleBusy ? 'Working…' : 'Disconnect'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={googleBusy}
+                      onClick={handleConnectGoogle}
+                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md border border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50"
+                    >
+                      <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+                        <path fill="#EA4335" d="M12 10.2v3.6h5.1c-.2 1.2-1.5 3.6-5.1 3.6-3.1 0-5.6-2.5-5.6-5.6S8.9 6.2 12 6.2c1.8 0 3 .7 3.7 1.4l2.5-2.4C16.7 3.7 14.6 2.8 12 2.8 6.9 2.8 2.8 6.9 2.8 12S6.9 21.2 12 21.2c5.2 0 8.6-3.6 8.6-8.7 0-.6-.1-1-.2-1.5H12z"/>
+                      </svg>
+                      {googleBusy ? 'Redirecting…' : 'Connect Google'}
+                    </button>
+                  )}
+                  {googleConnected && !hasPassword && (
+                    <p className="text-xs text-amber-700 dark:text-amber-300">
+                      Set a password below before disconnecting Google so you can still sign in.
+                    </p>
+                  )}
+                </div>
+
               <div>
-                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">Change Password</h3>
+                <h3 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
+                  {hasPassword ? 'Change Password' : 'Set a Password'}
+                </h3>
                 <div className="space-y-3 max-w-md">
+                  {hasPassword && (
                   <div>
                     <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Current Password</label>
                     <input
@@ -394,14 +516,17 @@ export default function SettingsPanel() {
                       placeholder="Leave blank to keep current password"
                     />
                   </div>
+                  )}
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">New Password</label>
+                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                      {hasPassword ? 'New Password' : 'Password'}
+                    </label>
                     <input
                       type="password"
                       value={formData.new_password}
                       onChange={(e) => setFormData({ ...formData, new_password: e.target.value })}
                       className="w-full px-3 py-2 glass-input rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                      placeholder="Leave blank to keep current password"
+                      placeholder={hasPassword ? 'Leave blank to keep current password' : 'Set a password for email login'}
                       minLength={8}
                     />
                   </div>

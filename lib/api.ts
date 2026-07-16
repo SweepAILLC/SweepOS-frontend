@@ -417,6 +417,7 @@ export function isSweepSessionAuthFailure(error: AxiosError): boolean {
 // ----- Automation engine types ------------------------------------------------
 export type AutomationPlaybook =
   | 'pre_sale_post_booking'
+  | 'pre_sale_pre_meeting'
   | 'first_payment_onboarding'
   | 'first_payment_referral'
   | 'win_combined_ask'
@@ -736,6 +737,24 @@ class ApiClient {
     ai_profile?: Record<string, unknown>;
   }) {
     const response = await this.client.put('/auth/me/settings', data);
+    return response.data;
+  }
+
+  /** Begin Google OAuth connect (authenticated). Returns authorization_url to navigate to. */
+  async startGoogleConnect(): Promise<{ authorization_url: string; mode: string }> {
+    const response = await this.client.get('/auth/google/start', {
+      params: { mode: 'connect' },
+    });
+    return response.data;
+  }
+
+  async disconnectGoogle(): Promise<{ ok: boolean; google_connected: boolean }> {
+    const response = await this.client.post('/auth/google/disconnect');
+    return response.data;
+  }
+
+  async getGoogleOAuthStatus(): Promise<{ configured: boolean }> {
+    const response = await this.client.get('/auth/google/status');
     return response.data;
   }
 
@@ -2172,6 +2191,21 @@ class ApiClient {
     const data = response.data;
     cache.set(CACHE_KEYS.ADMIN_HEALTH, data, TERMINAL_CACHE_TTL_MS);
     return data;
+  }
+
+  async getLlmUsageTimeseries(params?: {
+    days?: number;
+    scope?: 'mtd' | 'all';
+    org_id?: string;
+  }) {
+    const response = await this.client.get('/admin/llm-usage/timeseries', {
+      params: {
+        ...(params?.days != null ? { days: params.days } : {}),
+        ...(params?.scope ? { scope: params.scope } : {}),
+        ...(params?.org_id ? { org_id: params.org_id } : {}),
+      },
+    });
+    return response.data;
   }
 
   async getGlobalSettings() {

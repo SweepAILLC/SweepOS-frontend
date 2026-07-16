@@ -104,12 +104,9 @@ interface AIProfile {
   asset_links?: AssetLink[];
   offer_ladder?: OfferLadder;
   writing_samples?: WritingSample[];
-  email_html_template_enabled?: boolean;
-  email_html_template?: string;
 }
 
 type SectionId =
-  | 'priorities'
   | 'voice'
   | 'samples'
   | 'business'
@@ -121,7 +118,6 @@ type SectionId =
 const MAX_WRITING_SAMPLES = 12;
 
 const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
-  { id: 'priorities', title: 'Pipeline Priorities', subtitle: 'What matters most right now?' },
   { id: 'voice', title: 'Voice & Coaching', subtitle: 'How emails and copy should sound on your behalf' },
   {
     id: 'samples',
@@ -161,17 +157,6 @@ const COACHING_STYLE_OPTIONS = [
   'Systems & process-oriented',
 ];
 
-const PIPELINE_PRIORITY_OPTIONS = [
-  { id: 'testimonials', label: 'Testimonials & social proof', description: 'Surface asks for quotes, reviews, and case studies' },
-  { id: 'revenue', label: 'Revenue growth', description: 'Upsells, cross-sells, and pricing conversations' },
-  { id: 'retention', label: 'Retention & engagement', description: 'Keep active clients progressing and satisfied' },
-  { id: 'conversion', label: 'Lead conversion', description: 'Move cold/warm leads toward a booked call or sale' },
-  { id: 'referrals', label: 'Referrals', description: 'Generate word-of-mouth and warm introductions' },
-  { id: 'win_back', label: 'Win-back & re-engagement', description: 'Revive dead leads and lapsed clients' },
-  { id: 'onboarding', label: 'Smooth onboarding', description: 'Get new clients set up and feeling supported' },
-  { id: 'content', label: 'Content & thought leadership', description: 'Gather stories and angles for your marketing' },
-];
-
 const SALES_FRAMEWORK_OPTIONS = [
   'Consultative selling',
   'SPIN selling',
@@ -192,7 +177,7 @@ export default function IntelligencePanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<SectionId>('priorities');
+  const [activeSection, setActiveSection] = useState<SectionId>('voice');
   const [profile, setProfile] = useState<AIProfile>({});
   const [dirty, setDirty] = useState(false);
   const [orgThemes, setOrgThemes] = useState<OrgSalesContentTheme[]>([]);
@@ -308,25 +293,6 @@ export default function IntelligencePanel({
     }
   };
 
-  const togglePriority = (id: string) => {
-    const current = profile.pipeline_priorities || [];
-    if (current.includes(id)) {
-      update('pipeline_priorities', current.filter((p) => p !== id));
-    } else {
-      update('pipeline_priorities', [...current, id]);
-    }
-  };
-
-  const movePriority = (id: string, dir: -1 | 1) => {
-    const current = [...(profile.pipeline_priorities || [])];
-    const idx = current.indexOf(id);
-    if (idx < 0) return;
-    const target = idx + dir;
-    if (target < 0 || target >= current.length) return;
-    [current[idx], current[target]] = [current[target], current[idx]];
-    update('pipeline_priorities', current);
-  };
-
   const addAssetLink = () => {
     const links = [...(profile.asset_links || []), { label: '', url: '' }];
     update('asset_links', links);
@@ -356,9 +322,6 @@ export default function IntelligencePanel({
     });
     update('writing_samples', list);
   };
-
-  const brandedWrapperStarter = () =>
-    (profile.email_html_template || '').trim() || DEFAULT_EMAIL_HTML_TEMPLATE;
 
   const updateWritingSample = (idx: number, patch: Partial<WritingSample>) => {
     const list = [...(profile.writing_samples || [])];
@@ -452,7 +415,6 @@ export default function IntelligencePanel({
             {SECTIONS.map((s) => {
               const filled = (() => {
                 switch (s.id) {
-                  case 'priorities': return (profile.pipeline_priorities || []).length > 0;
                   case 'voice': return !!(
                     profile.writing_style ||
                     profile.writing_tone ||
@@ -547,100 +509,6 @@ export default function IntelligencePanel({
         <div className="flex-1 min-w-0">
           <div className="glass-card p-6 space-y-6">
 
-            {/* ── Pipeline Priorities ── */}
-            {activeSection === 'priorities' && (
-              <>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Pipeline Priorities</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Select what matters most to your business right now. The AI will weight recommendations,
-                    next steps, and email suggestions toward your top priorities — in the order you rank them.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  {/* Selected priorities — ordered, reorderable */}
-                  {(profile.pipeline_priorities || []).length > 0 && (
-                    <div className="space-y-1.5 mb-4">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Your priorities (drag to reorder)</p>
-                      {(profile.pipeline_priorities || []).map((id, idx) => {
-                        const opt = PIPELINE_PRIORITY_OPTIONS.find((o) => o.id === id);
-                        if (!opt) return null;
-                        return (
-                          <div
-                            key={id}
-                            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-violet-500/30 bg-violet-500/10"
-                          >
-                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 text-violet-700 dark:text-violet-300 flex items-center justify-center text-xs font-bold">
-                              {idx + 1}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{opt.label}</span>
-                              <span className="block text-[11px] text-gray-500 dark:text-gray-400">{opt.description}</span>
-                            </div>
-                            <div className="flex flex-col gap-0.5">
-                              <button
-                                type="button"
-                                onClick={() => movePriority(id, -1)}
-                                disabled={idx === 0}
-                                className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-30 disabled:cursor-default"
-                                title="Move up"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => movePriority(id, 1)}
-                                disabled={idx === (profile.pipeline_priorities || []).length - 1}
-                                className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-30 disabled:cursor-default"
-                                title="Move down"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => togglePriority(id)}
-                              className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                              title="Remove"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Unselected options */}
-                  {PIPELINE_PRIORITY_OPTIONS.filter((o) => !(profile.pipeline_priorities || []).includes(o.id)).length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Available</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {PIPELINE_PRIORITY_OPTIONS.filter((o) => !(profile.pipeline_priorities || []).includes(o.id)).map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => togglePriority(opt.id)}
-                            className="text-left px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 transition-colors"
-                          >
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{opt.label}</span>
-                            <span className="block text-[11px] text-gray-500 dark:text-gray-400">{opt.description}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {(profile.pipeline_priorities || []).length === 0 && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                      Click any option above to add it. The order you select them determines priority rank.
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
-
             {/* ── Voice & Coaching ── */}
             {activeSection === 'voice' && (
               <>
@@ -648,7 +516,7 @@ export default function IntelligencePanel({
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Voice & Coaching</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     The single source of truth for how the AI sounds when it writes on your behalf — emails,
-                    follow-ups, nurture sequences, and Performance prescriptions. Your coaching style here also
+                    follow-ups, nurture sequences, and coaching copy. Your coaching style here also
                     shapes how the AI frames advice and how it relates to your clients.
                   </p>
                 </div>
@@ -893,7 +761,7 @@ export default function IntelligencePanel({
                             <button
                               type="button"
                               onClick={() =>
-                                updateWritingSample(idx, { html_template: brandedWrapperStarter() })
+                                updateWritingSample(idx, { html_template: DEFAULT_EMAIL_HTML_TEMPLATE })
                               }
                               className="text-xs font-medium text-violet-600 dark:text-violet-400 hover:underline"
                             >
@@ -954,43 +822,6 @@ export default function IntelligencePanel({
                       No samples yet. Click <strong>Add sample</strong>, then pick the type and format
                       inside the card. Even one strong example will sharpen drafts noticeably.
                     </p>
-                  )}
-                </div>
-
-                <div className="border-t border-gray-200 dark:border-white/10 pt-5 mt-2 space-y-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Global branded wrapper{' '}
-                      <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
-                        — optional, off by default
-                      </span>
-                    </h4>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      If you turn this on, the EmailComposer modal will wrap any plain-text draft you
-                      send (and the live preview) in this HTML so all manual outbound looks branded.
-                      Per-sample HTML templates above are independent — leaving this off does not
-                      disable them.
-                    </p>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={!!profile.email_html_template_enabled}
-                      onChange={(e) => update('email_html_template_enabled', e.target.checked)}
-                      className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                    />
-                    <span className="font-medium">Enable global branded HTML wrapper</span>
-                  </label>
-
-                  {!!profile.email_html_template_enabled && (
-                    <textarea
-                      value={(profile.email_html_template || DEFAULT_EMAIL_HTML_TEMPLATE) as string}
-                      onChange={(e) => update('email_html_template', e.target.value)}
-                      rows={10}
-                      className="w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      placeholder={DEFAULT_EMAIL_HTML_TEMPLATE}
-                    />
                   )}
                 </div>
               </>

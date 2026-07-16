@@ -13,9 +13,11 @@ import {
 import type { HealthTrendPeriod } from '@/types/admin';
 import {
   enrichPeriodsWithLtv,
+  healthTrendPeriodsWithFinancesCash,
   formatPctMoM,
   formatPpMoM,
   lastTwoDefined,
+  periodFinancesCashUsd,
 } from '@/lib/healthTrendMetrics';
 import { PREMIUM_LINE_ANIMATION } from '@/lib/premiumMotion';
 
@@ -64,6 +66,22 @@ function LtvMomSummary({ data }: { data: HealthTrendPeriod[] }) {
       )
     </p>
   );
+}
+
+function CashAndLtvMomSummary({ data }: { data: HealthTrendPeriod[] }) {
+  const cashPair = lastTwoDefined(data.map((d) => periodFinancesCashUsd(d)));
+  const enriched = useMemo(() => enrichPeriodsWithLtv(data), [data]);
+  const ltvPair = lastTwoDefined(enriched.map((d) => d.display_ltv_usd));
+  if (!cashPair && !ltvPair) return null;
+  const parts: string[] = [];
+  if (cashPair) {
+    parts.push(`Cash ${formatPctMoM(cashPair[0], cashPair[1])} vs prior month`);
+  }
+  if (ltvPair) {
+    const dir = ltvPair[1] >= ltvPair[0] ? 'growth' : 'decay';
+    parts.push(`LTV proxy ${dir}: ${formatPctMoM(ltvPair[0], ltvPair[1])} vs prior month`);
+  }
+  return <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{parts.join(' · ')}</p>;
 }
 
 type XAxisMode = 'horizontal' | 'tilted';
@@ -213,6 +231,95 @@ export function ClientLtvTrendChart({
               {...PREMIUM_LINE_ANIMATION}
             />
           </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+/** Monthly combined cash + LTV proxy on one dual-axis chart. */
+export function CashAndLtvTrendChart({
+  data,
+  heightPx = 288,
+  xAxisMode = 'horizontal',
+  title = 'Combined cash & client LTV',
+  description = 'Monthly Finances cash (left) and LTV proxy — cumulative cash ÷ roster (right). Combined Stripe + Whop when the API reports it; otherwise Stripe-only for that month.',
+  className = '',
+}: {
+  data: HealthTrendPeriod[];
+  heightPx?: number;
+  xAxisMode?: XAxisMode;
+  title?: string;
+  description?: string;
+  className?: string;
+}) {
+  const chartData = useMemo(() => {
+    const withCash = healthTrendPeriodsWithFinancesCash(data);
+    const withLtv = enrichPeriodsWithLtv(withCash);
+    return withLtv.map((row, i) => ({
+      ...row,
+      finances_cash_usd: withCash[i]!.finances_cash_usd,
+    }));
+  }, [data]);
+
+  return (
+    <div className={className}>
+      {title ? (
+        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-1">{title}</p>
+      ) : null}
+      {description ? (
+        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">{description}</p>
+      ) : null}
+      <CashAndLtvMomSummary data={data} />
+      <div className="w-full min-w-0" style={{ height: heightPx }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
+            <XAxis
+              dataKey="period_label"
+              className="fill-gray-600 dark:fill-gray-400"
+              {...xAxisProps(xAxisMode)}
+            />
+            <YAxis
+              yAxisId="cash"
+              tick={{ fontSize: 11 }}
+              className="fill-gray-600 dark:fill-gray-400"
+              tickFormatter={(v) => `$${Number(v).toLocaleString()}`}
+            />
+            <YAxis
+              yAxisId="ltv"
+              orientation="right"
+              tick={{ fontSize: 11 }}
+              className="fill-gray-600 dark:fill-gray-400"
+              tickFormatter={(v) => `$${Number(v).toLocaleString()}`}
+            />
+            <Tooltip
+              {...tooltipStyle}
+              formatter={(value: number, name: string) => [currencyFmt(Number(value) || 0), name]}
+            />
+            <Legend />
+            <Line
+              yAxisId="cash"
+              type="monotone"
+              dataKey="finances_cash_usd"
+              name="Combined cash ($)"
+              stroke="#f59e0b"
+              strokeWidth={2}
+              dot={{ r: 3 }}
+              {...PREMIUM_LINE_ANIMATION}
+            />
+            <Line
+              yAxisId="ltv"
+              type="monotone"
+              dataKey="display_ltv_usd"
+              name="LTV proxy ($)"
+              stroke="#a855f7"
+              strokeWidth={2}
+              dot={{ r: 3 }}
+              connectNulls
+              {...PREMIUM_LINE_ANIMATION}
+            />
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>

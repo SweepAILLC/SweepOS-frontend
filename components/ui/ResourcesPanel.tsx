@@ -155,13 +155,14 @@ function CategoryBadge({ category }: { category: ResourceCategory }) {
 
 interface ResourceModalProps {
   resource: Resource;
+  canEditDocs: boolean;
   onClose: () => void;
   onSaved: () => void;
 }
 
-function ResourceModal({ resource, onClose, onSaved }: ResourceModalProps) {
+function ResourceModal({ resource, canEditDocs, onClose, onSaved }: ResourceModalProps) {
   const isEditableDoc = resource.category === 'SOP' || resource.category === 'AI Skill' || resource.category === 'Guide' || resource.category === 'Template';
-  const canEdit = isEditableDoc;
+  const canEdit = canEditDocs && isEditableDoc;
 
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -603,12 +604,14 @@ interface OrgLibraryDraft {
 function OrgLibraryItemModal({
   mode,
   initial,
+  canEdit,
   onClose,
   onSaved,
   onDeleted,
 }: {
   mode: 'create' | 'edit';
   initial: OrgLibraryDraft & { id?: string };
+  canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
   onDeleted?: () => void;
@@ -658,8 +661,6 @@ function OrgLibraryItemModal({
     const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1]! : '';
     setDraft((d) => ({ ...d, content_b64: b64, content_mime: mime }));
   };
-
-  const canEdit = true;
 
   const handleSave = async () => {
     if (!canEdit) return;
@@ -988,6 +989,8 @@ export default function ResourcesPanel() {
   const [search, setSearch] = useState('');
   const [openResource, setOpenResource] = useState<Resource | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [isSystemOwner, setIsSystemOwner] = useState(false);
+  const [canManageOrgLibrary, setCanManageOrgLibrary] = useState(false);
 
   // Org library
   const [libraryItems, setLibraryItems] = useState<Array<any>>([]);
@@ -1015,6 +1018,27 @@ export default function ResourcesPanel() {
     })();
     return () => { cancelled = true; };
   }, [loadDocs]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCurrentUser()
+      .then((user) => {
+        if (cancelled) return;
+        setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
+        const role = String(user.role || 'member').toLowerCase().trim();
+        setCanManageOrgLibrary(role === 'admin' || role === 'member' || role === 'owner');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsSystemOwner(false);
+          setCanManageOrgLibrary(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true);
@@ -1145,7 +1169,8 @@ export default function ResourcesPanel() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Resources</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              SOPs, AI skills, and business resources for your team. Click to view or edit.
+              SOPs, AI skills, and business resources for your team. Click to view
+              {isSystemOwner ? ' or edit platform docs' : ''}.
             </p>
           </div>
 
@@ -1273,21 +1298,23 @@ export default function ResourcesPanel() {
           </div>
         ) : view === 'docs' ? (
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
-              aria-label="Create new SOP"
-            >
-              <div className="flex flex-col items-center gap-2">
-                <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
-                </span>
-                <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New SOP</span>
-              </div>
-            </button>
+            {isSystemOwner ? (
+              <button
+                type="button"
+                onClick={() => setShowCreate(true)}
+                className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
+                aria-label="Create new SOP"
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  </span>
+                  <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New SOP</span>
+                </div>
+              </button>
+            ) : null}
             {filtered.map((resource) => (
               <ResourceTile
                 key={resource.id}
@@ -1325,21 +1352,23 @@ export default function ResourcesPanel() {
               </div>
             ) : (
               <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-                <button
-                  type="button"
-                  onClick={() => setShowNewLibraryItem(true)}
-                  className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
-                  aria-label="Create new library item"
-                >
-                  <div className="flex flex-col items-center gap-2">
-                    <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                    </span>
-                    <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New item</span>
-                  </div>
-                </button>
+                {canManageOrgLibrary ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowNewLibraryItem(true)}
+                    className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
+                    aria-label="Create new library item"
+                  >
+                    <div className="flex flex-col items-center gap-2">
+                      <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </span>
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New item</span>
+                    </div>
+                  </button>
+                ) : null}
 
                 {filteredLibraryItems.map((it: any) => (
                   <button
@@ -1381,21 +1410,23 @@ export default function ResourcesPanel() {
       {openResource && (
         <ResourceModal
           resource={openResource}
+          canEditDocs={isSystemOwner}
           onClose={handleClose}
           onSaved={handleSaved}
         />
       )}
 
-      {showCreate && (
+      {showCreate && isSystemOwner && (
         <CreateSopModal
           onClose={() => setShowCreate(false)}
           onCreated={handleCreated}
         />
       )}
 
-      {showNewLibraryItem && (
+      {showNewLibraryItem && canManageOrgLibrary && (
         <OrgLibraryItemModal
           mode="create"
+          canEdit={canManageOrgLibrary}
           initial={{ kind: 'markdown', title: '', description: '', tags: [], content_text: '# New resource\n\n' }}
           onClose={() => setShowNewLibraryItem(false)}
           onSaved={async () => {
@@ -1407,6 +1438,7 @@ export default function ResourcesPanel() {
       {openLibraryItem && (
         <OrgLibraryItemModal
           mode="edit"
+          canEdit={canManageOrgLibrary}
           initial={{
             id: String(openLibraryItem.id),
             kind: (openLibraryItem.kind || 'markdown') as OrgLibraryKind,

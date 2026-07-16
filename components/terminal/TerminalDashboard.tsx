@@ -30,17 +30,8 @@ const LeadsBySource = dynamic(() => import('@/components/terminal/LeadsBySource'
   ssr: false,
 });
 
-const PerformancePanel = dynamic(() => import('@/components/ui/PerformancePanel'), {
-  loading: () => (
-    <div className="space-y-3 px-1 py-2">
-      <div className="premium-shimmer h-16 rounded-xl bg-gray-200/60 dark:bg-white/[0.06]" />
-      <div className="premium-shimmer h-24 rounded-xl bg-gray-200/60 dark:bg-white/[0.06]" />
-    </div>
-  ),
-});
-
 interface TerminalDashboardProps {
-  /** When false, hide ROI priorities (legacy `performance` tab permission). */
+  /** @deprecated Priorities panel removed — prop ignored. */
   showPriorities?: boolean;
 }
 
@@ -200,21 +191,6 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
         <PremiumReveal delayMs={TERMINAL_STAGGER.financeRow}>
           <TerminalFinanceBookingsRow />
         </PremiumReveal>
-
-        {/* Row 4: priorities & approvals */}
-        {showPriorities ? (
-          <PremiumReveal delayMs={TERMINAL_STAGGER.priorities}>
-          <details open className="group">
-            <summary className="cursor-pointer select-none list-none flex items-center gap-2 py-1 min-w-0">
-              <span className={sectionToggleClass}>{sectionChevron}</span>
-              <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                Priorities &amp; approvals
-              </span>
-            </summary>
-            <PerformancePanel variant="embedded" />
-          </details>
-          </PremiumReveal>
-        ) : null}
       </div>
       </TerminalTimeRangeProvider>
     </TerminalCalendarProvider>

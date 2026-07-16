@@ -26,6 +26,52 @@ export interface HealthTrendPeriod {
   avg_client_ltv_usd?: number | null;
 }
 
+export interface LlmUsageFeatureBreakdown {
+  feature: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageOrgBreakdown {
+  org_id: string;
+  organization_name: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageSummary {
+  days: number;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  by_feature?: LlmUsageFeatureBreakdown[];
+  by_org?: LlmUsageOrgBreakdown[];
+}
+
+export interface LlmUsageTimeseriesPoint {
+  date: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageTimeseries {
+  org_id?: string | null;
+  organization_name?: string | null;
+  scope?: string | null;
+  days?: number | null;
+  period_start: string;
+  period_end: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  points: LlmUsageTimeseriesPoint[];
+}
+
 export interface GlobalHealth {
   total_organizations: number;
   organizations_created_last_30_days: number;
@@ -68,6 +114,7 @@ export interface GlobalHealth {
   show_up_rate_last_30d_pct: number | null;
   close_rate_last_30d_pct: number | null;
   health_trend_periods: HealthTrendPeriod[];
+  llm_usage_last_30d?: LlmUsageSummary | null;
 }
 
 export interface GlobalSettings {
@@ -133,5 +180,6 @@ export interface OrganizationDashboardSummary {
   manual_cash_all_time_usd?: number;
   total_processor_revenue_all_time_usd?: number;
   monthly_health_since_onboarding?: HealthTrendPeriod[];
+  llm_usage_last_30d?: LlmUsageSummary | null;
 }
 

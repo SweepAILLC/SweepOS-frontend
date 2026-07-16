@@ -15,10 +15,21 @@ export function isProgramProgressVisible(
   return client.program_progress_percent !== undefined && client.program_progress_percent !== null;
 }
 
-function dateInputToProgramIso(dateInput: string): string | null {
+/** Calendar day YYYY-MM-DD → UTC midnight ISO (stable across local timezones). */
+export function dateInputToProgramIso(dateInput: string): string | null {
   const trimmed = dateInput?.trim();
-  if (!trimmed) return null;
-  return new Date(`${trimmed}T00:00:00`).toISOString();
+  if (!trimmed || !/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return `${trimmed}T00:00:00.000Z`;
+}
+
+/** Stored program datetime → YYYY-MM-DD for date inputs (uses calendar prefix, not local TZ). */
+export function programIsoToDateInput(iso: string | null | undefined): string {
+  if (!iso || typeof iso !== 'string') return '';
+  const m = iso.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
 }
 
 /** Mirrors backend Client.calculate_progress for optimistic board updates. */
@@ -50,18 +61,28 @@ export function computeProgramProgressPercent(
   return Math.min(100, Math.max(0, progress));
 }
 
-/** Resolve program timeline fields from profile date inputs (matches PATCH behavior). */
+type ProgramTimelinePatch = {
+  program_start_date?: string | null;
+  program_end_date?: string | null;
+  program_duration_days?: number | null;
+  program_progress_percent?: number | null;
+};
+
+/**
+ * Resolve program timeline fields from profile date inputs (matches PATCH behavior).
+ * Uses `null` for explicit clears so callers can distinguish from "leave unchanged".
+ */
 export function resolveProgramTimelineFromInputs(
   startInput: string,
   endInput: string,
-): Pick<Client, 'program_start_date' | 'program_end_date' | 'program_duration_days' | 'program_progress_percent'> {
+): ProgramTimelinePatch {
   const startIso = dateInputToProgramIso(startInput);
   if (!startIso) {
     return {
-      program_start_date: undefined,
-      program_end_date: undefined,
-      program_duration_days: undefined,
-      program_progress_percent: undefined,
+      program_start_date: null,
+      program_end_date: null,
+      program_duration_days: null,
+      program_progress_percent: null,
     };
   }
 
@@ -69,9 +90,9 @@ export function resolveProgramTimelineFromInputs(
   if (!endIso) {
     return {
       program_start_date: startIso,
-      program_end_date: undefined,
-      program_duration_days: undefined,
-      program_progress_percent: undefined,
+      program_end_date: null,
+      program_duration_days: null,
+      program_progress_percent: null,
     };
   }
 
@@ -81,9 +102,9 @@ export function resolveProgramTimelineFromInputs(
   if (durationDays <= 0) {
     return {
       program_start_date: startIso,
-      program_end_date: undefined,
-      program_duration_days: undefined,
-      program_progress_percent: undefined,
+      program_end_date: null,
+      program_duration_days: null,
+      program_progress_percent: null,
     };
   }
 
@@ -91,7 +112,7 @@ export function resolveProgramTimelineFromInputs(
     program_start_date: startIso,
     program_end_date: endIso,
     program_duration_days: durationDays,
-    program_progress_percent: computeProgramProgressPercent(startIso, endIso, durationDays) ?? undefined,
+    program_progress_percent: computeProgramProgressPercent(startIso, endIso, durationDays),
   };
 }
 
@@ -106,9 +127,16 @@ export function buildOptimisticClientFromTimerFields(
   client: Client,
   snapshot: ClientTimerFormSnapshot,
 ): Client {
+  const timeline = resolveProgramTimelineFromInputs(
+    snapshot.program_start_date,
+    snapshot.program_end_date,
+  );
   const next: Client = {
     ...client,
-    ...resolveProgramTimelineFromInputs(snapshot.program_start_date, snapshot.program_end_date),
+    program_start_date: timeline.program_start_date ?? undefined,
+    program_end_date: timeline.program_end_date ?? undefined,
+    program_duration_days: timeline.program_duration_days ?? undefined,
+    program_progress_percent: timeline.program_progress_percent ?? undefined,
   };
 
   const isLead = (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(client.lifecycle_state);

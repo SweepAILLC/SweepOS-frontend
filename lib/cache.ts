@@ -1,5 +1,4 @@
 // Simple in-memory cache with TTL support
-import { clearPerformancePrioritiesCache } from './performancePrioritiesCache';
 import { clearPipelineStore } from './pipelineStore';
 
 interface CacheEntry<T> {
@@ -173,9 +172,7 @@ export function clearCalendarIntegrationStatusCache(): void {
 /** Clear caches that should not persist across logout. Call on logout. Terminal Stripe data refetches on next load. */
 export function clearSessionCaches(): void {
   cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
-  cache.deleteByPrefix('performance_snapshot_');
   cache.deleteByPrefix('outreach_inbox_');
-  clearPerformancePrioritiesCache();
   cache.deleteByPrefix('stripe_');
   // Client list must not bleed across orgs or sessions (key was previously global `clients`)
   cache.deleteByPrefix('clients');

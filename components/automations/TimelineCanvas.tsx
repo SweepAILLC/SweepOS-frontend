@@ -9,7 +9,7 @@ import {
 } from '@/lib/api';
 import type { Client } from '@/types/client';
 import PlaybookModal from './PlaybookModal';
-import WaitDelayModal from './WaitDelayModal';
+import WaitDelayModal, { type WaitDelayMode } from './WaitDelayModal';
 import BookingTriggerModal from './BookingTriggerModal';
 
 /**
@@ -23,8 +23,7 @@ import BookingTriggerModal from './BookingTriggerModal';
  *   - Dotted grid canvas background
  *   - Rounded rectangle nodes with a colored left accent strip
  *   - Vertical connection lines with port dots top/bottom
- *   - Wait nodes are a distinct first-class node type (clickable -> edits the
- *     downstream playbook's delay_seconds)
+ *   - Wait nodes are compact centered squares (clickable -> edits delay)
  *   - "Sections" wrap conditional sub-flows (Win Detected, Offboarding Window)
  *     with a labeled translucent frame, mirroring n8n's grouped node UI
  *
@@ -58,11 +57,30 @@ interface TimelineCanvasProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function delayLabel(seconds: number): string {
+function delayLabel(seconds: number, mode: WaitDelayMode = 'after_previous'): string {
+  if (mode === 'before_meeting') {
+    if (!seconds || seconds <= 0) return 'At booking';
+    if (seconds < 3_600) return `${Math.round(seconds / 60)} min before meeting`;
+    if (seconds < 86_400) return `${Math.round(seconds / 3_600)} h before meeting`;
+    return `${Math.round(seconds / 86_400)} d before meeting`;
+  }
   if (!seconds || seconds <= 0) return 'Immediate';
   if (seconds < 3_600) return `Wait ${Math.round(seconds / 60)} min`;
   if (seconds < 86_400) return `Wait ${Math.round(seconds / 3_600)} h`;
   return `Wait ${Math.round(seconds / 86_400)} d`;
+}
+
+function compactDelayLabel(seconds: number, mode: WaitDelayMode = 'after_previous'): string {
+  if (mode === 'before_meeting') {
+    if (!seconds || seconds <= 0) return 'At start';
+    if (seconds < 3_600) return `${Math.round(seconds / 60)}m pre`;
+    if (seconds < 86_400) return `${Math.round(seconds / 3_600)}h pre`;
+    return `${Math.round(seconds / 86_400)}d pre`;
+  }
+  if (!seconds || seconds <= 0) return 'Now';
+  if (seconds < 3_600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.round(seconds / 3_600)}h`;
+  return `${Math.round(seconds / 86_400)}d`;
 }
 
 function deriveLitStages(client: Client | null): Set<StageKey> {
@@ -91,6 +109,7 @@ function deriveNodeRuntimes(
   const lit = deriveLitStages(client);
   const runtimes: Record<AutomationPlaybook, NodeRuntime> = {
     pre_sale_post_booking: { status: 'idle', triggerFired: lit.has('pre_sale_booking') },
+    pre_sale_pre_meeting: { status: 'idle', triggerFired: lit.has('pre_sale_booking') },
     first_payment_onboarding: { status: 'idle', triggerFired: lit.has('first_payment') },
     first_payment_referral: { status: 'idle', triggerFired: lit.has('first_payment') },
     win_combined_ask: { status: 'idle', triggerFired: false },
@@ -139,6 +158,8 @@ function subjectFallback(pb: AutomationPlaybook): string {
   switch (pb) {
     case 'pre_sale_post_booking':
       return 'Quick note before our call';
+    case 'pre_sale_pre_meeting':
+      return 'Looking forward to talking soon';
     case 'first_payment_onboarding':
       return 'Welcome — your first steps';
     case 'first_payment_referral':
@@ -188,6 +209,7 @@ export default function TimelineCanvas({
 }: TimelineCanvasProps) {
   const [activeRule, setActiveRule] = useState<AutomationRule | null>(null);
   const [waitTarget, setWaitTarget] = useState<AutomationRule | null>(null);
+  const [waitMode, setWaitMode] = useState<WaitDelayMode>('after_previous');
   const [bookingTriggerRule, setBookingTriggerRule] = useState<AutomationRule | null>(null);
   const [jobs, setJobs] = useState<AutomationEmailJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
@@ -230,10 +252,17 @@ export default function TimelineCanvas({
   );
 
   const preSale = ruleByPlaybook.pre_sale_post_booking;
+  const preMeeting = ruleByPlaybook.pre_sale_pre_meeting;
   const onboarding = ruleByPlaybook.first_payment_onboarding;
   const referral = ruleByPlaybook.first_payment_referral;
   const winAsk = ruleByPlaybook.win_combined_ask;
   const offRecap = ruleByPlaybook.offboarding_recap_ask;
+
+  const openWait = (rule: AutomationRule | undefined, mode: WaitDelayMode) => {
+    if (!rule) return;
+    setWaitMode(mode);
+    setWaitTarget(rule);
+  };
 
   // Connector activation:
   //   - Booking trigger -> Pre-sale email: lit when client has booked but not paid
@@ -244,6 +273,7 @@ export default function TimelineCanvas({
   //   - Win/Active -> Offboarding section: lit when client is offboarding
   //   - Offboarding internal: lit when offboarding has fired
   const pre = runtimes.pre_sale_post_booking;
+  const preMeet = runtimes.pre_sale_pre_meeting;
   const fp = runtimes.first_payment_onboarding;
   const ref = runtimes.first_payment_referral;
   const win = runtimes.win_combined_ask;
@@ -281,6 +311,14 @@ export default function TimelineCanvas({
             />
             <Connector state={edgeFromDownstream(pre)} />
 
+            <WaitNode
+              rule={preSale}
+              active={pre.triggerFired || pre.status === 'pending' || pre.status === 'sent'}
+              mode="after_booking"
+              onClick={() => openWait(preSale, 'after_booking')}
+            />
+            <Connector state={edgeFromDownstream(pre)} />
+
             <PlaybookNode
               rule={preSale}
               runtime={pre}
@@ -288,6 +326,29 @@ export default function TimelineCanvas({
               kind="email"
               shortLabel="Post-booking"
               onClick={() => preSale && setActiveRule(preSale)}
+            />
+            <Connector state={edgeFromUpstream(pre)} />
+
+            <WaitNode
+              rule={preMeeting}
+              active={
+                preMeet.triggerFired ||
+                preMeet.status === 'pending' ||
+                preMeet.status === 'sent' ||
+                pre.status === 'sent'
+              }
+              mode="before_meeting"
+              onClick={() => openWait(preMeeting, 'before_meeting')}
+            />
+            <Connector state={edgeFromDownstream(preMeet)} />
+
+            <PlaybookNode
+              rule={preMeeting}
+              runtime={preMeet}
+              accent="violet"
+              kind="email"
+              shortLabel="Pre-meeting"
+              onClick={() => preMeeting && setActiveRule(preMeeting)}
             />
 
             <Connector
@@ -326,7 +387,7 @@ export default function TimelineCanvas({
             <WaitNode
               rule={referral}
               active={fp.status === 'sent' || fp.status === 'pending'}
-              onClick={() => referral && setWaitTarget(referral)}
+              onClick={() => openWait(referral, 'after_previous')}
             />
             <Connector state={edgeFromDownstream(ref)} />
 
@@ -364,7 +425,7 @@ export default function TimelineCanvas({
               <WaitNode
                 rule={winAsk}
                 active={win.triggerFired}
-                onClick={() => winAsk && setWaitTarget(winAsk)}
+                onClick={() => openWait(winAsk, 'after_previous')}
               />
               <Connector state={edgeFromDownstream(win)} />
               <PlaybookNode
@@ -437,6 +498,7 @@ export default function TimelineCanvas({
 
       <WaitDelayModal
         rule={waitTarget}
+        mode={waitMode}
         onClose={() => setWaitTarget(null)}
         onSaved={(next) => {
           onRuleSaved(next);
@@ -832,36 +894,39 @@ function WaitNode({
   rule,
   active,
   onClick,
+  mode = 'after_previous',
 }: {
   rule: AutomationRule | undefined;
   active: boolean;
   onClick: () => void;
+  mode?: WaitDelayMode;
 }) {
   const seconds = rule?.delay_seconds ?? 0;
-  const label = delayLabel(seconds);
+  const fullLabel = delayLabel(seconds, mode);
+  const label = compactDelayLabel(seconds, mode);
+  const eyebrow = mode === 'before_meeting' ? 'Pre-call' : 'Wait';
 
   return (
-    <div className="relative">
+    <div className="relative flex justify-center">
       <Port active={active} side="top" tone="amber" />
       <button
         type="button"
         onClick={onClick}
         disabled={!rule}
-        className={`group relative w-full flex items-center gap-3 rounded-xl bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm ring-1 px-4 py-2.5 transition-all ${
+        className={`group relative flex h-[4.25rem] w-[4.25rem] flex-col items-center justify-center gap-0.5 rounded-lg bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm ring-1 transition-all ${
           active ? 'ring-amber-500/50 shadow-md' : 'ring-amber-500/20 dark:ring-amber-500/15'
         } ${rule ? 'hover:shadow-lg hover:-translate-y-0.5 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
-        title="Edit wait delay"
-        aria-label={`Edit wait delay (${label})`}
+        title={`${eyebrow}: ${fullLabel}`}
+        aria-label={`Edit wait delay (${fullLabel})`}
       >
-        <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/12 text-amber-700 dark:text-amber-300 shrink-0">
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/12 text-amber-700 dark:text-amber-300">
           <NodeIcon kind="wait" />
-        </div>
-        <div className="text-left flex-1 min-w-0">
-          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-gray-500 dark:text-gray-400">Wait</div>
-          <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{label}</div>
-        </div>
-        <span className="text-[10px] font-medium text-amber-700 dark:text-amber-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          Edit
+        </span>
+        <span className="text-[8px] font-bold uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400 leading-none">
+          {eyebrow}
+        </span>
+        <span className="max-w-[3.5rem] truncate text-[11px] font-semibold text-gray-900 dark:text-gray-100 leading-tight text-center">
+          {label}
         </span>
       </button>
       <Port active={active} side="bottom" tone="amber" />

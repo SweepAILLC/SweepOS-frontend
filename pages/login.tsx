@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 
@@ -9,6 +9,18 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  // Surface Google OAuth errors from callback redirects
+  useEffect(() => {
+    if (!router.isReady) return;
+    const gerr = typeof router.query.google_error === 'string' ? router.query.google_error : '';
+    const msg = typeof router.query.message === 'string' ? router.query.message : '';
+    if (gerr === 'no_account') {
+      setError(msg || 'No SweepOS account for this Google email. Use your invite link to sign up.');
+    } else if (gerr) {
+      setError(msg || gerr.replace(/_/g, ' '));
+    }
+  }, [router.isReady, router.query.google_error, router.query.message]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -163,6 +175,42 @@ export default function Login() {
             </button>
           </div>
         </form>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-gray-300 dark:border-gray-600" />
+          </div>
+          <div className="relative flex justify-center text-sm">
+            <span className="px-2 bg-transparent text-gray-500 dark:text-gray-400">or</span>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          disabled={loading || submitting}
+          onClick={async () => {
+            setError('');
+            setLoading(true);
+            try {
+              const base = (process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '');
+              window.location.href = `${base}/auth/google/start?mode=login&redirect=1`;
+            } catch (err: any) {
+              setError(err?.message || 'Could not start Google sign-in');
+              setLoading(false);
+            }
+          }}
+          className="w-full flex justify-center items-center gap-2 py-2 px-4 text-sm font-medium rounded-md border border-gray-300 dark:border-gray-600 glass-card hover:bg-gray-50 dark:hover:bg-white/5 disabled:opacity-50"
+        >
+          <svg className="w-4 h-4" viewBox="0 0 24 24" aria-hidden>
+            <path fill="#EA4335" d="M12 10.2v3.6h5.1c-.2 1.2-1.5 3.6-5.1 3.6-3.1 0-5.6-2.5-5.6-5.6S8.9 6.2 12 6.2c1.8 0 3 .7 3.7 1.4l2.5-2.4C16.7 3.7 14.6 2.8 12 2.8 6.9 2.8 2.8 6.9 2.8 12S6.9 21.2 12 21.2c5.2 0 8.6-3.6 8.6-8.7 0-.6-.1-1-.2-1.5H12z"/>
+          </svg>
+          Sign in with Google
+        </button>
+
+        <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+          New here? Use the invite link you received — you can{' '}
+          <span className="text-gray-700 dark:text-gray-300 font-medium">Sign up with Google</span> on the invite page.
+        </p>
       </div>
     </div>
   );

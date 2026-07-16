@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Client, ClientPaymentsResponse } from '@/types/client';
 import { apiClient } from '@/lib/api';
@@ -15,7 +15,12 @@ import {
   normalizeLifecycleColumn,
   withNormalizedLifecycle,
 } from '@/lib/pipelineColumns';
-import { isProgramProgressVisible, buildOptimisticClientFromTimerFields } from '@/lib/clientProgram';
+import {
+  isProgramProgressVisible,
+  buildOptimisticClientFromTimerFields,
+  dateInputToProgramIso,
+  programIsoToDateInput,
+} from '@/lib/clientProgram';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
@@ -93,58 +98,46 @@ export default function ClientDetailDrawer({
     void saveClientFields();
   };
 
-  const pushTimerOptimistic = useCallback(
-    (snapshot: typeof formData) => {
-      if (!client || !onClientSaved) return;
-      onClientSaved(
-        withNormalizedLifecycle(buildOptimisticClientFromTimerFields(client, snapshot)),
-      );
-    },
-    [client, onClientSaved],
-  );
+  const clientId = client?.id ?? null;
 
-  const TIMER_FORM_KEYS = ['program_start_date', 'program_end_date', 'follow_up_due_date'] as const;
-
+  // Sync form when opening the drawer or switching clients — not on every board
+  // optimistic update (that was wiping in-progress timeline edits).
   useEffect(() => {
     if (isOpen) setShowCheckInCalendar(false);
-    
-    if (client) {
-      setFormData({
-        first_name: client.first_name || '',
-        last_name: client.last_name || '',
-        email: client.email || '',
-        emails: Array.isArray(client.emails) ? [...client.emails] : [],
-        phone: client.phone || '',
-        instagram: client.instagram || '',
-        notes: client.notes || '',
-        program_start_date: client.program_start_date 
-          ? new Date(client.program_start_date).toISOString().split('T')[0] 
-          : '',
-        program_end_date: client.program_end_date 
-          ? new Date(client.program_end_date).toISOString().split('T')[0] 
-          : '',
-        follow_up_due_date: followUpIsoToDateInput(
-          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
-        ),
+
+    if (!client || !isOpen) return;
+
+    setFormData({
+      first_name: client.first_name || '',
+      last_name: client.last_name || '',
+      email: client.email || '',
+      emails: Array.isArray(client.emails) ? [...client.emails] : [],
+      phone: client.phone || '',
+      instagram: client.instagram || '',
+      notes: client.notes || '',
+      program_start_date: programIsoToDateInput(client.program_start_date),
+      program_end_date: programIsoToDateInput(client.program_end_date),
+      follow_up_due_date: followUpIsoToDateInput(
+        typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
+      ),
+    });
+    loadPayments();
+    loadBrevoStatus();
+    loadNextCheckIn();
+
+    if (client.program_start_date && client.program_end_date) {
+      apiClient.getClient(client.id).then((updatedClient) => {
+        const normalized = withNormalizedLifecycle(updatedClient);
+        if (normalized.lifecycle_state !== client.lifecycle_state) {
+          onClientSaved?.(normalized);
+        }
+      }).catch((error) => {
+        console.error('[ClientDetailDrawer] Error fetching updated client:', error);
       });
-      loadPayments();
-      loadBrevoStatus();
-      loadNextCheckIn();
-      
-      // Automatically trigger automation when drawer opens
-      // The get_client endpoint will update the state based on progress
-      if (isOpen && client.program_start_date && client.program_end_date) {
-        apiClient.getClient(client.id).then((updatedClient) => {
-          const normalized = withNormalizedLifecycle(updatedClient);
-          if (normalized.lifecycle_state !== client.lifecycle_state) {
-            onClientSaved?.(normalized);
-          }
-        }).catch((error) => {
-          console.error('[ClientDetailDrawer] Error fetching updated client:', error);
-        });
-      }
     }
-  }, [client, isOpen]);
+    // intentionally clientId + isOpen only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, isOpen]);
 
   // When the board triggers a refresh (Stripe/Whop/calendar sync), reload the drawer's
   // transactions + calendar summary even if the selected client didn't change.
@@ -270,27 +263,22 @@ export default function ClientDetailDrawer({
       setIfChanged('instagram', snapshot.instagram, client.instagram ?? '');
       setIfChanged('notes', snapshot.notes, client.notes ?? '');
 
-      const currentStartDate = client.program_start_date
-        ? new Date(client.program_start_date).toISOString().split('T')[0]
-        : '';
-      const currentEndDate = client.program_end_date
-        ? new Date(client.program_end_date).toISOString().split('T')[0]
-        : '';
+      const currentStartDate = programIsoToDateInput(client.program_start_date);
+      const currentEndDate = programIsoToDateInput(client.program_end_date);
 
       if (snapshot.program_start_date !== currentStartDate) {
-        if (snapshot.program_start_date && snapshot.program_start_date.trim() !== '') {
-          updateData.program_start_date = new Date(snapshot.program_start_date + 'T00:00:00').toISOString();
-        } else {
-          updateData.program_start_date = null;
-        }
+        updateData.program_start_date = dateInputToProgramIso(snapshot.program_start_date);
       }
 
       if (snapshot.program_end_date !== currentEndDate) {
-        if (snapshot.program_end_date && snapshot.program_end_date.trim() !== '') {
-          updateData.program_end_date = new Date(snapshot.program_end_date + 'T00:00:00').toISOString();
-        } else {
-          updateData.program_end_date = null;
-        }
+        updateData.program_end_date = dateInputToProgramIso(snapshot.program_end_date);
+      }
+
+      // When either date changes, send both so the backend can recompute duration.
+      if ('program_start_date' in updateData || 'program_end_date' in updateData) {
+        updateData.program_start_date =
+          dateInputToProgramIso(snapshot.program_start_date) ?? null;
+        updateData.program_end_date = dateInputToProgramIso(snapshot.program_end_date) ?? null;
       }
 
       const isLeadClient =
@@ -736,11 +724,10 @@ export default function ClientDetailDrawer({
                                         follow_up_due_date: prev.follow_up_due_date,
                                       })
                                     : action;
-                                const next = { ...prev, ...patch };
-                                if (TIMER_FORM_KEYS.some((k) => k in patch)) {
-                                  pushTimerOptimistic(next);
-                                }
-                                return next;
+                                // Do not pushTimerOptimistic on every keystroke — that updated
+                                // `client` and used to reset this form mid-edit. Optimistic
+                                // board updates run on blur via saveClientFields instead.
+                                return { ...prev, ...patch };
                               });
                             }}
                             fieldBlurSave={fieldBlurSave}

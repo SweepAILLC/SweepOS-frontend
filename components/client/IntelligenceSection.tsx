@@ -713,7 +713,7 @@ export default function IntelligenceSection({
           {rollup.accumulated_clips.length > 0 && (
             <div>
               <p className="text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Transcript clips (top {INTELLIGENCE_VISIBLE_CLIPS} of {INTELLIGENCE_MAX_POOL} prioritized)
+                Transcript clips (recent)
               </p>
               <p className="text-[10px] text-gray-500 dark:text-gray-400 mb-1.5 leading-snug">
                 Objection clips only appear when they match a recurring theme across multiple clients in your org (for

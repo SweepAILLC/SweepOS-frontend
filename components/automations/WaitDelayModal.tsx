@@ -3,8 +3,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { apiClient, type AutomationRule } from '@/lib/api';
 
+export type WaitDelayMode = 'after_previous' | 'after_booking' | 'before_meeting';
+
 interface WaitDelayModalProps {
   rule: AutomationRule | null;
+  mode?: WaitDelayMode;
   onClose: () => void;
   onSaved: (next: AutomationRule) => void;
 }
@@ -42,14 +45,37 @@ function partsToSeconds(value: number, unit: Unit): number {
   }
 }
 
-function describe(seconds: number): string {
+function describe(seconds: number, mode: WaitDelayMode): string {
+  if (mode === 'before_meeting') {
+    if (seconds <= 0) return 'Sends immediately when the booking lands (or ASAP if the meeting is sooner)';
+    if (seconds < 3_600) return `Sends ~${Math.round(seconds / 60)} min before the meeting`;
+    if (seconds < 86_400) return `Sends ~${Math.round(seconds / 3_600)} h before the meeting`;
+    return `Sends ~${Math.round(seconds / 86_400)} d before the meeting`;
+  }
+  if (mode === 'after_booking') {
+    if (seconds <= 0) return 'Sends immediately when the booking lands';
+    if (seconds < 3_600) return `Waits ~${Math.round(seconds / 60)} min after the booking lands`;
+    if (seconds < 86_400) return `Waits ~${Math.round(seconds / 3_600)} h after the booking lands`;
+    return `Waits ~${Math.round(seconds / 86_400)} d after the booking lands`;
+  }
   if (seconds <= 0) return 'Sends immediately when the trigger fires';
   if (seconds < 3_600) return `Waits ~${Math.round(seconds / 60)} min after the previous step`;
   if (seconds < 86_400) return `Waits ~${Math.round(seconds / 3_600)} h after the previous step`;
   return `Waits ~${Math.round(seconds / 86_400)} d after the previous step`;
 }
 
-export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModalProps) {
+function titleForMode(mode: WaitDelayMode): string {
+  if (mode === 'before_meeting') return 'Time before meeting';
+  if (mode === 'after_booking') return 'Wait after booking lands';
+  return 'Delay before next email';
+}
+
+export default function WaitDelayModal({
+  rule,
+  mode = 'after_previous',
+  onClose,
+  onSaved,
+}: WaitDelayModalProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [parts, setParts] = useState<{ value: number; unit: Unit }>(
     rule ? toUnitParts(rule.delay_seconds || 0) : { value: 0, unit: 'minutes' },
@@ -80,6 +106,10 @@ export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModa
   if (!rule) return null;
 
   const totalSeconds = partsToSeconds(parts.value, parts.unit);
+  const presets =
+    mode === 'before_meeting'
+      ? PRESETS.filter((p) => p.seconds > 0 || p.label === 'Immediate')
+      : PRESETS;
 
   const onSave = async () => {
     setSaving(true);
@@ -123,9 +153,10 @@ export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModa
           <div className="flex items-start justify-between gap-3 border-b border-white/10 px-4 py-3 sm:px-5">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-amber-400/90">Wait step</p>
-              <h3 className="text-base font-semibold text-white">Delay before next email</h3>
+              <h3 className="text-base font-semibold text-white">{titleForMode(mode)}</h3>
               <p className="mt-1 text-xs text-gray-400">
-                Before <span className="text-gray-200">{rule.playbook.replace(/_/g, ' ')}</span>
+                {mode === 'before_meeting' ? 'Before ' : 'Before '}
+                <span className="text-gray-200">{rule.playbook.replace(/_/g, ' ')}</span>
               </p>
             </div>
             <button
@@ -144,7 +175,7 @@ export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModa
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500 mb-2">Quick presets</p>
               <div className="flex flex-wrap gap-2">
-                {PRESETS.map((p) => {
+                {presets.map((p) => {
                   const active = totalSeconds === p.seconds;
                   return (
                     <button
@@ -188,7 +219,7 @@ export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModa
                   <option value="days">days</option>
                 </select>
               </div>
-              <p className="mt-2 text-xs text-gray-400">{describe(totalSeconds)}.</p>
+              <p className="mt-2 text-xs text-gray-400">{describe(totalSeconds, mode)}.</p>
             </div>
 
             {error ? (
@@ -198,22 +229,21 @@ export default function WaitDelayModal({ rule, onClose, onSaved }: WaitDelayModa
             ) : null}
           </div>
 
-          <div className="flex items-center justify-end gap-2 border-t border-white/10 px-4 py-3 sm:px-5 bg-black/20">
+          <div className="flex justify-end gap-2 border-t border-white/10 px-4 py-3 sm:px-5">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm text-gray-300 hover:bg-white/5"
+              className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-white/5"
             >
               Cancel
             </button>
             <button
               type="button"
-              onClick={onSave}
               disabled={saving}
-              aria-busy={saving}
-              className="rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-gray-950 text-sm font-semibold px-4 py-2"
+              onClick={onSave}
+              className="rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-gray-950 hover:bg-amber-400 disabled:opacity-50"
             >
-              {saving ? 'Saving…' : 'Save delay'}
+              {saving ? 'Saving…' : 'Save wait'}
             </button>
           </div>
         </div>
