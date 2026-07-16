@@ -1242,7 +1242,14 @@ export default function IntegrationsPanel() {
               </div>
               <p className={mutedClass}>
                 Built from <code className="text-[11px]">NEXT_PUBLIC_API_BASE_URL</code>. In production it must be HTTPS
-                and match the backend <code className="text-[11px]">MCP_RESOURCE_URL</code>.
+                and match the backend <code className="text-[11px]">MCP_RESOURCE_URL</code> exactly (Claude sends that
+                value as the OAuth <code className="text-[11px]">resource</code> parameter).
+              </p>
+              <p className={mutedClass}>
+                Browser console noise: a <code className="text-[11px]">405</code> on{" "}
+                <code className="text-[11px]">claude.ai/v1/toolbox/shttp/mcp/…</code> or{" "}
+                <code className="text-[11px]">user_settings</code> 404 is Claude’s own UI — check your API logs for{" "}
+                <code className="text-[11px]">POST /mcp/oauth/token</code> instead.
               </p>
             </div>
 
