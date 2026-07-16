@@ -731,41 +731,88 @@ export default function AdminPanel() {
                     </p>
                   </div>
                 </div>
-                {(health.llm_usage_last_30d.by_org?.length ?? 0) > 0 && (
-                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
-                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-                      Top orgs by estimated cost
-                    </p>
-                    <table className="min-w-full text-sm">
-                      <thead>
-                        <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
-                          <th className="py-2 pr-4 font-medium">Organization</th>
-                          <th className="py-2 pr-4 font-medium">Calls</th>
-                          <th className="py-2 pr-4 font-medium">Tokens</th>
-                          <th className="py-2 font-medium">Est. cost</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {(health.llm_usage_last_30d.by_org ?? []).slice(0, 10).map((row) => (
-                          <tr
-                            key={row.org_id}
-                            className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
-                          >
-                            <td className="py-2 pr-4">{row.organization_name}</td>
-                            <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
-                            <td className="py-2 pr-4 tabular-nums">{row.total_tokens.toLocaleString()}</td>
-                            <td className="py-2 tabular-nums">
-                              ${row.estimated_cost_usd.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
-                            </td>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {(health.llm_usage_last_30d.by_feature?.length ?? 0) > 0 && (
+                    <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-1">
+                        Cost by feature
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                        Includes Call Library, call insights, Fathom sentiment, Content Studio,
+                        automations, and health score — not only new calls.
+                      </p>
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+                            <th className="py-2 pr-4 font-medium">Feature</th>
+                            <th className="py-2 pr-4 font-medium">Calls</th>
+                            <th className="py-2 pr-4 font-medium">Tokens</th>
+                            <th className="py-2 font-medium">Est. cost</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        </thead>
+                        <tbody>
+                          {(health.llm_usage_last_30d.by_feature ?? []).map((row) => (
+                            <tr
+                              key={row.feature}
+                              className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
+                            >
+                              <td className="py-2 pr-4 font-mono text-xs">{row.feature}</td>
+                              <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
+                              <td className="py-2 pr-4 tabular-nums">
+                                {row.total_tokens.toLocaleString()}
+                              </td>
+                              <td className="py-2 tabular-nums">
+                                $
+                                {row.estimated_cost_usd.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  {(health.llm_usage_last_30d.by_org?.length ?? 0) > 0 && (
+                    <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
+                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+                        Top orgs by estimated cost
+                      </p>
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+                            <th className="py-2 pr-4 font-medium">Organization</th>
+                            <th className="py-2 pr-4 font-medium">Calls</th>
+                            <th className="py-2 pr-4 font-medium">Tokens</th>
+                            <th className="py-2 font-medium">Est. cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(health.llm_usage_last_30d.by_org ?? []).slice(0, 10).map((row) => (
+                            <tr
+                              key={row.org_id}
+                              className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
+                            >
+                              <td className="py-2 pr-4">{row.organization_name}</td>
+                              <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
+                              <td className="py-2 pr-4 tabular-nums">
+                                {row.total_tokens.toLocaleString()}
+                              </td>
+                              <td className="py-2 tabular-nums">
+                                $
+                                {row.estimated_cost_usd.toLocaleString(undefined, {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <p className="text-sm text-gray-500 dark:text-gray-400">
