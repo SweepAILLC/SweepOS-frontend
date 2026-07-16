@@ -1143,7 +1143,7 @@ export default function AdminPanel() {
                           </tr>
                         </thead>
                         <tbody>
-                          {dashboardData.llm_usage_last_30d.by_feature.map((row) => (
+                          {(dashboardData.llm_usage_last_30d.by_feature ?? []).map((row) => (
                             <tr
                               key={row.feature}
                               className="border-b border-gray-100 dark:border-white/5"
