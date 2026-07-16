@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 
@@ -68,9 +69,9 @@ export default function GoogleAuthComplete() {
             Google sign-in failed
           </h1>
           <p className="text-sm text-red-700 dark:text-red-300">{error}</p>
-          <a href="/login" className="text-primary-500 hover:text-primary-600 font-medium">
+          <Link href="/login" className="text-primary-500 hover:text-primary-600 font-medium">
             Back to login
-          </a>
+          </Link>
         </div>
       </div>
     );
