@@ -1207,6 +1207,19 @@ export default function IntegrationsPanel() {
               <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
                 Remote MCP URL
               </p>
+              {/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\b/i.test(MCP_RESOURCE_URL) && (
+                <p className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                  This URL is local-only. <strong>Claude.ai</strong> cannot reach localhost — use your public HTTPS API
+                  (e.g. <code className="text-[11px]">https://api.sweepai.site/mcp</code>) for Claude.ai. Localhost works
+                  only with Claude Desktop / Claude Code on this machine.
+                </p>
+              )}
+              {!MCP_RESOURCE_URL.startsWith('https://') &&
+                !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\b/i.test(MCP_RESOURCE_URL) && (
+                  <p className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                    Claude.ai requires an <strong>https://</strong> MCP URL in production.
+                  </p>
+                )}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
                 <code className="block min-w-0 flex-1 break-all rounded-lg border-2 border-zinc-300 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-50">
                   {MCP_RESOURCE_URL}
