@@ -746,7 +746,7 @@ export default function AdminPanel() {
                         </tr>
                       </thead>
                       <tbody>
-                        {health.llm_usage_last_30d.by_org.slice(0, 10).map((row) => (
+                        {(health.llm_usage_last_30d.by_org ?? []).slice(0, 10).map((row) => (
                           <tr
                             key={row.org_id}
                             className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
