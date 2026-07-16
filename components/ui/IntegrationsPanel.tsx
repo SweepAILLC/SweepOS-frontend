@@ -8,7 +8,9 @@ import { useLoading } from '@/contexts/LoadingContext';
 import { isOrgAdminRole } from '@/lib/tabAccess';
 import type { BrevoStatus, CalComStatus, CalendlyStatus } from '@/types/integration';
 
-type IntegrationModal = 'brevo' | 'fathom' | 'stripe' | 'calcom' | 'calendly' | 'whop' | null;
+type IntegrationModal = 'brevo' | 'fathom' | 'stripe' | 'calcom' | 'calendly' | 'whop' | 'claude' | null;
+
+const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
 
 /** High-contrast fields inside integration modals (solid surfaces). */
 const fieldInputClass =
@@ -39,6 +41,17 @@ function BrandTileImage({ src, alt }: { src: string; alt: string }) {
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:bg-zinc-900 dark:ring-zinc-600/80">
       {/* Static logos from /public */}
       <img src={src} alt={alt} className="h-full w-full object-contain" />
+    </div>
+  );
+}
+
+function ClaudeTileMark() {
+  return (
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[#D97757] p-2 shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
+      aria-hidden
+    >
+      <span className="text-xl font-bold tracking-tight text-white">C</span>
     </div>
   );
 }
@@ -164,6 +177,7 @@ export default function IntegrationsPanel() {
   const [whopCompanyId, setWhopCompanyId] = useState('');
   const [whopBusy, setWhopBusy] = useState(false);
   const [whopErr, setWhopErr] = useState<string | null>(null);
+  const [mcpUrlCopied, setMcpUrlCopied] = useState(false);
 
   const refreshBrevoSummary = useCallback(async () => {
     try {
@@ -678,6 +692,21 @@ export default function IntegrationsPanel() {
             </p>
           </div>
         </button>
+
+        <button type="button" onClick={() => setModal('claude')} className={tileBtn}>
+          <div className="flex h-full min-h-0 flex-col">
+            <ClaudeTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Claude</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Custom connector (MCP)
+              </p>
+            </div>
+            <p className="mt-auto text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Setup guide
+            </p>
+          </div>
+        </button>
       </div>
 
       {modal === 'brevo' && (
@@ -1146,6 +1175,83 @@ export default function IntegrationsPanel() {
             {!canManageIntegrations && !whopConnected && (
               <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200">Only admins and owners can connect Whop.</p>
             )}
+          </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'claude' && (
+        <SquareModalShell title="Claude custom connector" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <BeginnerSetupGuide
+              intro="Claude connects to SweepOS with a remote MCP URL (no API key in Sweep). When you connect, Claude opens Google sign-in so it can access the same org you use in Sweep. Use a public HTTPS API URL in production — localhost only works for local Claude Desktop testing."
+              steps={[
+                <>
+                  In Sweep, open <strong>Settings → Profile</strong> and <strong>Connect Google</strong> (or sign in with Google on login) so your account can authorize Claude.
+                </>,
+                <>
+                  In Claude (claude.ai or Desktop), go to <strong>Settings → Connectors → Add custom connector</strong>.
+                </>,
+                <>
+                  Paste the <strong>Remote MCP URL</strong> below. Leave OAuth Client ID and Secret empty (Sweep supports dynamic client registration).
+                </>,
+                <>
+                  Click <strong>Add</strong>, then <strong>Connect</strong>, and finish Google sign-in for your Sweep account.
+                </>,
+                <>
+                  In a chat, open <strong>+ → Connectors</strong> and enable SweepOS. Claude can then read clients, Marketing Intel, Terminal, and (with Brevo connected) send client email after you confirm.
+                </>,
+              ]}
+            />
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+                Remote MCP URL
+              </p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                <code className="block min-w-0 flex-1 break-all rounded-lg border-2 border-zinc-300 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-50">
+                  {MCP_RESOURCE_URL}
+                </code>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg border-2 border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(MCP_RESOURCE_URL);
+                      setMcpUrlCopied(true);
+                      window.setTimeout(() => setMcpUrlCopied(false), 2000);
+                    } catch {
+                      setError('Could not copy MCP URL. Select and copy it manually.');
+                    }
+                  }}
+                >
+                  {mcpUrlCopied ? 'Copied' : 'Copy URL'}
+                </button>
+              </div>
+              <p className={mutedClass}>
+                Built from <code className="text-[11px]">NEXT_PUBLIC_API_BASE_URL</code>. In production it must be HTTPS
+                and match the backend <code className="text-[11px]">MCP_RESOURCE_URL</code>.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+                Claude Code
+              </p>
+              <pre className="overflow-x-auto rounded-lg border-2 border-zinc-300 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-50">
+                {`claude mcp add --transport http sweepos ${MCP_RESOURCE_URL}`}
+              </pre>
+              <p className={mutedClass}>Then run <code className="text-[11px]">/mcp</code> in Claude Code to authenticate.</p>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">What Claude can access</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
+                <li>Client profiles and call insights</li>
+                <li>Marketing Intel (objections, wins, themes, ICP)</li>
+                <li>Terminal dashboard (cash, MRR, calendar, failed payments)</li>
+                <li>Brevo senders + send client email (requires Brevo connected; confirm before send)</li>
+              </ul>
+            </div>
           </div>
         </SquareModalShell>
       )}
