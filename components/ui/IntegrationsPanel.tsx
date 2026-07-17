@@ -45,17 +45,6 @@ function BrandTileImage({ src, alt }: { src: string; alt: string }) {
   );
 }
 
-function ClaudeTileMark() {
-  return (
-    <div
-      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-[#D97757] p-2 shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
-      aria-hidden
-    >
-      <span className="text-xl font-bold tracking-tight text-white">C</span>
-    </div>
-  );
-}
-
 function SquareModalShell({
   title,
   onClose,
@@ -695,7 +684,7 @@ export default function IntegrationsPanel() {
 
         <button type="button" onClick={() => setModal('claude')} className={tileBtn}>
           <div className="flex h-full min-h-0 flex-col">
-            <ClaudeTileMark />
+            <BrandTileImage src="/claude.png" alt="Claude" />
             <div className="mt-2 min-w-0 flex-1">
               <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Claude</p>
               <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
