@@ -1268,6 +1268,7 @@ export default function IntegrationsPanel() {
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
                 <li>Client profiles and call insights</li>
                 <li>Marketing Intel (objections, wins, themes, ICP)</li>
+                <li>Org Intelligence profile (business context, offers + pricing, sales approach)</li>
                 <li>Terminal dashboard (cash, MRR, calendar, failed payments)</li>
                 <li>Brevo senders + send client email (requires Brevo connected; confirm before send)</li>
               </ul>
