@@ -122,7 +122,7 @@ export function PieChartSkeleton({ height = 220 }: { height?: number }) {
 
 export function KpiGridSkeleton({ count = 7 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2 min-w-0">
+    <div className="grid grid-cols-2 landscape:grid-cols-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2 min-w-0">
       {Array.from({ length: count }).map((_, i) => (
         <div
           key={i}

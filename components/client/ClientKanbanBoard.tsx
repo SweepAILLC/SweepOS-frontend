@@ -1626,7 +1626,7 @@ export default function ClientKanbanBoard({
                   key={column.id}
                   delayMs={columnIndex * COLUMN_STAGGER_MS}
                   animate={shouldAnimateColumns.current}
-                  className="flex w-[220px] min-w-[220px] shrink-0 flex-col self-stretch sm:w-[240px] sm:min-w-[240px]"
+                  className="flex w-[min(220px,78vw)] min-w-[min(220px,78vw)] shrink-0 flex-col self-stretch sm:w-[240px] sm:min-w-[240px]"
                 >
                   <KanbanColumn
                     id={column.id}

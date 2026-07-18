@@ -535,7 +535,7 @@ export default function ClientDetailDrawer({
     <Transition show={isOpen} as={Fragment}>
       <Dialog 
         as="div" 
-        className="relative z-50" 
+        className="relative z-[70]" 
         onClose={onClose}
       >
         <Transition.Child
@@ -552,7 +552,7 @@ export default function ClientDetailDrawer({
 
         <div className="fixed inset-0 overflow-hidden">
           <div className="absolute inset-0 overflow-hidden">
-            <div className="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10">
+            <div className="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-0 sm:pl-10">
               <Transition.Child
                 as={Fragment}
                 enter="transform transition ease-in-out duration-500 sm:duration-700"
@@ -562,15 +562,25 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-[min(90vw,1400px)] max-w-none flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:glass-card rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-                    <div className="flex-shrink-0 px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-white/10">
-                        <div className="flex items-center justify-between gap-3">
-                        <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
+                    <div className="flex-shrink-0 px-3 py-3 sm:px-6 sm:py-4 border-b border-gray-200 dark:border-white/10">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                        <Dialog.Title className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0 pr-8 sm:pr-0 relative">
                           Client Profile
+                          <button
+                            type="button"
+                            onClick={onClose}
+                            className="absolute right-0 top-1/2 -translate-y-1/2 p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors sm:hidden"
+                            aria-label="Close"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
                         </Dialog.Title>
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
                               {savingFields ? (
                                 <span className="text-xs text-gray-400 dark:text-gray-500" aria-live="polite">
                                   Saving…
@@ -582,33 +592,33 @@ export default function ClientDetailDrawer({
                                     type="button"
                                     onClick={handleEmailClient}
                                     disabled={checkingBrevoContact}
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
                                     title="Send email to this client via Brevo"
                                   >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                                     </svg>
-                                    {checkingBrevoContact ? 'Checking...' : 'Email'}
+                                    <span>{checkingBrevoContact ? 'Checking...' : 'Email'}</span>
                                   </button>
                                 ) : (
                                   <button
                                     type="button"
                                     onClick={handleAddToBrevo}
                                     disabled={addingToBrevo || getAllClientEmails(client).length === 0}
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
                                     title="Add this client as a contact in Brevo"
                                   >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                                     </svg>
-                                    {addingToBrevo ? 'Adding...' : 'Add to Brevo'}
+                                    <span className="truncate max-w-[6.5rem] sm:max-w-none">{addingToBrevo ? 'Adding...' : 'Add to Brevo'}</span>
                                   </button>
                                 )
                               )}
                               <button
                                 type="button"
                                 onClick={() => setShowCheckInCalendar(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-green-300 dark:border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-green-300 dark:border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
                                 title="View and sync check-in calendar"
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -621,13 +631,13 @@ export default function ClientDetailDrawer({
                                   type="button"
                                   onClick={() => void handleAdvanceStage()}
                                   disabled={advancingStage || savingFields}
-                                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 min-w-0"
                                   title={`Move from ${currentStageTitle} to ${nextStage.title}`}
                                 >
                                   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                   </svg>
-                                  <span className="truncate max-w-[10rem] sm:max-w-none">
+                                  <span className="truncate max-w-[7rem] sm:max-w-[10rem] md:max-w-none">
                                     {advancingStage ? 'Moving…' : `→ ${nextStage.title}`}
                                   </span>
                                 </button>
@@ -635,7 +645,7 @@ export default function ClientDetailDrawer({
                               <button
                                 type="button"
                                 onClick={onClose}
-                                className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                                className="hidden sm:inline-flex p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
                                 aria-label="Close"
                               >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

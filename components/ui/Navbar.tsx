@@ -84,11 +84,28 @@ export default function Navbar({
   automationsAwaitingApproval = 0,
 }: NavbarProps) {
   const [mounted, setMounted] = useState(false);
-  const { collapsed, toggleCollapsed } = useSidebar();
+  const {
+    collapsed,
+    toggleCollapsed,
+    mobileNavOpen,
+    openMobileNav,
+    closeMobileNav,
+    isMobileNav,
+  } = useSidebar();
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobileNav();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen, closeMobileNav]);
 
   const shouldShowTab = (tab: string): boolean =>
     canAccessTab(tab, { isOwner, userRole, tabPermissions });
@@ -96,8 +113,15 @@ export default function Navbar({
   const shouldShowBottomNavTab = (tab: TabId): boolean =>
     canAccessBottomNavTab(tab, { userRole, tabPermissions });
 
-  const navWidth = collapsed ? 'w-[5rem]' : 'w-56';
-  const btnLayout = collapsed ? 'justify-center px-2' : '';
+  // Overlay drawer always shows labels; desktop rail respects collapsed.
+  const iconOnly = !isMobileNav && collapsed;
+  const desktopWidth = collapsed ? 'lg:w-[5rem]' : 'lg:w-56';
+  const btnLayout = iconOnly ? 'justify-center px-2' : '';
+
+  const handleTabChange = (tab: TabId) => {
+    onTabChange(tab);
+    closeMobileNav();
+  };
 
   const tabBtn = (tab: TabId, label: string) => {
     const active = activeTab === tab;
@@ -106,7 +130,7 @@ export default function Navbar({
       <button
         key={tab}
         type="button"
-        onClick={() => onTabChange(tab)}
+        onClick={() => handleTabChange(tab)}
         className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive}`}
         title={label}
         aria-label={label}
@@ -118,7 +142,7 @@ export default function Navbar({
         }
       >
         {icon ? <NavIcon>{icon}</NavIcon> : null}
-        <span className={collapsed ? 'sr-only' : 'truncate'}>{label}</span>
+        <span className={iconOnly ? 'sr-only' : 'truncate'}>{label}</span>
       </button>
     );
   };
@@ -134,7 +158,7 @@ export default function Navbar({
       <button
         key={tab}
         type="button"
-        onClick={() => onTabChange(tab)}
+        onClick={() => handleTabChange(tab)}
         className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''}`}
         aria-label={opts?.ariaLabel ?? label}
         title={opts?.title ?? label}
@@ -142,14 +166,14 @@ export default function Navbar({
       >
         <span className="relative flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5">
           {icon}
-          {collapsed && (opts?.badge ?? 0) > 0 ? (
+          {iconOnly && (opts?.badge ?? 0) > 0 ? (
             <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[0.875rem] h-3.5 rounded-full bg-amber-500 text-white text-[8px] font-bold px-0.5">
               {(opts?.badge ?? 0) > 9 ? '9+' : opts?.badge}
             </span>
           ) : null}
         </span>
-        <span className={collapsed ? 'sr-only' : 'truncate flex-1'}>{label}</span>
-        {!collapsed && (opts?.badge ?? 0) > 0 ? (
+        <span className={iconOnly ? 'sr-only' : 'truncate flex-1'}>{label}</span>
+        {!iconOnly && (opts?.badge ?? 0) > 0 ? (
           <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
             {(opts?.badge ?? 0) > 99 ? '99+' : opts?.badge}
           </span>
@@ -158,43 +182,42 @@ export default function Navbar({
     );
   };
 
-  return (
-    <nav
-      className={`glass-panel fixed left-0 top-0 bottom-0 z-[50] ${navWidth} flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-[width] duration-300 ease-out`}
-      aria-label="Main navigation"
-    >
-      <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10">
-        <div className={`flex items-center gap-2 min-w-0 ${collapsed ? 'justify-center' : ''}`}>
-          {mounted && (
-            <div className="relative w-8 h-8 flex-shrink-0">
-              <img
-                src="/SWEEP_favicon.png"
-                alt=""
-                width={32}
-                height={32}
-                className="object-contain w-full h-full"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          )}
-          {!collapsed ? (
-            <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">
-              Sweep OS
-            </h1>
-          ) : null}
-        </div>
-        {!collapsed && organizationName ? (
-          <p
-            className={`text-xs font-medium text-gray-500 dark:text-gray-400 truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''}`}
-            title={organizationName}
-          >
-            {organizationName}
-          </p>
+  const brandBlock = (
+    <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10">
+      <div className={`flex items-center gap-2 min-w-0 ${iconOnly ? 'justify-center' : ''}`}>
+        {mounted && (
+          <div className="relative w-8 h-8 flex-shrink-0">
+            <img
+              src="/SWEEP_favicon.png"
+              alt=""
+              width={32}
+              height={32}
+              className="object-contain w-full h-full"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        {!iconOnly ? (
+          <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">
+            Sweep OS
+          </h1>
         ) : null}
       </div>
+      {!iconOnly && organizationName ? (
+        <p
+          className={`text-xs font-medium text-gray-500 dark:text-gray-400 truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''}`}
+          title={organizationName}
+        >
+          {organizationName}
+        </p>
+      ) : null}
+    </div>
+  );
 
+  const navLinks = (
+    <>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-2 px-2 space-y-1">
         {shouldShowTab('terminal') && tabBtn('terminal', 'Terminal')}
         {shouldShowTab('pipeline') && tabBtn('pipeline', 'Pipeline')}
@@ -260,10 +283,11 @@ export default function Navbar({
             { ariaLabel: 'Open settings' }
           )}
 
+        {/* Collapse only applies to the desktop rail. */}
         <button
           type="button"
           onClick={toggleCollapsed}
-          className={`${navBtnBase} ${btnLayout} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2`}
+          className={`${navBtnBase} ${btnLayout} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2 hidden lg:flex`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -276,9 +300,95 @@ export default function Navbar({
               )}
             </svg>
           </NavIcon>
-          <span className={collapsed ? 'sr-only' : 'truncate'}>{collapsed ? 'Expand' : 'Collapse'}</span>
+          <span className={iconOnly ? 'sr-only' : 'truncate'}>{collapsed ? 'Expand' : 'Collapse'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={closeMobileNav}
+          className={`${navBtnBase} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2 lg:hidden`}
+          aria-label="Close menu"
+        >
+          <NavIcon>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </NavIcon>
+          <span className="truncate">Close</span>
         </button>
       </div>
-    </nav>
+    </>
+  );
+
+  return (
+    <>
+      {/* Compact top chrome — frees the full width for main content on phones (portrait & landscape). */}
+      <header
+        className="lg:hidden fixed top-0 left-0 right-0 z-[55] h-[var(--app-mobile-topbar-height,3.5rem)] flex items-center gap-3 px-3 glass-panel border-b border-gray-200/60 dark:border-white/10 shadow-sm pt-[env(safe-area-inset-top,0px)]"
+        style={{
+          height: 'calc(var(--app-mobile-topbar-height, 3.5rem) + env(safe-area-inset-top, 0px))',
+        }}
+      >
+        <button
+          type="button"
+          onClick={openMobileNav}
+          className="inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-white/15 transition-colors"
+          aria-label="Open navigation menu"
+          aria-expanded={mobileNavOpen}
+          aria-controls="app-sidebar-nav"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {mounted && (
+            <img
+              src="/SWEEP_favicon.png"
+              alt=""
+              width={28}
+              height={28}
+              className="object-contain w-7 h-7 flex-shrink-0"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">
+              Sweep OS
+            </p>
+            {organizationName ? (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight">
+                {organizationName}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      {/* Scrim — keeps drawer from competing with main UI while open. */}
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        className={`lg:hidden fixed inset-0 z-[58] bg-black/50 backdrop-blur-[1px] transition-opacity duration-300 ${
+          mobileNavOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={closeMobileNav}
+        tabIndex={mobileNavOpen ? 0 : -1}
+      />
+
+      <nav
+        id="app-sidebar-nav"
+        className={`glass-panel fixed left-0 top-0 bottom-0 z-[60] flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-transform duration-300 ease-out lg:transition-[width,transform] w-[min(18rem,85vw)] ${desktopWidth} ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:translate-x-0`}
+        aria-label="Main navigation"
+        aria-hidden={isMobileNav && !mobileNavOpen ? true : undefined}
+      >
+        {brandBlock}
+        {navLinks}
+      </nav>
+    </>
   );
 }
