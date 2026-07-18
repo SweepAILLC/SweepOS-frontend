@@ -34,7 +34,7 @@ import { clearSessionCaches } from '@/lib/cache';
 export default function Dashboard() {
   const router = useRouter();
   const { setLoading: setGlobalLoading } = useLoading();
-  const { mainPaddingClass, callLibraryPaddingClass } = useSidebar();
+  const { mainPaddingClass, callLibraryPaddingClass, mobileTopPaddingClass } = useSidebar();
   
   // Tab ids are centralized in lib/tabs.ts (Navbar imports the same type).
   type DashboardTabId = TabId;
@@ -353,7 +353,7 @@ export default function Dashboard() {
       />
 
       {notification && (
-        <div className={`fixed top-4 right-4 z-[60] p-4 rounded-lg shadow-lg max-w-sm ${
+        <div className={`fixed top-[calc(var(--app-mobile-topbar-height,0px)+env(safe-area-inset-top,0px)+0.75rem)] right-3 z-[65] p-3 sm:p-4 rounded-lg shadow-lg max-w-[min(24rem,calc(100vw-1.5rem))] lg:top-4 ${
           notification.type === 'success' 
             ? 'bg-green-500 dark:bg-green-600 text-white' 
             : 'bg-red-500 dark:bg-red-600 text-white'
@@ -372,15 +372,15 @@ export default function Dashboard() {
       )}
 
       <div
-        className={`min-w-0 w-full min-h-screen transition-[padding-left] duration-300 ease-out ${
+        className={`min-w-0 w-full min-h-[100dvh] transition-[padding] duration-300 ease-out ${mobileTopPaddingClass} ${
           activeTab === 'call_library' ? callLibraryPaddingClass : mainPaddingClass
         }`}
       >
         <main
-          className={`min-w-0 mx-auto px-2 sm:px-4 lg:px-5 py-3 sm:py-6 ${
+          className={`min-w-0 mx-auto px-3 sm:px-4 lg:px-5 py-3 sm:py-6 overflow-x-hidden ${
             activeTab === 'pipeline' || activeTab === 'terminal'
               ? 'max-w-none w-full'
-              : 'max-w-7xl overflow-x-hidden'
+              : 'max-w-7xl'
           }`}
         >
         {activeTab === 'terminal' && (

@@ -8,7 +8,7 @@ import ShinyButton from '@/components/ui/ShinyButton';
 
 export default function NewFunnelPage() {
   const router = useRouter();
-  const { mainPaddingClass } = useSidebar();
+  const { mainPaddingClass, mobileTopPaddingClass } = useSidebar();
   const organizationName = useCurrentOrgName();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
@@ -54,7 +54,7 @@ export default function NewFunnelPage() {
           onTabChange={(tab) => router.push(`/?tab=${tab}`)}
           organizationName={organizationName}
         />
-      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-[padding-left] duration-300 ease-out ${mainPaddingClass}`}>
+      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-[padding] duration-300 ease-out ${mobileTopPaddingClass} ${mainPaddingClass}`}>
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}

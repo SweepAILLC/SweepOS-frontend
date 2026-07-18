@@ -4,6 +4,23 @@
 
 :root {
   --app-sidebar-width: 14rem;
+  /* Desktop: no mobile top bar. Mobile overrides below. */
+  --app-mobile-topbar-height: 0px;
+}
+
+/* Overlay-nav shell: full-width main canvas; top chrome instead of left gutter. */
+@media (max-width: 1023.98px) {
+  :root {
+    --app-sidebar-width: 0px;
+    --app-mobile-topbar-height: 3.5rem;
+  }
+}
+
+/* Landscape phones: shorter top bar so charts/tables keep readable height. */
+@media (max-width: 1023.98px) and (orientation: landscape) {
+  :root {
+    --app-mobile-topbar-height: 2.75rem;
+  }
 }
 
 body {
