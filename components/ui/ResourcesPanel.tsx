@@ -423,7 +423,7 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
                 </div>
               ) : (
                 <div
-                  className="resource-md-content text-sm text-gray-800 dark:text-gray-200 leading-relaxed"
+                  className="resource-md-content text-sm leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(content || '') }}
                 />
               )}

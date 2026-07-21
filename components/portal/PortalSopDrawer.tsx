@@ -643,7 +643,7 @@ export default function PortalSopDrawer({
                   <p className="text-xs text-gray-500 py-10 text-center">Loading document…</p>
                 ) : (
                   <div
-                    className="resource-md-content text-xs text-gray-800 dark:text-gray-200 leading-relaxed"
+                    className="resource-md-content text-xs leading-relaxed"
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(content || '') }}
                   />
                 )}
