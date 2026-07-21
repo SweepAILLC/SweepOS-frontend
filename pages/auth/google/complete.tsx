@@ -3,19 +3,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 
-function emailFromAccessToken(token: string): string {
-  try {
-    const part = token.split('.')[1];
-    if (!part) return '';
-    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded));
-    return typeof payload.sub === 'string' ? payload.sub : '';
-  } catch {
-    return '';
-  }
-}
-
 /**
  * Completes Google OAuth by reading `token` from the query string
  * (set by the backend callback redirect) and storing the access cookie.
@@ -44,20 +31,10 @@ export default function GoogleAuthComplete() {
       path: '/',
     });
     sessionStorage.setItem('newSession', '1');
-    // Clear password-login leftovers so org selection uses token auth.
     sessionStorage.removeItem('login_password');
+    sessionStorage.removeItem('login_email');
 
-    const email = emailFromAccessToken(token);
-    if (email) {
-      sessionStorage.setItem('login_email', email);
-    }
-
-    const multi = router.query.multi_org === '1';
-    if (multi) {
-      const qs = email ? `?email=${encodeURIComponent(email)}` : '';
-      window.location.href = `/select-organization${qs}`;
-      return;
-    }
+    // Always enter the primary (or selected) account; switch orgs in Settings → Accounts.
     window.location.href = '/';
   }, [router.isReady, router.query]);
 

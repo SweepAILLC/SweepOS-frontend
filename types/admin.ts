@@ -1,3 +1,5 @@
+export type ConsultingTier = 'pro_consulting' | 'core_consulting';
+
 export interface Organization {
   id: string;
   name: string;
@@ -8,6 +10,8 @@ export interface Organization {
   funnel_count?: number;
   admin_email?: string;  // Only present when creating a new org
   admin_password?: string;  // Only present when creating a new org
+  consulting_tier?: ConsultingTier | null;
+  booking_url?: string | null;
 }
 
 export interface HealthTrendPeriod {
@@ -180,6 +184,24 @@ export interface OrganizationDashboardSummary {
   manual_cash_all_time_usd?: number;
   total_processor_revenue_all_time_usd?: number;
   monthly_health_since_onboarding?: HealthTrendPeriod[];
+  /** Terminal-style KPIs for selected time scope */
+  kpi_scope?: string | null;
+  kpi_range_days?: number | null;
+  kpi_cash_usd?: number;
+  kpi_mrr_usd?: number;
+  kpi_avg_ltv_usd?: number | null;
+  kpi_upcoming_count?: number;
+  kpi_aov_usd?: number | null;
+  kpi_order_count?: number;
+  kpi_close_rate_pct?: number | null;
+  kpi_show_up_rate_pct?: number | null;
+  /** Growth / coaching (30d) — mirrors Owner Health product cards */
+  show_up_rate_last_30d_pct?: number | null;
+  close_rate_last_30d_pct?: number | null;
+  calls_booked_last_30d?: number;
+  calls_booked_previous_30d?: number;
+  lifecycle_active_clients_current?: number;
+  lifecycle_active_clients_previous_30d_cohort?: number;
   llm_usage_last_30d?: LlmUsageSummary | null;
 }
 

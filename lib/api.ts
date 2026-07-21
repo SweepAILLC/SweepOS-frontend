@@ -577,6 +577,46 @@ export interface OutreachInboxResponse {
   performance_task_count: number;
 }
 
+/** Org portal to-do item (GET/POST/PATCH /portal/todos). */
+export interface PortalTodo {
+  id: string;
+  org_id: string;
+  title: string;
+  description: string | null;
+  completed: boolean;
+  due_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Shared live notepad tab (GET/PUT /portal/shared-pads/{id}). */
+export interface PortalSharedPad {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  content: string;
+  revision: number;
+  updated_by: string | null;
+  updated_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+  unchanged?: boolean;
+}
+
+export interface PortalSharedPadSummary {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  revision: number;
+  updated_by_name: string | null;
+  updated_at: string;
+}
+
+export const MAX_PORTAL_SHARED_PADS = 10;
+
 class ApiClient {
   private client: AxiosInstance;
 
@@ -2153,7 +2193,15 @@ class ApiClient {
     return response.data;
   }
 
-  async updateOrganization(orgId: string, data: { name?: string; max_user_seats?: number | null }) {
+  async updateOrganization(
+    orgId: string,
+    data: {
+      name?: string;
+      max_user_seats?: number | null;
+      consulting_tier?: 'pro_consulting' | 'core_consulting' | null | '';
+      booking_url?: string | null;
+    }
+  ) {
     const response = await this.client.patch(`/admin/organizations/${orgId}`, data);
     return response.data;
   }
@@ -2217,8 +2265,16 @@ class ApiClient {
     return data;
   }
 
-  async getOrganizationDashboard(orgId: string) {
-    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`);
+  async getOrganizationDashboard(
+    orgId: string,
+    params?: { range?: number; scope?: 'mtd' | 'all' }
+  ) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`, {
+      params: {
+        ...(params?.range != null ? { range: params.range } : {}),
+        ...(params?.scope ? { scope: params.scope } : {}),
+      },
+    });
     return response.data;
   }
 
@@ -2558,48 +2614,60 @@ class ApiClient {
   async listDocs(): Promise<Array<{
     resource_id: string;
     category: string;
+    sop_category: string | null;
     title: string;
     description: string;
     powered_by: string | null;
+    video_url: string | null;
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
+    sort_order: number | null;
   }>> {
     const response = await this.client.get('/resources/docs');
     return response.data as Array<{
       resource_id: string;
       category: string;
+      sop_category: string | null;
       title: string;
       description: string;
       powered_by: string | null;
+      video_url: string | null;
       is_custom: boolean;
       is_builtin: boolean;
       updated_at: string | null;
+      sort_order: number | null;
     }>;
   }
 
   async getDoc(resourceId: string): Promise<{
     resource_id: string;
     category: string;
+    sop_category: string | null;
     title: string;
     description: string;
     content: string;
     powered_by: string | null;
+    video_url: string | null;
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
+    sort_order: number | null;
   }> {
     const response = await this.client.get(`/resources/docs/${resourceId}`);
     return response.data as {
       resource_id: string;
       category: string;
+      sop_category: string | null;
       title: string;
       description: string;
       content: string;
       powered_by: string | null;
+      video_url: string | null;
       is_custom: boolean;
       is_builtin: boolean;
       updated_at: string | null;
+      sort_order: number | null;
     };
   }
 
@@ -2607,10 +2675,12 @@ class ApiClient {
     resourceId: string,
     body: {
       category: string;
+      sop_category?: string | null;
       title: string;
       description: string;
       content: string;
       powered_by?: string | null;
+      video_url?: string | null;
     }
   ): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.put(`/resources/docs/${resourceId}`, body);
@@ -2619,13 +2689,46 @@ class ApiClient {
 
   async createDoc(body: {
     category: string;
+    sop_category?: string | null;
     title: string;
     description: string;
     content: string;
     powered_by?: string | null;
+    video_url?: string | null;
   }): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.post('/resources/docs', body);
     return response.data as { resource_id: string; title: string; content: string };
+  }
+
+  async reorderDocs(resourceIds: string[]): Promise<Array<{
+    resource_id: string;
+    category: string;
+    sop_category: string | null;
+    title: string;
+    description: string;
+    powered_by: string | null;
+    video_url: string | null;
+    is_custom: boolean;
+    is_builtin: boolean;
+    updated_at: string | null;
+    sort_order: number | null;
+  }>> {
+    const response = await this.client.post('/resources/docs/reorder', {
+      resource_ids: resourceIds,
+    });
+    return response.data as Array<{
+      resource_id: string;
+      category: string;
+      sop_category: string | null;
+      title: string;
+      description: string;
+      powered_by: string | null;
+      video_url: string | null;
+      is_custom: boolean;
+      is_builtin: boolean;
+      updated_at: string | null;
+      sort_order: number | null;
+    }>;
   }
 
   async deleteDoc(resourceId: string): Promise<{ resource_id: string; deleted: boolean }> {
@@ -2727,6 +2830,231 @@ class ApiClient {
     );
     cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
+  }
+
+  // ----- Org Portal (consulting program) ------------------------------------
+
+  async getPortalTodos(): Promise<PortalTodo[]> {
+    const response = await this.client.get('/portal/todos');
+    return (response.data || []) as PortalTodo[];
+  }
+
+  async createPortalTodo(data: {
+    title: string;
+    description?: string;
+    due_date?: string;
+  }): Promise<PortalTodo> {
+    const response = await this.client.post('/portal/todos', data);
+    return response.data as PortalTodo;
+  }
+
+  async updatePortalTodo(
+    id: string,
+    data: {
+      title?: string;
+      description?: string;
+      completed?: boolean;
+      due_date?: string | null;
+    }
+  ): Promise<PortalTodo> {
+    const response = await this.client.patch(`/portal/todos/${id}`, data);
+    return response.data as PortalTodo;
+  }
+
+  async deletePortalTodo(id: string): Promise<void> {
+    await this.client.delete(`/portal/todos/${id}`);
+  }
+
+  // ----- Admin: org portal to-dos (cross-org) --------------------------------
+
+  async getAdminOrgPortalTodos(orgId: string): Promise<PortalTodo[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-todos`);
+    return (response.data || []) as PortalTodo[];
+  }
+
+  async createAdminOrgPortalTodo(
+    orgId: string,
+    data: { title: string; description?: string; due_date?: string }
+  ): Promise<PortalTodo> {
+    const response = await this.client.post(`/admin/organizations/${orgId}/portal-todos`, data);
+    return response.data as PortalTodo;
+  }
+
+  async updateAdminOrgPortalTodo(
+    orgId: string,
+    todoId: string,
+    data: {
+      title?: string;
+      description?: string;
+      completed?: boolean;
+      due_date?: string | null;
+    }
+  ): Promise<PortalTodo> {
+    const response = await this.client.patch(
+      `/admin/organizations/${orgId}/portal-todos/${todoId}`,
+      data
+    );
+    return response.data as PortalTodo;
+  }
+
+  async deleteAdminOrgPortalTodo(orgId: string, todoId: string): Promise<void> {
+    await this.client.delete(`/admin/organizations/${orgId}/portal-todos/${todoId}`);
+  }
+
+  // ----- Org Portal shared pads (multi-tab live notepad) ---------------------
+
+  async listPortalSharedPads(): Promise<PortalSharedPadSummary[]> {
+    const response = await this.client.get('/portal/shared-pads', { timeout: 8000 });
+    return (response.data || []) as PortalSharedPadSummary[];
+  }
+
+  async createPortalSharedPad(title?: string): Promise<PortalSharedPad> {
+    const response = await this.client.post(
+      '/portal/shared-pads',
+      title ? { title } : {},
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async getPortalSharedPadById(
+    padId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(`/portal/shared-pads/${padId}`, {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async putPortalSharedPadById(
+    padId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(`/portal/shared-pads/${padId}`, data, {
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async renamePortalSharedPad(padId: string, title: string): Promise<PortalSharedPad> {
+    const response = await this.client.patch(
+      `/portal/shared-pads/${padId}`,
+      { title },
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async deletePortalSharedPad(padId: string): Promise<void> {
+    await this.client.delete(`/portal/shared-pads/${padId}`, { timeout: 8000 });
+  }
+
+  async listAdminOrgPortalSharedPads(orgId: string): Promise<PortalSharedPadSummary[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pads`, {
+      timeout: 8000,
+    });
+    return (response.data || []) as PortalSharedPadSummary[];
+  }
+
+  async createAdminOrgPortalSharedPad(orgId: string, title?: string): Promise<PortalSharedPad> {
+    const response = await this.client.post(
+      `/admin/organizations/${orgId}/portal-shared-pads`,
+      title ? { title } : {},
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async getAdminOrgPortalSharedPadById(
+    orgId: string,
+    padId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      {
+        params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+        timeout: 8000,
+      }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async putAdminOrgPortalSharedPadById(
+    orgId: string,
+    padId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      data,
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async renameAdminOrgPortalSharedPad(
+    orgId: string,
+    padId: string,
+    title: string
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.patch(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      { title },
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async deleteAdminOrgPortalSharedPad(orgId: string, padId: string): Promise<void> {
+    await this.client.delete(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, {
+      timeout: 8000,
+    });
+  }
+
+  /** @deprecated Prefer getPortalSharedPadById */
+  async getPortalSharedPad(sinceRevision?: number): Promise<PortalSharedPad> {
+    const response = await this.client.get('/portal/shared-pad', {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer putPortalSharedPadById */
+  async putPortalSharedPad(data: {
+    content: string;
+    base_revision?: number;
+  }): Promise<PortalSharedPad> {
+    const response = await this.client.put('/portal/shared-pad', data, { timeout: 8000 });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer getAdminOrgPortalSharedPadById */
+  async getAdminOrgPortalSharedPad(
+    orgId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pad`, {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer putAdminOrgPortalSharedPadById */
+  async putAdminOrgPortalSharedPad(
+    orgId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(
+      `/admin/organizations/${orgId}/portal-shared-pad`,
+      data,
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
   }
 }
 

@@ -183,7 +183,21 @@ export default function Navbar({
   };
 
   const brandBlock = (
-    <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10">
+    <button
+      type="button"
+      onClick={() => {
+        onTabChange('org_portal');
+        closeMobileNav();
+      }}
+      className={`flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10 w-full text-left transition-colors cursor-pointer group ${
+        activeTab === 'org_portal'
+          ? 'bg-white/10 dark:bg-white/10'
+          : 'hover:bg-white/5 dark:hover:bg-white/5'
+      }`}
+      title="Open org portal"
+      aria-label="Open organization portal"
+      aria-current={activeTab === 'org_portal' ? 'page' : undefined}
+    >
       <div className={`flex items-center gap-2 min-w-0 ${iconOnly ? 'justify-center' : ''}`}>
         {mounted && (
           <div className="relative w-8 h-8 flex-shrink-0">
@@ -200,20 +214,30 @@ export default function Navbar({
           </div>
         )}
         {!iconOnly ? (
-          <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">
+          <h1
+            className={`text-base font-bold truncate leading-tight min-w-0 transition-colors ${
+              activeTab === 'org_portal'
+                ? 'text-violet-700 dark:text-violet-300'
+                : 'text-gray-900 dark:text-gray-100 group-hover:text-violet-700 dark:group-hover:text-violet-300'
+            }`}
+          >
             Sweep OS
           </h1>
         ) : null}
       </div>
       {!iconOnly && organizationName ? (
         <p
-          className={`text-xs font-medium text-gray-500 dark:text-gray-400 truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''}`}
+          className={`text-xs font-medium truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''} ${
+            activeTab === 'org_portal'
+              ? 'text-violet-600/80 dark:text-violet-300/80'
+              : 'text-gray-500 dark:text-gray-400'
+          }`}
           title={organizationName}
         >
           {organizationName}
         </p>
       ) : null}
-    </div>
+    </button>
   );
 
   const navLinks = (
@@ -224,16 +248,16 @@ export default function Navbar({
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
+        {shouldShowTab('automations') &&
+          iconBtn('automations', 'Automations', TAB_ICONS.automations!, {
+            title: 'Automated email playbooks & worker health',
+            badge: automationsAwaitingApproval,
+          })}
         {shouldShowTab('resources') && tabBtn('resources', 'Resources')}
         {shouldShowTab('owner') && tabBtn('owner', 'Owner')}
       </div>
 
       <div className="flex-shrink-0 p-2 border-t border-gray-200/50 dark:border-white/10 space-y-1">
-        {shouldShowBottomNavTab('automations') &&
-          iconBtn('automations', 'Automations', TAB_ICONS.automations, {
-            title: 'Automated email playbooks & worker health',
-            badge: automationsAwaitingApproval,
-          })}
         {shouldShowBottomNavTab('intelligence') &&
           iconBtn(
             'intelligence',
@@ -249,22 +273,6 @@ export default function Navbar({
             {
               ariaLabel: 'AI Intelligence',
               title: 'AI Intelligence profile',
-            }
-          )}
-        {shouldShowBottomNavTab('integrations') &&
-          iconBtn(
-            'integrations',
-            'Integrations',
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"
-              />
-            </svg>,
-            {
-              title: 'Connect Stripe, Brevo, Whop, and more',
             }
           )}
         {shouldShowBottomNavTab('settings') &&

@@ -8,12 +8,8 @@ export {
   legacyTabOpensPipeline,
 } from '@/lib/tabs';
 
-/** Sidebar footer tabs — settings is available to every user; others are org admin/owner only. */
-export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = [
-  'automations',
-  'intelligence',
-  'integrations',
-];
+/** Sidebar footer tabs (settings section) — settings for everyone; others admin/owner only. */
+export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = ['intelligence'];
 
 export const BOTTOM_NAV_TAB_IDS: TabId[] = [
   ...MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
@@ -53,6 +49,7 @@ export function defaultTabPermissions(): Record<string, boolean> {
     automations: true,
     clients: true,
     settings: true,
+    org_portal: true,
   };
 }
 
@@ -67,7 +64,7 @@ export function canAccessTab(
 ): boolean {
   const roleLower = String(ctx.userRole || 'member').toLowerCase().trim();
   if (tab === 'owner') return ctx.isOwner;
-  if (tab === 'resources') return true;
+  if (tab === 'resources' || tab === 'org_portal') return true;
   if (
     roleLower === 'member' &&
     (tab === 'integrations' || tab === 'intelligence' || tab === 'automations')

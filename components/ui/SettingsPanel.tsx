@@ -6,8 +6,9 @@ import { clearSessionCaches } from '@/lib/cache';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import UsersPanel from '@/components/UsersPanel';
+import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 
-type SettingsSection = 'appearance' | 'accounts' | 'team' | 'profile' | 'privacy';
+type SettingsSection = 'appearance' | 'accounts' | 'team' | 'profile' | 'privacy' | 'integrations';
 
 interface OrgOption {
   id: string;
@@ -19,6 +20,7 @@ const SIDEBAR_ITEMS: { id: SettingsSection; label: string; adminOnly?: boolean }
   { id: 'appearance', label: 'Appearance' },
   { id: 'accounts', label: 'Accounts' },
   { id: 'team', label: 'Team', adminOnly: true },
+  { id: 'integrations', label: 'Integrations', adminOnly: true },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
@@ -110,7 +112,7 @@ export default function SettingsPanel() {
     loadSettings();
   }, []);
 
-  // Handle return from Google connect (/?tab=settings&section=profile&google=connected)
+  // Deep-links: /?tab=settings&section=… and Google connect return
   useEffect(() => {
     if (!router.isReady) return;
     const tab = router.query.tab;
@@ -119,9 +121,14 @@ export default function SettingsPanel() {
     const googleError = router.query.google_error;
     const message = typeof router.query.message === 'string' ? router.query.message : '';
 
-    if (tab === 'settings' || sectionQ === 'profile' || google || googleError) {
+    if (tab === 'settings' || sectionQ || google || googleError) {
       if (sectionQ === 'profile' || google || googleError) {
         setSection('profile');
+      } else if (
+        typeof sectionQ === 'string' &&
+        ['appearance', 'accounts', 'team', 'profile', 'privacy', 'integrations'].includes(sectionQ)
+      ) {
+        setSection(sectionQ as SettingsSection);
       }
     }
     if (google === 'connected') {
@@ -135,6 +142,14 @@ export default function SettingsPanel() {
       router.replace({ pathname: router.pathname, query: {} }, undefined, { shallow: true });
     }
   }, [router.isReady, router.query.tab, router.query.section, router.query.google, router.query.google_error]);
+
+  const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner';
+
+  useEffect(() => {
+    if (!loading && section === 'integrations' && !isAdminOrOwner) {
+      setSection('appearance');
+    }
+  }, [loading, section, isAdminOrOwner]);
 
   const handleConnectGoogle = async () => {
     try {
@@ -284,7 +299,6 @@ export default function SettingsPanel() {
     );
   }
 
-  const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner';
   const visibleSidebarItems = SIDEBAR_ITEMS.filter(
     (item) => !item.adminOnly || isAdminOrOwner
   );
@@ -298,7 +312,20 @@ export default function SettingsPanel() {
             <button
               key={item.id}
               type="button"
-              onClick={() => setSection(item.id)}
+              onClick={() => {
+                setSection(item.id);
+                if (item.id === 'integrations') {
+                  void router.replace(
+                    { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+                    undefined,
+                    { shallow: true }
+                  );
+                } else if (router.query.section) {
+                  void router.replace({ pathname: '/', query: { tab: 'settings' } }, undefined, {
+                    shallow: true,
+                  });
+                }
+              }}
               className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
                 section === item.id
                   ? 'bg-white/20 dark:bg-white/10 text-gray-900 dark:text-gray-100'
@@ -322,6 +349,9 @@ export default function SettingsPanel() {
 
       {/* Content */}
       <div className="flex-1 min-w-0">
+        {section === 'integrations' && isAdminOrOwner ? (
+          <IntegrationsPanel />
+        ) : (
         <div className="glass-card p-6">
           {error && (
             <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
@@ -601,6 +631,7 @@ export default function SettingsPanel() {
           )}
 
         </div>
+        )}
       </div>
     </div>
   );

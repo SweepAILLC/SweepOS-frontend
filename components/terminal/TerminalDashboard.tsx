@@ -130,6 +130,8 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
           checkStripeWebhookAndRefresh(),
           checkCalendarWebhookAndRefresh(),
         ]);
+        // Calendar poll already dispatches chart refresh events (no Stripe required).
+        // Full Terminal refresh stays Stripe-gated only for payment sync.
         if (stripeChanged) {
           await runTerminalDataRefresh({ reason: 'webhook' });
         }

@@ -10,12 +10,13 @@ import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
 import AdminPanel from '@/components/AdminPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import SettingsPanel from '@/components/ui/SettingsPanel';
-import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
 import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
 import ResourcesPanel from '@/components/ui/ResourcesPanel';
 import AutomationsTab from '@/components/automations/AutomationsTab';
+import OrgPortalPanel from '@/components/portal/OrgPortalPanel';
+import type { ConsultingTier } from '@/types/admin';
 import {
   resolveLegacyTab,
   legacyTabOpensTerminal,
@@ -57,9 +58,10 @@ export default function Dashboard() {
     if (savedTab && legacyTabOpensPipeline(savedTab)) {
       return 'pipeline';
     }
-    if (savedTab === 'brevo') {
-      localStorage.setItem('activeTab', 'integrations');
-      return 'integrations';
+    if (savedTab === 'brevo' || savedTab === 'integrations') {
+      localStorage.setItem('activeTab', 'settings');
+      sessionStorage.setItem('openSettingsIntegrations', '1');
+      return 'settings';
     }
     const resolved = resolveLegacyTab(savedTab);
     if (resolved) return resolved;
@@ -73,6 +75,8 @@ export default function Dashboard() {
   );
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
+  /** Platform operators (sudo / Sweep Internal admin|owner) — see AdminPanel on org portal. */
+  const [isSystemOwner, setIsSystemOwner] = useState(false);
   const [isMainOrg, setIsMainOrg] = useState(false);
   const [userRole, setUserRole] = useState<string>('member'); // Track user role for permission checks
   const [tabPermissions, setTabPermissions] = useState<Record<string, boolean>>(() =>
@@ -81,6 +85,8 @@ export default function Dashboard() {
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [organizationName, setOrganizationName] = useState<string | null>(null);
   const [automationsAwaitingApproval, setAutomationsAwaitingApproval] = useState(0);
+  const [consultingTier, setConsultingTier] = useState<ConsultingTier | null>(null);
+  const [bookingUrl, setBookingUrl] = useState<string | null>(null);
 
   // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
   useEffect(() => {
@@ -130,6 +136,7 @@ export default function Dashboard() {
 
         const userIsOwner = String(user.role || '').toLowerCase().trim() === 'owner';
         setIsOwner(userIsOwner);
+        setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
         const normalizedRole = String(user.role || 'member').toLowerCase().trim();
         setUserRole(normalizedRole);
 
@@ -139,7 +146,18 @@ export default function Dashboard() {
         // Show the shell immediately; permissions and org name can hydrate after.
         setLoadingState(false);
 
-        const u = user as { org_id?: string; org_name?: string | null; email?: string };
+        const u = user as {
+          org_id?: string;
+          org_name?: string | null;
+          email?: string;
+          consulting_tier?: ConsultingTier | null;
+          booking_url?: string | null;
+        };
+        const tier = u.consulting_tier;
+        setConsultingTier(
+          tier === 'pro_consulting' || tier === 'core_consulting' ? tier : null
+        );
+        setBookingUrl(u.booking_url ?? null);
         if (u.org_name) {
           setOrganizationName(u.org_name);
         } else if (u.email && u.org_id) {
@@ -251,15 +269,23 @@ export default function Dashboard() {
       return;
     } else if (brevo_connected === 'true') {
       setNotification({ type: 'success', message: 'Brevo connected successfully!' });
-      setActiveTab('integrations');
-      router.replace('/', undefined, { shallow: true });
+      setActiveTab('settings');
+      router.replace(
+        { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+        undefined,
+        { shallow: true }
+      );
       setTimeout(() => setNotification(null), 5000);
       return;
     } else if (brevo_error) {
       const errorMsg = error_description || 'Failed to connect Brevo';
       setNotification({ type: 'error', message: `Brevo connection error: ${errorMsg}` });
-      setActiveTab('integrations');
-      router.replace('/', undefined, { shallow: true });
+      setActiveTab('settings');
+      router.replace(
+        { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+        undefined,
+        { shallow: true }
+      );
       setTimeout(() => setNotification(null), 5000);
       return;
     }
@@ -289,9 +315,17 @@ export default function Dashboard() {
         router.replace('/', undefined, { shallow: true });
         return;
       }
-      const normalizedTab = tab === 'brevo' ? 'integrations' : tab;
-      if (VALID_TAB_IDS.includes(normalizedTab as TabId)) {
-        const tabValue = normalizedTab as TabId;
+      if (tab === 'brevo' || tab === 'integrations') {
+        setActiveTab('settings');
+        router.replace(
+          { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+          undefined,
+          { shallow: true }
+        );
+        return;
+      }
+      if (VALID_TAB_IDS.includes(tab as TabId)) {
+        const tabValue = tab as TabId;
         setActiveTab(tabValue);
         const rawFid = router.query.funnelId;
         if (tabValue === 'funnels' && rawFid && typeof rawFid === 'string') {
@@ -313,16 +347,72 @@ export default function Dashboard() {
     }
   }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
-  // Members must not stay on admin-only footer tabs (URL/localStorage). Settings stays open for logout/org switch.
+  // Members must not stay on admin-only tabs (URL/localStorage). Settings stays open for logout/org switch.
   useEffect(() => {
     if (loading) return;
     const roleLower = String(userRole || 'member').toLowerCase().trim();
     if (roleLower !== 'member') return;
-    if (MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS.includes(activeTab)) {
+    if (
+      MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS.includes(activeTab) ||
+      activeTab === 'automations'
+    ) {
       setActiveTab('terminal');
       setGlobalLoading(false);
     }
   }, [loading, activeTab, userRole, setGlobalLoading]);
+
+  // System owners open Owner Panel via logo/org_portal — redirect legacy owner tab.
+  useEffect(() => {
+    if (loading || !isSystemOwner) return;
+    if (activeTab === 'owner') {
+      setActiveTab('org_portal');
+      setGlobalLoading(false);
+    }
+  }, [loading, activeTab, isSystemOwner, setGlobalLoading]);
+
+  // Integrations live under Settings → Integrations.
+  useEffect(() => {
+    if (loading) return;
+    const openIntegrations = sessionStorage.getItem('openSettingsIntegrations') === '1';
+    if (openIntegrations) sessionStorage.removeItem('openSettingsIntegrations');
+    if (activeTab === 'integrations' || openIntegrations) {
+      setActiveTab('settings');
+      void router.replace(
+        { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+        undefined,
+        { shallow: true }
+      );
+      setGlobalLoading(false);
+    }
+  }, [loading, activeTab, router, setGlobalLoading]);
+
+  // Refresh consulting portal fields when opening the portal (booking URL can change after admin save).
+  useEffect(() => {
+    if (loading || activeTab !== 'org_portal' || isSystemOwner) return;
+    let cancelled = false;
+    void apiClient
+      .getCurrentUser()
+      .then((user) => {
+        if (cancelled) return;
+        const u = user as {
+          org_name?: string | null;
+          consulting_tier?: ConsultingTier | null;
+          booking_url?: string | null;
+        };
+        const tier = u.consulting_tier;
+        setConsultingTier(
+          tier === 'pro_consulting' || tier === 'core_consulting' ? tier : null
+        );
+        setBookingUrl(typeof u.booking_url === 'string' && u.booking_url.trim() ? u.booking_url.trim() : null);
+        if (u.org_name) setOrganizationName(u.org_name);
+      })
+      .catch(() => {
+        /* keep existing portal props */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, activeTab, isSystemOwner]);
 
   if (loading) {
     return (
@@ -345,7 +435,7 @@ export default function Dashboard() {
         onTabChange={(tab) => {
           if (tab !== activeTab) setActiveTab(tab);
         }} 
-        isOwner={isOwner}
+        isOwner={isOwner && !isSystemOwner}
         tabPermissions={tabPermissions}
         userRole={userRole || 'member'}
         organizationName={organizationName}
@@ -378,7 +468,7 @@ export default function Dashboard() {
       >
         <main
           className={`min-w-0 mx-auto px-3 sm:px-4 lg:px-5 py-3 sm:py-6 overflow-x-hidden ${
-            activeTab === 'pipeline' || activeTab === 'terminal'
+            activeTab === 'pipeline' || activeTab === 'terminal' || activeTab === 'org_portal'
               ? 'max-w-none w-full'
               : 'max-w-7xl'
           }`}
@@ -442,19 +532,23 @@ export default function Dashboard() {
           )
         )}
 
-        {activeTab === 'integrations' && (
-          hasTabAccess('integrations') ? (
-            <IntegrationsPanel />
+        {activeTab === 'org_portal' && (
+          isSystemOwner ? (
+            <AdminPanel />
+          ) : hasTabAccess('org_portal') ? (
+            <OrgPortalPanel
+              organizationName={organizationName}
+              consultingTier={consultingTier}
+              bookingUrl={bookingUrl}
+              isActive={activeTab === 'org_portal'}
+            />
           ) : (
-            <RestrictedTabView tabName="integrations" />
+            <RestrictedTabView tabName="org_portal" />
           )
         )}
 
-        {activeTab === 'owner' && isOwner && (
-          <div>
-            <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Owner Panel</h2>
-            <AdminPanel />
-          </div>
+        {activeTab === 'owner' && isOwner && !isSystemOwner && (
+          <AdminPanel />
         )}
 
         {activeTab === 'intelligence' && (

@@ -3,13 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Client } from '@/types/client';
 import { apiClient } from '@/lib/api';
-
-type Ladder = {
-  core_offer?: { name?: string; promise?: string; price_terms?: string };
-  upsells?: Array<{ name?: string; promise?: string; price_terms?: string }>;
-  downsells?: Array<{ name?: string; promise?: string; price_terms?: string }>;
-  referral_offer?: { incentive?: string; ask_script_hints?: string };
-};
+import { normalizeOfferLadder, type OfferLadder } from '@/lib/offerLadder';
 
 export type OfferSlotValue = string;
 
@@ -21,7 +15,7 @@ function parseMoneyToCents(raw: string): number {
   return Math.round(v * 100);
 }
 
-function buildOfferOptions(ladder: Ladder | null): { value: string; label: string }[] {
+function buildOfferOptions(ladder: OfferLadder | null): { value: string; label: string }[] {
   const opts: { value: string; label: string }[] = [{ value: '', label: '—' }];
   if (!ladder) return opts;
 
@@ -32,12 +26,8 @@ function buildOfferOptions(ladder: Ladder | null): { value: string; label: strin
   opts.push({ value: 'core', label: `Core · ${coreName}` });
 
   (ladder.upsells || []).forEach((u, i) => {
-    const name = (u?.name || u?.promise || `Upsell ${i + 1}`).toString().slice(0, 80);
-    opts.push({ value: `upsell:${i}`, label: `↑ ${name}` });
-  });
-  (ladder.downsells || []).forEach((d, i) => {
-    const name = (d?.name || d?.promise || `Downsell ${i + 1}`).toString().slice(0, 80);
-    opts.push({ value: `downsell:${i}`, label: `↓ ${name}` });
+    const name = (u?.name || u?.promise || `Add-on ${i + 1}`).toString().slice(0, 80);
+    opts.push({ value: `upsell:${i}`, label: `Add-on · ${name}` });
   });
 
   const refLabel =
@@ -62,7 +52,7 @@ export default function OfferEnrollmentSection({
   minimal,
   onSaved,
 }: OfferEnrollmentSectionProps) {
-  const [ladder, setLadder] = useState<Ladder | null>(null);
+  const [ladder, setLadder] = useState<OfferLadder | null>(null);
   const [slot, setSlot] = useState('');
   const [totalStr, setTotalStr] = useState('');
   const [notes, setNotes] = useState('');
@@ -78,7 +68,11 @@ export default function OfferEnrollmentSection({
       .then((s: { ai_profile?: Record<string, unknown> }) => {
         if (cancelled) return;
         const raw = s?.ai_profile?.offer_ladder;
-        setLadder(raw != null && typeof raw === 'object' ? (raw as Ladder) : null);
+        setLadder(
+          raw != null && typeof raw === 'object'
+            ? normalizeOfferLadder(raw as OfferLadder)
+            : null
+        );
       })
       .catch(() => {
         if (!cancelled) setLadder(null);
@@ -104,7 +98,16 @@ export default function OfferEnrollmentSection({
     syncFromClient();
   }, [client.id, client.updated_at, syncFromClient]);
 
-  const options = useMemo(() => buildOfferOptions(ladder), [ladder]);
+  const options = useMemo(() => {
+    const next = buildOfferOptions(ladder);
+    if (oe?.slot?.startsWith('downsell:') && !next.some((option) => option.value === oe.slot)) {
+      next.push({
+        value: oe.slot,
+        label: oe.name_snapshot || 'Legacy add-on',
+      });
+    }
+    return next;
+  }, [ladder, oe?.name_snapshot, oe?.slot]);
 
   const contractCentsPreview = useMemo(() => parseMoneyToCents(totalStr), [totalStr]);
   const owedPreview = useMemo(

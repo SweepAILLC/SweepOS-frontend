@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ResponsiveContainer,
   ComposedChart,
@@ -42,29 +42,50 @@ function formatDayLabel(isoDate: string): string {
 export function ApiCostsTrendChart({
   organizations,
   className = '',
+  /** When set, locks the chart to this org (hides org filter). */
+  lockedOrgId,
+  /** Bump to force a refetch (e.g. live refresh while modal is open). */
+  refreshToken = 0,
 }: {
   organizations: Organization[];
   className?: string;
+  lockedOrgId?: string;
+  refreshToken?: number;
 }) {
   const [timeRange, setTimeRange] = useState<DashboardTimeRange>(30);
-  const [orgId, setOrgId] = useState<string>('');
+  const [orgId, setOrgId] = useState<string>(lockedOrgId || '');
   const [data, setData] = useState<LlmUsageTimeseries | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasDataRef = useRef(false);
+
+  useEffect(() => {
+    if (lockedOrgId) setOrgId(lockedOrgId);
+  }, [lockedOrgId]);
+
+  useEffect(() => {
+    // Filter/org change should show loading; soft refreshToken bumps should not.
+    hasDataRef.current = false;
+  }, [timeRange, orgId, lockedOrgId]);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      setLoading(true);
+      // Avoid flicker on live refresh when we already have a chart snapshot.
+      if (!hasDataRef.current) setLoading(true);
       setError(null);
       try {
         const tl = financesTimelineApiParams(timeRange);
+        const effectiveOrgId = lockedOrgId || orgId || undefined;
         const res = (await apiClient.getLlmUsageTimeseries({
           days: tl.days,
           scope: tl.scope,
-          org_id: orgId || undefined,
+          org_id: effectiveOrgId,
         })) as LlmUsageTimeseries;
-        if (!cancelled) setData(res);
+        if (!cancelled) {
+          hasDataRef.current = true;
+          setData(res);
+        }
       } catch (err: unknown) {
         if (!cancelled) {
           const msg =
@@ -73,7 +94,7 @@ export function ApiCostsTrendChart({
             (err as { message?: string })?.message ||
             'Failed to load API cost trend';
           setError(typeof msg === 'string' ? msg : 'Failed to load API cost trend');
-          setData(null);
+          if (!hasDataRef.current) setData(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -83,7 +104,7 @@ export function ApiCostsTrendChart({
     return () => {
       cancelled = true;
     };
-  }, [timeRange, orgId]);
+  }, [timeRange, orgId, lockedOrgId, refreshToken]);
 
   const chartRows =
     data?.points.map((p) => ({
@@ -91,8 +112,11 @@ export function ApiCostsTrendChart({
       label: formatDayLabel(p.date),
     })) ?? [];
 
-  const scopeLabel = orgId
-    ? organizations.find((o) => o.id === orgId)?.name || data?.organization_name || 'Selected org'
+  const effectiveOrgId = lockedOrgId || orgId;
+  const scopeLabel = effectiveOrgId
+    ? organizations.find((o) => o.id === effectiveOrgId)?.name ||
+      data?.organization_name ||
+      'Selected org'
     : 'All organizations';
 
   return (
@@ -109,19 +133,21 @@ export function ApiCostsTrendChart({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="text-sm glass-input rounded-md px-3 py-1.5 min-w-[10rem]"
-            aria-label="Filter by organization"
-          >
-            <option value="">All organizations</option>
-            {organizations.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
+          {!lockedOrgId ? (
+            <select
+              value={orgId}
+              onChange={(e) => setOrgId(e.target.value)}
+              className="text-sm glass-input rounded-md px-3 py-1.5 min-w-[10rem]"
+              aria-label="Filter by organization"
+            >
+              <option value="">All organizations</option>
+              {organizations.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
           <select
             value={timeRange === 'all' ? 'all' : timeRange === 'mtd' ? 'mtd' : String(timeRange)}
             onChange={(e) => {

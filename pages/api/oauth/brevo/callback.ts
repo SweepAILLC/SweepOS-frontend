@@ -62,7 +62,7 @@ export default async function handler(
     const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3002';
     return res.redirect(
       302,
-      `${frontendUrl}/?brevo_error=unexpected_response&error_description=${encodeURIComponent(`Backend returned status ${response.status}`)}&tab=integrations`
+      `${frontendUrl}/?brevo_error=unexpected_response&error_description=${encodeURIComponent(`Backend returned status ${response.status}`)}&tab=settings&section=integrations`
     );
   } catch (error: any) {
     console.error('[BREVO CALLBACK] Error proxying Brevo OAuth callback:', error);
@@ -71,7 +71,7 @@ export default async function handler(
     const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3002';
     return res.redirect(
       302,
-      `${frontendUrl}/?brevo_error=proxy_error&error_description=${encodeURIComponent(error.message || 'Failed to process OAuth callback')}&tab=integrations`
+      `${frontendUrl}/?brevo_error=proxy_error&error_description=${encodeURIComponent(error.message || 'Failed to process OAuth callback')}&tab=settings&section=integrations`
     );
   }
 }

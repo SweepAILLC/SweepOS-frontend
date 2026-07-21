@@ -56,7 +56,7 @@ export interface CallInsightsRollup {
 }
 
 export interface OfferSuggestion {
-  /** Internal kind: core | upsell | downsell | referral. */
+  /** Internal kind: core | upsell | referral (legacy records may contain downsell). */
   kind: string;
   /** Human label (e.g. "core offer", "upsell"). */
   kind_label: string;

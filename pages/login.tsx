@@ -44,46 +44,34 @@ export default function Login() {
         throw new Error('Email and password are required');
       }
       
-      // Store email and password in session storage for org selection if needed
-      sessionStorage.setItem('login_email', normalizedEmail);
-      sessionStorage.setItem('login_password', normalizedPassword);
-      
-      const result = await apiClient.login(normalizedEmail, normalizedPassword);
-      
-      // Check if organization selection is required
-      if (result.requires_org_selection && result.organizations) {
-        // Redirect to organization selection page
-        router.push({
-          pathname: '/select-organization',
-          query: { email: normalizedEmail }
-        });
-        return;
+      // Multi-org users land on their primary account; switch later in Settings → Accounts.
+      let result = await apiClient.login(normalizedEmail, normalizedPassword);
+
+      // Legacy fallback: if an older API still asks for org selection, pick primary and continue.
+      if (result.requires_org_selection && result.organizations?.length) {
+        const primary =
+          result.organizations.find((o: { is_primary?: boolean }) => o.is_primary) ||
+          result.organizations[0];
+        result = await apiClient.login(normalizedEmail, normalizedPassword, primary.id);
       }
-      
-      // Verify we got a token
+
       if (!result.access_token) {
         throw new Error('No access token received');
       }
-      
-      // Clear session storage on successful login
+
       sessionStorage.removeItem('login_email');
       sessionStorage.removeItem('login_password');
-      
-      // Small delay to ensure cookie is set before redirect
-      // This prevents race condition where dashboard loads before cookie is available
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
-      // Verify cookie is set before redirecting
-      const token = document.cookie.split('; ').find(row => row.startsWith('access_token='));
+
+      // Small delay so the auth cookie is available before the dashboard loads
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      const token = document.cookie.split('; ').find((row) => row.startsWith('access_token='));
       if (!token) {
         console.error('Cookie not found after login. This may indicate a CORS or cookie setting issue.');
-        // Still redirect - the dashboard will handle the auth error
       }
-      
+
       // Mark as new session so dashboard starts on Terminal (refresh keeps current tab)
       sessionStorage.setItem('newSession', '1');
-      // Use window.location instead of router.push to ensure full page reload
-      // This ensures the cookie is available when the dashboard loads
       window.location.href = '/';
     } catch (err: any) {
       console.error('Login error:', err);

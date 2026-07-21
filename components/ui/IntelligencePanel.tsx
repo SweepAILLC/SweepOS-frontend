@@ -4,6 +4,13 @@ import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, type OrgSalesContentTheme } from '@/lib/api';
 import { DEFAULT_EMAIL_HTML_TEMPLATE } from '@/lib/emailHtmlDefaultTemplate';
+import {
+  normalizeOfferLadder,
+  type ObjectionHandler,
+  type OfferEntry,
+  type OfferLadder,
+  type ReferralOffer,
+} from '@/lib/offerLadder';
 
 const CAMPAIGN_SAMPLE_KINDS = [
   'onboarding_email',
@@ -21,38 +28,6 @@ import { useLoading } from '@/contexts/LoadingContext';
 interface AssetLink {
   label: string;
   url: string;
-}
-
-interface OfferEntry {
-  name?: string;
-  promise?: string;
-  ideal_for?: string;
-  not_for?: string;
-  price_terms?: string;
-  when_to_use?: string;
-  triggers?: string[];
-  contraindications?: string;
-}
-
-interface ReferralOffer {
-  incentive?: string;
-  eligibility?: string;
-  ask_script_hints?: string;
-}
-
-interface ObjectionHandler {
-  objection: string;
-  response: string;
-}
-
-interface OfferLadder {
-  version?: number;
-  core_offer?: OfferEntry;
-  downsells?: OfferEntry[];
-  upsells?: OfferEntry[];
-  referral_offer?: ReferralOffer;
-  positioning_notes?: string[];
-  objection_handlers?: ObjectionHandler[];
 }
 
 type WritingSampleKind =
@@ -125,7 +100,7 @@ const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
     subtitle: 'Voice examples plus optional branded HTML for referral, upsell, and re-sign campaigns',
   },
   { id: 'business', title: 'Your Business', subtitle: 'Help the AI understand what you do' },
-  { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, downsells, upsells, and referral offer' },
+  { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, upsells and add-ons, and referral offer' },
   { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
   { id: 'marketing', title: 'Marketing', subtitle: 'How you attract and nurture prospects' },
 ];
@@ -191,7 +166,11 @@ export default function IntelligencePanel({
       const settings = await apiClient.getUserSettings();
       const saved = settings?.ai_profile;
       if (saved != null && typeof saved === 'object') {
-        setProfile(saved as AIProfile);
+        const next = saved as AIProfile;
+        setProfile({
+          ...next,
+          ...(next.offer_ladder ? { offer_ladder: normalizeOfferLadder(next.offer_ladder) } : {}),
+        });
         setDirty(false);
       } else {
         setProfile({});
@@ -271,13 +250,20 @@ export default function IntelligencePanel({
       setSaving(true);
       setError(null);
       setSaved(false);
-      await apiClient.updateUserSettings({ ai_profile: profile as Record<string, unknown> });
+      const profileToSave = profile.offer_ladder
+        ? { ...profile, offer_ladder: normalizeOfferLadder(profile.offer_ladder) }
+        : profile;
+      await apiClient.updateUserSettings({ ai_profile: profileToSave as Record<string, unknown> });
       // Confirm round-trip: reload from server so the UI reflects exactly what was persisted
       try {
         const settings = await apiClient.getUserSettings();
         const persisted = settings?.ai_profile;
         if (persisted != null && typeof persisted === 'object') {
-          setProfile(persisted as AIProfile);
+          const next = persisted as AIProfile;
+          setProfile({
+            ...next,
+            ...(next.offer_ladder ? { offer_ladder: normalizeOfferLadder(next.offer_ladder) } : {}),
+          });
         }
       } catch {
         // Reload failed — keep local state, which is already correct
@@ -352,14 +338,14 @@ export default function IntelligencePanel({
     updateLadder({ ...ladder, core_offer: core });
   };
 
-  const addLadderItem = (kind: 'downsells' | 'upsells') => {
+  const addLadderItem = (kind: 'upsells') => {
     const ladder = profile.offer_ladder || {};
     const items = [...(ladder[kind] || []), { name: '', promise: '' } as OfferEntry];
     updateLadder({ ...ladder, [kind]: items });
   };
 
   const updateLadderItem = (
-    kind: 'downsells' | 'upsells',
+    kind: 'upsells',
     idx: number,
     field: keyof OfferEntry,
     value: string | string[],
@@ -370,7 +356,7 @@ export default function IntelligencePanel({
     updateLadder({ ...ladder, [kind]: items });
   };
 
-  const removeLadderItem = (kind: 'downsells' | 'upsells', idx: number) => {
+  const removeLadderItem = (kind: 'upsells', idx: number) => {
     const ladder = profile.offer_ladder || {};
     const items = (ladder[kind] || []).filter((_, i) => i !== idx);
     updateLadder({ ...ladder, [kind]: items });
@@ -431,7 +417,6 @@ export default function IntelligencePanel({
                       l && (
                         (l.core_offer && (l.core_offer.name || l.core_offer.promise)) ||
                         (l.upsells || []).length > 0 ||
-                        (l.downsells || []).length > 0 ||
                         (l.referral_offer && (l.referral_offer.incentive || l.referral_offer.ask_script_hints))
                       )
                     );
@@ -876,7 +861,7 @@ export default function IntelligencePanel({
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Offers & Ladder</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Define your core offer plus any downsells, upsells, and referral offer. Performance ROI rows
+                    Define your core offer plus any upsells, add-ons, and referral offer. Performance ROI rows
                     will prescribe the best fit when a client&apos;s buying signals match — and the AI will tailor
                     pitch language using each client&apos;s prospect voice profile.
                   </p>
@@ -932,14 +917,14 @@ export default function IntelligencePanel({
                   </div>
                 </div>
 
-                {/* Upsells */}
+                {/* Upsells and add-ons */}
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upsells</h4>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upsells and add-ons</h4>
                       <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        Expansion offers prescribed when the system detects an upsell tag. Add the behavioral
-                        triggers that make each upsell the right fit.
+                        Expansion and complementary offers matched to each client&apos;s goals and signals. Add the
+                        triggers and guardrails that make each option the right fit.
                       </p>
                     </div>
                     <button
@@ -947,12 +932,12 @@ export default function IntelligencePanel({
                       onClick={() => addLadderItem('upsells')}
                       className="text-xs text-emerald-700 dark:text-emerald-300 hover:underline whitespace-nowrap"
                     >
-                      + Add upsell
+                      + Add upsell or add-on
                     </button>
                   </div>
                   {(profile.offer_ladder?.upsells || []).length === 0 && (
                     <p className="text-xs text-gray-400 dark:text-gray-500">
-                      None yet. Add the next-step offers your best clients move into.
+                      None yet. Add relevant next-step offers or complementary services.
                     </p>
                   )}
                   {(profile.offer_ladder?.upsells || []).map((u, idx) => (
@@ -987,7 +972,7 @@ export default function IntelligencePanel({
                         value={u.promise || ''}
                         onChange={(e) => updateLadderItem('upsells', idx, 'promise', e.target.value)}
                         rows={2}
-                        placeholder="Promise / outcome of this upsell"
+                        placeholder="Promise / outcome of this offer"
                         className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
                       <input
@@ -1023,74 +1008,6 @@ export default function IntelligencePanel({
                           className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                       </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Downsells */}
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Downsells</h4>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        Lighter alternatives prescribed for cold/warm leads who hesitate at the core offer.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => addLadderItem('downsells')}
-                      className="text-xs text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap"
-                    >
-                      + Add downsell
-                    </button>
-                  </div>
-                  {(profile.offer_ladder?.downsells || []).length === 0 && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
-                      None yet. A trial, mini-program, or low-ticket on-ramp works well here.
-                    </p>
-                  )}
-                  {(profile.offer_ladder?.downsells || []).map((d, idx) => (
-                    <div key={idx} className="rounded-md border border-gray-200 dark:border-white/10 p-3 space-y-2">
-                      <div className="flex items-start gap-2">
-                        <input
-                          type="text"
-                          value={d.name || ''}
-                          onChange={(e) => updateLadderItem('downsells', idx, 'name', e.target.value)}
-                          placeholder="Name (e.g. 30-day starter)"
-                          className="flex-1 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <input
-                          type="text"
-                          value={d.price_terms || ''}
-                          onChange={(e) => updateLadderItem('downsells', idx, 'price_terms', e.target.value)}
-                          placeholder="Price / terms"
-                          className="w-40 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeLadderItem('downsells', idx)}
-                          className="mt-1 p-1.5 text-gray-400 hover:text-red-500"
-                          title="Remove"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                      <textarea
-                        value={d.promise || ''}
-                        onChange={(e) => updateLadderItem('downsells', idx, 'promise', e.target.value)}
-                        rows={2}
-                        placeholder="Promise / outcome"
-                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      <textarea
-                        value={d.when_to_use || ''}
-                        onChange={(e) => updateLadderItem('downsells', idx, 'when_to_use', e.target.value)}
-                        rows={2}
-                        placeholder="When to use (e.g. price objection, not ready for full commitment)"
-                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
                     </div>
                   ))}
                 </div>
