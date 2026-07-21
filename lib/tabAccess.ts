@@ -16,6 +16,12 @@ export const BOTTOM_NAV_TAB_IDS: TabId[] = [
   'settings',
 ];
 
+export const CONSULTING_TIERS = ['pro_consulting', 'core_consulting'] as const;
+
+export function hasConsultingTier(tier: string | null | undefined): boolean {
+  return tier === 'pro_consulting' || tier === 'core_consulting';
+}
+
 export function isOrgAdminRole(userRole: string): boolean {
   const roleLower = String(userRole || 'member').toLowerCase().trim();
   return roleLower === 'admin' || roleLower === 'owner';
@@ -24,11 +30,22 @@ export function isOrgAdminRole(userRole: string): boolean {
 /** Footer nav: settings for everyone; other footer tabs require admin/owner role. */
 export function canAccessBottomNavTab(
   tab: TabId,
-  ctx: { userRole: string; tabPermissions: Record<string, boolean> }
+  ctx: {
+    userRole: string;
+    tabPermissions: Record<string, boolean>;
+    consultingTier?: string | null;
+    isSystemOwner?: boolean;
+  }
 ): boolean {
   if (tab === 'settings') return true;
   if (!isOrgAdminRole(ctx.userRole)) return false;
-  return canAccessTab(tab, { isOwner: false, userRole: ctx.userRole, tabPermissions: ctx.tabPermissions });
+  return canAccessTab(tab, {
+    isOwner: false,
+    userRole: ctx.userRole,
+    tabPermissions: ctx.tabPermissions,
+    consultingTier: ctx.consultingTier,
+    isSystemOwner: ctx.isSystemOwner,
+  });
 }
 
 /** Default tab permission map when the backend endpoint is unavailable. */
@@ -49,7 +66,7 @@ export function defaultTabPermissions(): Record<string, boolean> {
     automations: true,
     clients: true,
     settings: true,
-    org_portal: true,
+    org_portal: false,
   };
 }
 
@@ -60,11 +77,18 @@ export function canAccessTab(
     isOwner: boolean;
     userRole: string;
     tabPermissions: Record<string, boolean>;
+    /** Org consulting program tier — required for client portal (org_portal). */
+    consultingTier?: string | null;
+    /** System owners use org_portal for Owner Panel regardless of consulting tier. */
+    isSystemOwner?: boolean;
   }
 ): boolean {
   const roleLower = String(ctx.userRole || 'member').toLowerCase().trim();
   if (tab === 'owner') return ctx.isOwner;
-  if (tab === 'resources' || tab === 'org_portal') return true;
+  if (tab === 'resources') return true;
+  if (tab === 'org_portal') {
+    return Boolean(ctx.isSystemOwner) || hasConsultingTier(ctx.consultingTier);
+  }
   if (
     roleLower === 'member' &&
     (tab === 'integrations' || tab === 'intelligence' || tab === 'automations')

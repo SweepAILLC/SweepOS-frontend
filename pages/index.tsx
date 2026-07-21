@@ -27,6 +27,7 @@ import {
   canAccessTab,
   canAccessTerminalPriorities,
   defaultTabPermissions,
+  hasConsultingTier,
   MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
 } from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
@@ -370,6 +371,15 @@ export default function Dashboard() {
     }
   }, [loading, activeTab, isSystemOwner, setGlobalLoading]);
 
+  // Client portal requires a consulting tier (system owners keep Owner Panel).
+  useEffect(() => {
+    if (loading || activeTab !== 'org_portal' || isSystemOwner) return;
+    if (!hasConsultingTier(consultingTier)) {
+      setActiveTab('terminal');
+      setGlobalLoading(false);
+    }
+  }, [loading, activeTab, isSystemOwner, consultingTier, setGlobalLoading]);
+
   // Integrations live under Settings → Integrations.
   useEffect(() => {
     if (loading) return;
@@ -424,7 +434,13 @@ export default function Dashboard() {
 
   // Check if current tab is accessible
   const hasTabAccess = (tab: string): boolean =>
-    canAccessTab(tab, { isOwner, userRole, tabPermissions });
+    canAccessTab(tab, {
+      isOwner,
+      userRole,
+      tabPermissions,
+      consultingTier,
+      isSystemOwner,
+    });
 
   const showTerminalPriorities = canAccessTerminalPriorities(tabPermissions);
 
@@ -440,6 +456,8 @@ export default function Dashboard() {
         userRole={userRole || 'member'}
         organizationName={organizationName}
         automationsAwaitingApproval={automationsAwaitingApproval}
+        consultingTier={consultingTier}
+        isSystemOwner={isSystemOwner}
       />
 
       {notification && (

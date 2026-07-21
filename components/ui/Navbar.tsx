@@ -13,6 +13,8 @@ interface NavbarProps {
   userRole?: string;
   organizationName?: string | null;
   automationsAwaitingApproval?: number;
+  consultingTier?: string | null;
+  isSystemOwner?: boolean;
 }
 
 const navBtnBase =
@@ -82,6 +84,8 @@ export default function Navbar({
   userRole = 'member',
   organizationName = null,
   automationsAwaitingApproval = 0,
+  consultingTier = null,
+  isSystemOwner = false,
 }: NavbarProps) {
   const [mounted, setMounted] = useState(false);
   const {
@@ -107,11 +111,25 @@ export default function Navbar({
     return () => window.removeEventListener('keydown', onKey);
   }, [mobileNavOpen, closeMobileNav]);
 
-  const shouldShowTab = (tab: string): boolean =>
-    canAccessTab(tab, { isOwner, userRole, tabPermissions });
+  const accessCtx = {
+    isOwner,
+    userRole,
+    tabPermissions,
+    consultingTier,
+    isSystemOwner,
+  };
+
+  const shouldShowTab = (tab: string): boolean => canAccessTab(tab, accessCtx);
 
   const shouldShowBottomNavTab = (tab: TabId): boolean =>
-    canAccessBottomNavTab(tab, { userRole, tabPermissions });
+    canAccessBottomNavTab(tab, {
+      userRole,
+      tabPermissions,
+      consultingTier,
+      isSystemOwner,
+    });
+
+  const canOpenOrgPortal = shouldShowTab('org_portal');
 
   // Overlay drawer always shows labels; desktop rail respects collapsed.
   const iconOnly = !isMobileNav && collapsed;
@@ -186,17 +204,17 @@ export default function Navbar({
     <button
       type="button"
       onClick={() => {
-        onTabChange('org_portal');
+        onTabChange(canOpenOrgPortal ? 'org_portal' : 'terminal');
         closeMobileNav();
       }}
       className={`flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10 w-full text-left transition-colors cursor-pointer group ${
-        activeTab === 'org_portal'
+        canOpenOrgPortal && activeTab === 'org_portal'
           ? 'bg-white/10 dark:bg-white/10'
           : 'hover:bg-white/5 dark:hover:bg-white/5'
       }`}
-      title="Open org portal"
-      aria-label="Open organization portal"
-      aria-current={activeTab === 'org_portal' ? 'page' : undefined}
+      title={canOpenOrgPortal ? 'Open org portal' : 'Go to Terminal'}
+      aria-label={canOpenOrgPortal ? 'Open organization portal' : 'Go to Terminal'}
+      aria-current={canOpenOrgPortal && activeTab === 'org_portal' ? 'page' : undefined}
     >
       <div className={`flex items-center gap-2 min-w-0 ${iconOnly ? 'justify-center' : ''}`}>
         {mounted && (
@@ -216,7 +234,7 @@ export default function Navbar({
         {!iconOnly ? (
           <h1
             className={`text-base font-bold truncate leading-tight min-w-0 transition-colors ${
-              activeTab === 'org_portal'
+              canOpenOrgPortal && activeTab === 'org_portal'
                 ? 'text-violet-700 dark:text-violet-300'
                 : 'text-gray-900 dark:text-gray-100 group-hover:text-violet-700 dark:group-hover:text-violet-300'
             }`}
@@ -228,7 +246,7 @@ export default function Navbar({
       {!iconOnly && organizationName ? (
         <p
           className={`text-xs font-medium truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''} ${
-            activeTab === 'org_portal'
+            canOpenOrgPortal && activeTab === 'org_portal'
               ? 'text-violet-600/80 dark:text-violet-300/80'
               : 'text-gray-500 dark:text-gray-400'
           }`}
