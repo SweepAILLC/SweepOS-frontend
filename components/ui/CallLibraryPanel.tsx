@@ -43,6 +43,21 @@ function formatCtx(ctx: Record<string, unknown> | undefined): string {
   return parts.join(' ');
 }
 
+function isGlanceCallLibraryItem(item: CallLibraryItem | null | undefined): boolean {
+  if (!item) return false;
+  const kind = (item.analysis_kind || (item.report?.analysis_kind as string | undefined) || '')
+    .toString()
+    .toLowerCase();
+  if (kind === 'glance') return true;
+  if (kind === 'sales') return false;
+  // Legacy rows without analysis_kind: detect glance payload shape.
+  const report = item.report;
+  if (report && typeof report === 'object' && (report.glance || report.fathom_summary)) {
+    return true;
+  }
+  return false;
+}
+
 const BILLING_SUFFIX: Record<string, string> = {
   recurring_monthly: '/mo',
   recurring_annual: '/yr',
@@ -476,12 +491,17 @@ export default function CallLibraryPanel() {
                             ) : null}
                           </div>
                           <div className="shrink-0 flex flex-col items-end gap-1">
-                            {item.call_score != null && item.status === 'complete' ? (
+                            {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                              <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                                Non-sales
+                              </span>
+                            ) : null}
+                            {item.call_score != null && item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <span className="text-xs font-bold tabular-nums text-violet-600 dark:text-violet-400">
                                 {Math.round(item.call_score)}
                               </span>
                             ) : null}
-                            {item.status === 'complete' ? (
+                            {item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <ClosedDealBadge item={item} size="xs" />
                             ) : null}
                             {isPending ? (
@@ -544,7 +564,11 @@ export default function CallLibraryPanel() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{item.call_title}</p>
-                          {item.status === 'complete' ? (
+                          {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                            <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full shrink-0">
+                              Non-sales
+                            </span>
+                          ) : item.status === 'complete' ? (
                             <ClosedDealBadge item={item} size="xs" />
                           ) : null}
                         </div>
@@ -674,10 +698,17 @@ export default function CallLibraryPanel() {
                           Open recording
                         </a>
                       ) : null}
-                      {selectedItem.status === 'complete' ? (
+                      {selectedItem.status === 'complete' && !isGlanceCallLibraryItem(selectedItem) ? (
                         <ClosedDealBadge item={selectedItem} size="sm" />
                       ) : null}
-                      {selectedItem.call_score != null && selectedItem.status === 'complete' ? (
+                      {isGlanceCallLibraryItem(selectedItem) && selectedItem.status === 'complete' ? (
+                        <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                          Non-sales
+                        </span>
+                      ) : null}
+                      {selectedItem.call_score != null &&
+                      selectedItem.status === 'complete' &&
+                      !isGlanceCallLibraryItem(selectedItem) ? (
                         <span
                           title="Sales call quality score (0-100)"
                           className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400"
@@ -708,6 +739,100 @@ export default function CallLibraryPanel() {
                   {selectedItem.status !== 'complete' ? (
                     <div className="px-4 py-4 text-sm text-amber-800 dark:text-amber-200 bg-amber-500/10">
                       {callLibraryStatusMessage(selectedItem.status, selectedItem.failure_reason)}
+                    </div>
+                  ) : selectedItem.report && isGlanceCallLibraryItem(selectedItem) ? (
+                    <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
+                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
+                        <section>
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
+                            <div className="flex items-center gap-2">
+                              {selectedItem.share_url ? (
+                                <a
+                                  href={selectedItem.share_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open share link
+                                </a>
+                              ) : null}
+                              {selectedItem.video_url ? (
+                                <a
+                                  href={selectedItem.video_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open video
+                                </a>
+                              ) : selectedItem.recording_url ? (
+                                <a
+                                  href={selectedItem.recording_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open recording
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                            Use these links to view the recording (some providers block embedding inside other apps).
+                          </p>
+                        </section>
+                      ) : null}
+
+                      {typeof selectedItem.report.fathom_summary === 'string' &&
+                      selectedItem.report.fathom_summary.trim() ? (
+                        <section>
+                          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                            Fathom summary
+                          </h4>
+                          <p className="leading-relaxed whitespace-pre-wrap">
+                            {selectedItem.report.fathom_summary}
+                          </p>
+                        </section>
+                      ) : null}
+
+                      {(() => {
+                        const glance =
+                          selectedItem.report.glance && typeof selectedItem.report.glance === 'object'
+                            ? (selectedItem.report.glance as {
+                                analysis?: unknown;
+                                action_items?: unknown;
+                              })
+                            : null;
+                        const analysis =
+                          typeof glance?.analysis === 'string' ? glance.analysis.trim() : '';
+                        const actionItems = Array.isArray(glance?.action_items)
+                          ? (glance.action_items as unknown[])
+                              .map((x) => String(x || '').trim())
+                              .filter(Boolean)
+                          : [];
+                        if (!analysis && actionItems.length === 0) return null;
+                        return (
+                          <section>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-indigo-500 dark:text-indigo-400 mb-2">
+                              At a glance
+                            </h4>
+                            {analysis ? <p className="leading-relaxed mb-3">{analysis}</p> : null}
+                            {actionItems.length ? (
+                              <div>
+                                <p className="text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1.5">
+                                  Action items
+                                </p>
+                                <ul className="list-disc list-inside space-y-1.5">
+                                  {actionItems.map((item, i) => (
+                                    <li key={i}>{item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+                          </section>
+                        );
+                      })()}
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">

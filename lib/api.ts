@@ -288,6 +288,8 @@ export type CallLibraryDealBilling =
   | 'recurring_annual'
   | null;
 
+export type CallLibraryAnalysisKind = 'sales' | 'glance';
+
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -296,6 +298,8 @@ export interface CallLibraryItem {
   status: string;
   failure_reason?: string | null;
   client_name: string | null;
+  /** sales = full audit; glance = Fathom summary + light LLM. */
+  analysis_kind?: CallLibraryAnalysisKind | string | null;
   call_score: number | null;
   /** True only when the LLM is confident the sale was closed on this call. */
   deal_closed?: boolean;
