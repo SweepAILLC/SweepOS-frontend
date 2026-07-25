@@ -4,8 +4,11 @@ import { Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
   apiClient,
   type AutomationEmailJob,
+  type AutomationFlow,
+  type AutomationNodeKind,
   type AutomationPlaybook,
   type AutomationRule,
+  type AutomationScheduleMode,
 } from '@/lib/api';
 import type { Client } from '@/types/client';
 import PlaybookModal from './PlaybookModal';
@@ -13,25 +16,10 @@ import WaitDelayModal, { type WaitDelayMode } from './WaitDelayModal';
 import BookingTriggerModal from './BookingTriggerModal';
 
 /**
- * Single-column, n8n-inspired automation timeline.
+ * Single-column, n8n-inspired automation timeline for one flow tab.
  *
- * Visual model: one consecutive vertical journey from "client paid" to
- * "client offboards". Trigger -> Action -> Wait -> Action -> [Win section]
- * -> [Offboarding section] -> End.
- *
- * Conventions borrowed from n8n:
- *   - Dotted grid canvas background
- *   - Rounded rectangle nodes with a colored left accent strip
- *   - Vertical connection lines with port dots top/bottom
- *   - Wait nodes are compact centered squares (clickable -> edits delay)
- *   - "Sections" wrap conditional sub-flows (Win Detected, Offboarding Window)
- *     with a labeled translucent frame, mirroring n8n's grouped node UI
- *
- * Energization (when Preview as client is set):
- *   - Active connector lines: vertical animated gradient pulses flowing
- *     downward
- *   - Active nodes: colored ring + outer glow ring (animated pulse)
- *   - Inactive sections: muted opacity, dimmed accent
+ * Flows: post_booking | onboarding | wins_ascension
+ * Node UI (WaitNode / PlaybookNode / TriggerNode) is shared across flows.
  */
 
 type StageKey = 'pre_sale_booking' | 'first_payment' | 'win' | 'offboarding';
@@ -45,12 +33,63 @@ interface NodeRuntime {
 }
 
 interface TimelineCanvasProps {
+  flow: AutomationFlow;
   rules: AutomationRule[];
   previewClient: Client | null;
   previewClientId: string | null;
   previewClientOptions: Client[];
   onPreviewClientChange: (id: string | null) => void;
   onRuleSaved: (next: AutomationRule) => void;
+  onRulesReload: () => void | Promise<void>;
+}
+
+const FLOW_META: Record<
+  AutomationFlow,
+  { title: string; accent: 'violet' | 'emerald' | 'amber'; endTitle: string; endSubtitle: string }
+> = {
+  post_booking: {
+    title: 'Post-booking flow',
+    accent: 'violet',
+    endTitle: 'Ready for the call',
+    endSubtitle: 'Lead arrives prepared',
+  },
+  onboarding: {
+    title: 'Onboarding flow',
+    accent: 'emerald',
+    endTitle: 'Client onboarded',
+    endSubtitle: 'Welcome sequence complete',
+  },
+  wins_ascension: {
+    title: 'Wins / ascension flow',
+    accent: 'amber',
+    endTitle: 'Ascension complete',
+    endSubtitle: 'Win asks + offboarding covered',
+  },
+};
+
+function waitModeForSchedule(mode: AutomationScheduleMode | null | undefined): WaitDelayMode {
+  if (mode === 'before_meeting') return 'before_meeting';
+  if (mode === 'after_booking') return 'after_booking';
+  return 'after_previous';
+}
+
+function shortLabelForRule(rule: AutomationRule): string {
+  if ((rule.node_kind || 'action') === 'wait') return 'Wait';
+  if (rule.playbook === 'pre_sale_post_booking') return 'Post-booking';
+  if (rule.playbook === 'pre_sale_pre_meeting') return 'Pre-meeting';
+  if (rule.playbook === 'first_payment_onboarding') return 'Onboarding';
+  if (rule.playbook === 'first_payment_referral') return 'Referral ask';
+  if (rule.playbook === 'win_combined_ask') return 'Combined ask';
+  if (rule.playbook === 'offboarding_recap_ask') return 'Recap & ask';
+  if (rule.schedule_mode === 'before_meeting') return 'Pre-meeting';
+  return `Email ${Number(rule.step_index ?? 0) + 1}`;
+}
+
+function playbookKind(rule: AutomationRule): 'email' | 'gift' | 'handshake' | 'recap' {
+  if (rule.playbook === 'first_payment_referral') return 'gift';
+  if (rule.playbook === 'win_combined_ask') return 'handshake';
+  if (rule.playbook === 'offboarding_recap_ask') return 'recap';
+  return 'email';
 }
 
 // ---------------------------------------------------------------------------
@@ -105,20 +144,28 @@ function deriveLitStages(client: Client | null): Set<StageKey> {
 function deriveNodeRuntimes(
   client: Client | null,
   jobs: AutomationEmailJob[],
-): Record<AutomationPlaybook, NodeRuntime> {
+  playbooks: AutomationPlaybook[],
+): Record<string, NodeRuntime> {
   const lit = deriveLitStages(client);
-  const runtimes: Record<AutomationPlaybook, NodeRuntime> = {
-    pre_sale_post_booking: { status: 'idle', triggerFired: lit.has('pre_sale_booking') },
-    pre_sale_pre_meeting: { status: 'idle', triggerFired: lit.has('pre_sale_booking') },
-    first_payment_onboarding: { status: 'idle', triggerFired: lit.has('first_payment') },
-    first_payment_referral: { status: 'idle', triggerFired: lit.has('first_payment') },
-    win_combined_ask: { status: 'idle', triggerFired: false },
-    offboarding_recap_ask: { status: 'idle', triggerFired: lit.has('offboarding') },
-  };
+  const runtimes: Record<string, NodeRuntime> = {};
+  for (const pb of playbooks) {
+    let triggerFired = false;
+    if (pb.startsWith('pre_sale') || pb.includes('_booking_') || pb.includes('post_booking')) {
+      triggerFired = lit.has('pre_sale_booking');
+    } else if (pb.startsWith('first_payment') || pb.includes('_payment_')) {
+      triggerFired = lit.has('first_payment');
+    } else if (pb.includes('offboarding')) {
+      triggerFired = lit.has('offboarding');
+    }
+    runtimes[pb] = { status: 'idle', triggerFired };
+  }
 
-  const seen = new Set<AutomationPlaybook>();
+  const seen = new Set<string>();
   for (const job of jobs) {
     const pb = job.playbook;
+    if (!runtimes[pb]) {
+      runtimes[pb] = { status: 'idle', triggerFired: false };
+    }
     if (seen.has(pb)) continue;
     seen.add(pb);
     runtimes[pb].triggerFired = true;
@@ -145,13 +192,16 @@ function deriveNodeRuntimes(
     }
   }
 
-  // Eligible-but-not-yet-fired nodes inherit a soft 'on path' glow.
-  for (const pb of Object.keys(runtimes) as AutomationPlaybook[]) {
+  for (const pb of Object.keys(runtimes)) {
     if (runtimes[pb].triggerFired && runtimes[pb].status === 'idle') {
       runtimes[pb].status = 'eligible';
     }
   }
   return runtimes;
+}
+
+function idleRuntime(): NodeRuntime {
+  return { status: 'idle', triggerFired: false };
 }
 
 function subjectFallback(pb: AutomationPlaybook): string {
@@ -169,7 +219,7 @@ function subjectFallback(pb: AutomationPlaybook): string {
     case 'offboarding_recap_ask':
       return 'Your wins so far — and what’s next';
     default:
-      return pb;
+      return 'Follow-up email';
   }
 }
 
@@ -200,12 +250,14 @@ function formatRelative(iso: string): string {
 // ---------------------------------------------------------------------------
 
 export default function TimelineCanvas({
+  flow,
   rules,
   previewClient,
   previewClientId,
   previewClientOptions,
   onPreviewClientChange,
   onRuleSaved,
+  onRulesReload,
 }: TimelineCanvasProps) {
   const [activeRule, setActiveRule] = useState<AutomationRule | null>(null);
   const [waitTarget, setWaitTarget] = useState<AutomationRule | null>(null);
@@ -213,12 +265,26 @@ export default function TimelineCanvas({
   const [bookingTriggerRule, setBookingTriggerRule] = useState<AutomationRule | null>(null);
   const [jobs, setJobs] = useState<AutomationEmailJob[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [addingAt, setAddingAt] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSlot, setAddSlot] = useState<{
+    triggerKind: 'booking' | 'payment' | 'win' | 'offboarding';
+    insertBeforePlaybook?: string | null;
+    scheduleMode?: AutomationScheduleMode;
+    slotKey: string;
+  } | null>(null);
 
-  const ruleByPlaybook = useMemo(() => {
-    const map: Partial<Record<AutomationPlaybook, AutomationRule>> = {};
-    for (const r of rules) map[r.playbook] = r;
-    return map;
-  }, [rules]);
+  const flowRules = useMemo(() => {
+    const filtered = rules.filter((r) => (r.flow || inferFlow(r.playbook)) === flow);
+    return filtered.sort((a, b) => {
+      const ta = a.trigger_kind || '';
+      const tb = b.trigger_kind || '';
+      if (ta !== tb) return ta.localeCompare(tb);
+      return Number(a.step_index ?? 0) - Number(b.step_index ?? 0);
+    });
+  }, [rules, flow]);
+
+  const playbooks = useMemo(() => flowRules.map((r) => r.playbook), [flowRules]);
 
   useEffect(() => {
     if (!previewClient) {
@@ -228,7 +294,7 @@ export default function TimelineCanvas({
     let cancelled = false;
     setJobsLoading(true);
     apiClient
-      .listAutomationJobs({ client_id: previewClient.id, limit: 25 })
+      .listAutomationJobs({ client_id: previewClient.id, limit: 50 })
       .then((res) => {
         if (cancelled) return;
         setJobs(res.items || []);
@@ -247,16 +313,9 @@ export default function TimelineCanvas({
   }, [previewClient]);
 
   const runtimes = useMemo(
-    () => deriveNodeRuntimes(previewClient, jobs),
-    [previewClient, jobs],
+    () => deriveNodeRuntimes(previewClient, jobs, playbooks),
+    [previewClient, jobs, playbooks],
   );
-
-  const preSale = ruleByPlaybook.pre_sale_post_booking;
-  const preMeeting = ruleByPlaybook.pre_sale_pre_meeting;
-  const onboarding = ruleByPlaybook.first_payment_onboarding;
-  const referral = ruleByPlaybook.first_payment_referral;
-  const winAsk = ruleByPlaybook.win_combined_ask;
-  const offRecap = ruleByPlaybook.offboarding_recap_ask;
 
   const openWait = (rule: AutomationRule | undefined, mode: WaitDelayMode) => {
     if (!rule) return;
@@ -264,20 +323,15 @@ export default function TimelineCanvas({
     setWaitTarget(rule);
   };
 
-  // Connector activation:
-  //   - Booking trigger -> Pre-sale email: lit when client has booked but not paid
-  //   - First Payment trigger -> Onboarding: lit when client has paid
-  //   - Onboarding -> Wait -> Referral ask: lit chain after each step lands
-  //   - Active program -> Win section: lit while client is active or has wins
-  //   - Win section internal chain: lit when win has fired
-  //   - Win/Active -> Offboarding section: lit when client is offboarding
-  //   - Offboarding internal: lit when offboarding has fired
-  const pre = runtimes.pre_sale_post_booking;
-  const preMeet = runtimes.pre_sale_pre_meeting;
-  const fp = runtimes.first_payment_onboarding;
-  const ref = runtimes.first_payment_referral;
-  const win = runtimes.win_combined_ask;
-  const off = runtimes.offboarding_recap_ask;
+  const bookingSteps = flowRules.filter((r) => (r.trigger_kind || inferTrigger(r.playbook)) === 'booking');
+  const paymentSteps = flowRules.filter((r) => (r.trigger_kind || inferTrigger(r.playbook)) === 'payment');
+  const winSteps = flowRules.filter((r) => (r.trigger_kind || inferTrigger(r.playbook)) === 'win');
+  const offboardingSteps = flowRules.filter(
+    (r) => (r.trigger_kind || inferTrigger(r.playbook)) === 'offboarding',
+  );
+
+  const preSale = bookingSteps.find((r) => r.playbook === 'pre_sale_post_booking') || bookingSteps[0];
+  const meta = FLOW_META[flow];
 
   const inActiveProgram =
     !!previewClient &&
@@ -285,10 +339,155 @@ export default function TimelineCanvas({
       previewClient.lifecycle_state === 'offboarding' ||
       (previewClient.lifetime_revenue_cents ?? 0) > 0);
 
+  const openAddSlot = (opts: {
+    triggerKind: 'booking' | 'payment' | 'win' | 'offboarding';
+    insertBeforePlaybook?: string | null;
+    scheduleMode?: AutomationScheduleMode;
+    slotKey: string;
+  }) => {
+    setAddError(null);
+    setAddSlot(opts);
+  };
+
+  const addStep = async (nodeKind: AutomationNodeKind) => {
+    if (!addSlot) return;
+    setAddingAt(addSlot.slotKey);
+    setAddError(null);
+    try {
+      await apiClient.addAutomationFlowStep(flow, {
+        trigger_kind: addSlot.triggerKind,
+        node_kind: nodeKind,
+        schedule_mode: addSlot.scheduleMode ?? 'after_previous',
+        delay_seconds: nodeKind === 'wait' ? 3600 : 0,
+        subject_template: nodeKind === 'action' ? 'Quick follow-up, {{first_name}}' : null,
+        insert_before_playbook: addSlot.insertBeforePlaybook ?? null,
+      });
+      setAddSlot(null);
+      await onRulesReload();
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Failed to add step');
+    } finally {
+      setAddingAt(null);
+    }
+  };
+
+  const deleteStep = async (rule: AutomationRule) => {
+    setAddError(null);
+    try {
+      await apiClient.deleteAutomationRule(rule.playbook);
+      await onRulesReload();
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'Failed to delete step');
+    }
+  };
+
+  /** Independent wait / action nodes with + between each. */
+  const renderStepChain = (
+    steps: AutomationRule[],
+    accent: 'violet' | 'emerald' | 'amber',
+    triggerKind: 'booking' | 'payment' | 'win' | 'offboarding',
+    firstWaitMode?: WaitDelayMode,
+  ) => {
+    const nurture = steps.filter((r) => r.schedule_mode !== 'before_meeting');
+    const preMeeting = steps.filter((r) => r.schedule_mode === 'before_meeting');
+    const chain = nurture.length > 0 ? nurture : steps;
+
+    const renderNode = (rule: AutomationRule, idx: number, list: AutomationRule[]) => {
+      const runtime = runtimes[rule.playbook] || idleRuntime();
+      const mode = waitModeForSchedule(rule.schedule_mode);
+      const waitModeResolved =
+        idx === 0 && firstWaitMode && rule.schedule_mode !== 'before_meeting'
+          ? firstWaitMode
+          : mode;
+      const nextPlaybook = list[idx + 1]?.playbook ?? null;
+      const slotAfter = `after:${rule.playbook}`;
+      const isWait = (rule.node_kind || 'action') === 'wait';
+
+      return (
+        <Fragment key={rule.playbook}>
+          <div className="relative group/node">
+            {isWait ? (
+              <WaitNode
+                rule={rule}
+                active={runtime.triggerFired || runtime.status === 'pending' || runtime.status === 'sent'}
+                mode={waitModeResolved}
+                onClick={() => openWait(rule, waitModeResolved)}
+              />
+            ) : (
+              <PlaybookNode
+                rule={rule}
+                runtime={runtime}
+                accent={accent}
+                kind={playbookKind(rule)}
+                shortLabel={shortLabelForRule(rule)}
+                onClick={() => setActiveRule(rule)}
+                onEditDelay={() => openWait(rule, waitModeResolved)}
+              />
+            )}
+            <button
+              type="button"
+              onClick={() => void deleteStep(rule)}
+              className="absolute -right-2 -top-2 z-10 rounded-full bg-white dark:bg-gray-900 ring-1 ring-red-500/30 px-2 py-0.5 text-[10px] font-medium text-red-600 opacity-0 group-hover/node:opacity-100 hover:bg-red-50 dark:hover:bg-red-950/40 transition-opacity"
+              title="Remove this node"
+            >
+              Remove
+            </button>
+          </div>
+          <Connector
+            state={
+              nextPlaybook
+                ? edgeFromUpstream(runtime)
+                : runtime.status === 'sent'
+                  ? 'sent'
+                  : 'idle'
+            }
+            onAdd={() =>
+              openAddSlot({
+                triggerKind,
+                insertBeforePlaybook: nextPlaybook,
+                scheduleMode:
+                  rule.schedule_mode === 'before_meeting' ? 'before_meeting' : 'after_previous',
+                slotKey: slotAfter,
+              })
+            }
+            adding={addingAt === slotAfter}
+            addLabel="Add node"
+          />
+        </Fragment>
+      );
+    };
+
+    return (
+      <>
+        {chain.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 dark:border-white/15 px-4 py-3 text-center text-xs text-gray-500">
+            No steps yet — click <span className="font-semibold">+</span> above to add a wait or email.
+          </div>
+        ) : (
+          chain.map((rule, idx) => renderNode(rule, idx, chain))
+        )}
+
+        {preMeeting.length > 0 && nurture.length > 0 ? (
+          <>
+            <div className="my-1 flex items-center gap-2 px-1">
+              <div className="h-px flex-1 bg-violet-500/20" />
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600 dark:text-violet-300">
+                Before meeting
+              </span>
+              <div className="h-px flex-1 bg-violet-500/20" />
+            </div>
+            {preMeeting.map((rule, idx) => renderNode(rule, idx, preMeeting))}
+          </>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <div className="space-y-4">
       <div className="overflow-hidden rounded-2xl border border-gray-200/80 dark:border-white/10 shadow-lg shadow-violet-500/5">
         <CanvasHeader
+          title={meta.title}
           previewClient={previewClient}
           previewClientId={previewClientId}
           previewClientOptions={previewClientOptions}
@@ -299,188 +498,167 @@ export default function TimelineCanvas({
         <div className="automation-canvas relative px-4 sm:px-10 py-10 sm:py-14 bg-gradient-to-b from-gray-50 via-gray-50 to-violet-50/30 dark:from-gray-950 dark:via-gray-950 dark:to-violet-950/20">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(139,92,246,0.08),transparent_55%)] dark:bg-[radial-gradient(ellipse_at_top,rgba(139,92,246,0.12),transparent_55%)]" />
           <div className="relative mx-auto max-w-lg flex flex-col items-stretch gap-0">
-            {/* ──────────────── Stage 0: Pre-sale post-booking ──────────────── */}
-            <TriggerNode
-              kind="calendar"
-              title="Booking lands"
-              subtitle="Calendly · Cal.com"
-              accent="violet"
-              fired={pre.triggerFired}
-              onClick={() => preSale && setBookingTriggerRule(preSale)}
-              editable={!!preSale}
-            />
-            <Connector state={edgeFromDownstream(pre)} />
+            {flow === 'post_booking' && (
+              <>
+                <TriggerNode
+                  kind="calendar"
+                  title="Booking lands"
+                  subtitle="Calendly · Cal.com"
+                  accent="violet"
+                  fired={(runtimes[preSale?.playbook || ''] || idleRuntime()).triggerFired}
+                  onClick={() => preSale && setBookingTriggerRule(preSale)}
+                  editable={!!preSale}
+                />
+                <Connector
+                  state={edgeFromDownstream(runtimes[preSale?.playbook || ''] || idleRuntime())}
+                  onAdd={() =>
+                    openAddSlot({
+                      triggerKind: 'booking',
+                      insertBeforePlaybook:
+                        bookingSteps.find((r) => r.schedule_mode !== 'before_meeting')?.playbook ??
+                        bookingSteps[0]?.playbook ??
+                        null,
+                      scheduleMode: 'after_booking',
+                      slotKey: 'booking:start',
+                    })
+                  }
+                  adding={addingAt === 'booking:start'}
+                  addLabel="Add node"
+                />
+                {renderStepChain(bookingSteps, 'violet', 'booking', 'after_booking')}
+                <EndNode
+                  title={meta.endTitle}
+                  subtitle={meta.endSubtitle}
+                  activated={bookingSteps.some((r) => runtimes[r.playbook]?.status === 'sent')}
+                />
+              </>
+            )}
 
-            <WaitNode
-              rule={preSale}
-              active={pre.triggerFired || pre.status === 'pending' || pre.status === 'sent'}
-              mode="after_booking"
-              onClick={() => openWait(preSale, 'after_booking')}
-            />
-            <Connector state={edgeFromDownstream(pre)} />
+            {flow === 'onboarding' && (
+              <>
+                <TriggerNode
+                  kind="payment"
+                  title="First payment"
+                  subtitle="Stripe · Whop"
+                  accent="emerald"
+                  fired={paymentSteps.some((r) => runtimes[r.playbook]?.triggerFired)}
+                />
+                <Connector
+                  state={edgeFromDownstream(
+                    runtimes[paymentSteps[0]?.playbook || ''] || idleRuntime(),
+                  )}
+                  onAdd={() =>
+                    openAddSlot({
+                      triggerKind: 'payment',
+                      insertBeforePlaybook: paymentSteps[0]?.playbook ?? null,
+                      scheduleMode: paymentSteps.length === 0 ? 'after_trigger' : 'after_previous',
+                      slotKey: 'payment:start',
+                    })
+                  }
+                  adding={addingAt === 'payment:start'}
+                  addLabel="Add node"
+                />
+                {renderStepChain(paymentSteps, 'emerald', 'payment', 'after_previous')}
+                <EndNode
+                  title={meta.endTitle}
+                  subtitle={meta.endSubtitle}
+                  activated={paymentSteps.some((r) => runtimes[r.playbook]?.status === 'sent')}
+                />
+              </>
+            )}
 
-            <PlaybookNode
-              rule={preSale}
-              runtime={pre}
-              accent="violet"
-              kind="email"
-              shortLabel="Post-booking"
-              onClick={() => preSale && setActiveRule(preSale)}
-            />
-            <Connector state={edgeFromUpstream(pre)} />
+            {flow === 'wins_ascension' && (
+              <>
+                <SectionFrame
+                  kind="win"
+                  title="Win detected"
+                  subtitle="Fathom call insight tags a win during the active program"
+                  accent="amber"
+                  activated={
+                    winSteps.some((r) => runtimes[r.playbook]?.triggerFired) || inActiveProgram
+                  }
+                  activatedStrong={winSteps.some((r) => runtimes[r.playbook]?.triggerFired)}
+                >
+                  <Connector
+                    state={edgeFromDownstream(
+                      runtimes[winSteps[0]?.playbook || ''] || idleRuntime(),
+                    )}
+                    onAdd={() =>
+                      openAddSlot({
+                        triggerKind: 'win',
+                        insertBeforePlaybook: winSteps[0]?.playbook ?? null,
+                        scheduleMode: 'after_trigger',
+                        slotKey: 'win:start',
+                      })
+                    }
+                    adding={addingAt === 'win:start'}
+                    addLabel="Add node"
+                  />
+                  {renderStepChain(winSteps, 'amber', 'win', 'after_previous')}
+                </SectionFrame>
 
-            <WaitNode
-              rule={preMeeting}
-              active={
-                preMeet.triggerFired ||
-                preMeet.status === 'pending' ||
-                preMeet.status === 'sent' ||
-                pre.status === 'sent'
-              }
-              mode="before_meeting"
-              onClick={() => openWait(preMeeting, 'before_meeting')}
-            />
-            <Connector state={edgeFromDownstream(preMeet)} />
+                <Connector
+                  state={
+                    offboardingSteps.some((r) => runtimes[r.playbook]?.status === 'sent')
+                      ? 'sent'
+                      : offboardingSteps.some((r) => runtimes[r.playbook]?.status === 'pending')
+                        ? 'pending'
+                        : offboardingSteps.some((r) => runtimes[r.playbook]?.triggerFired) ||
+                            previewClient?.lifecycle_state === 'offboarding'
+                          ? 'eligible'
+                          : 'idle'
+                  }
+                  extraTall
+                />
 
-            <PlaybookNode
-              rule={preMeeting}
-              runtime={preMeet}
-              accent="violet"
-              kind="email"
-              shortLabel="Pre-meeting"
-              onClick={() => preMeeting && setActiveRule(preMeeting)}
-            />
+                <SectionFrame
+                  kind="graduate"
+                  title="Offboarding"
+                  subtitle="~75% program progress"
+                  accent="violet"
+                  activated={
+                    offboardingSteps.some((r) => runtimes[r.playbook]?.triggerFired) ||
+                    previewClient?.lifecycle_state === 'offboarding'
+                  }
+                  activatedStrong={offboardingSteps.some((r) => runtimes[r.playbook]?.triggerFired)}
+                >
+                  <Connector
+                    state={edgeFromDownstream(
+                      runtimes[offboardingSteps[0]?.playbook || ''] || idleRuntime(),
+                    )}
+                    onAdd={() =>
+                      openAddSlot({
+                        triggerKind: 'offboarding',
+                        insertBeforePlaybook: offboardingSteps[0]?.playbook ?? null,
+                        scheduleMode: 'after_trigger',
+                        slotKey: 'offboarding:start',
+                      })
+                    }
+                    adding={addingAt === 'offboarding:start'}
+                    addLabel="Add node"
+                  />
+                  {renderStepChain(offboardingSteps, 'violet', 'offboarding', 'after_previous')}
+                </SectionFrame>
 
-            <Connector
-              state={
-                fp.status === 'sent'
-                  ? 'sent'
-                  : fp.status === 'pending'
-                    ? 'pending'
-                    : fp.triggerFired
-                      ? 'eligible'
+                <Connector
+                  state={
+                    offboardingSteps.some((r) => runtimes[r.playbook]?.status === 'sent')
+                      ? 'sent'
                       : 'idle'
-              }
-              extraTall
-            />
-
-            {/* ──────────────── Stage 1: First Payment ──────────────── */}
-            <TriggerNode
-              kind="payment"
-              title="First payment"
-              subtitle="Stripe · Whop"
-              accent="emerald"
-              fired={fp.triggerFired}
-            />
-            <Connector state={edgeFromDownstream(fp)} />
-
-            <PlaybookNode
-              rule={onboarding}
-              runtime={fp}
-              accent="emerald"
-              kind="email"
-              shortLabel="Onboarding"
-              onClick={() => onboarding && setActiveRule(onboarding)}
-            />
-            <Connector state={edgeFromUpstream(fp)} />
-
-            <WaitNode
-              rule={referral}
-              active={fp.status === 'sent' || fp.status === 'pending'}
-              onClick={() => openWait(referral, 'after_previous')}
-            />
-            <Connector state={edgeFromDownstream(ref)} />
-
-            <PlaybookNode
-              rule={referral}
-              runtime={ref}
-              accent="emerald"
-              kind="gift"
-              shortLabel="Referral ask"
-              onClick={() => referral && setActiveRule(referral)}
-            />
-
-            {/* ──────────────── Stage 2: Active program — Win section ──────────────── */}
-            <Connector
-              state={
-                win.status === 'sent'
-                  ? 'sent'
-                  : win.status === 'pending'
-                    ? 'pending'
-                    : inActiveProgram
-                      ? 'eligible'
-                      : 'idle'
-              }
-              extraTall
-            />
-
-            <SectionFrame
-              kind="win"
-              title="Win detected"
-              subtitle="Fathom call insight tags a win during the active program"
-              accent="amber"
-              activated={win.triggerFired || inActiveProgram}
-              activatedStrong={win.triggerFired}
-            >
-              <WaitNode
-                rule={winAsk}
-                active={win.triggerFired}
-                onClick={() => openWait(winAsk, 'after_previous')}
-              />
-              <Connector state={edgeFromDownstream(win)} />
-              <PlaybookNode
-                rule={winAsk}
-                runtime={win}
-                accent="amber"
-                kind="handshake"
-                shortLabel="Combined ask"
-                onClick={() => winAsk && setActiveRule(winAsk)}
-              />
-            </SectionFrame>
-
-            {/* ──────────────── Stage 3: Offboarding window ──────────────── */}
-            <Connector
-              state={
-                off.status === 'sent'
-                  ? 'sent'
-                  : off.status === 'pending'
-                    ? 'pending'
-                    : off.triggerFired || previewClient?.lifecycle_state === 'offboarding'
-                      ? 'eligible'
-                      : 'idle'
-              }
-              extraTall
-            />
-
-            <SectionFrame
-              kind="graduate"
-              title="Offboarding"
-              subtitle="~75% program progress"
-              accent="violet"
-              activated={
-                off.triggerFired || previewClient?.lifecycle_state === 'offboarding'
-              }
-              activatedStrong={off.triggerFired}
-            >
-              {/* Offboarding has no per-section wait — it's an immediate recap. The
-                  delay is still editable from the playbook itself. */}
-              <PlaybookNode
-                rule={offRecap}
-                runtime={off}
-                accent="violet"
-                kind="recap"
-                shortLabel="Recap & ask"
-                onClick={() => offRecap && setActiveRule(offRecap)}
-              />
-            </SectionFrame>
-
-            <Connector state={off.status === 'sent' ? 'sent' : 'idle'} />
-            <EndNode
-              title="Journey complete"
-              subtitle="Client offboarded"
-              activated={off.status === 'sent'}
-            />
+                  }
+                />
+                <EndNode
+                  title={meta.endTitle}
+                  subtitle={meta.endSubtitle}
+                  activated={offboardingSteps.some((r) => runtimes[r.playbook]?.status === 'sent')}
+                />
+              </>
+            )}
           </div>
+
+          {addError ? (
+            <p className="mt-4 text-center text-xs text-red-600 dark:text-red-300">{addError}</p>
+          ) : null}
 
           <Legend hasPreview={!!previewClient} />
         </div>
@@ -515,7 +693,16 @@ export default function TimelineCanvas({
         }}
       />
 
-      {/* Canvas grid + connector animation */}
+      <AddNodeMiniModal
+        open={!!addSlot}
+        busy={!!addingAt}
+        onClose={() => {
+          if (addingAt) return;
+          setAddSlot(null);
+        }}
+        onChoose={(kind) => void addStep(kind)}
+      />
+
       <style jsx global>{`
         .automation-canvas {
           background-image: radial-gradient(circle, rgba(120, 120, 140, 0.12) 1px, transparent 1px);
@@ -534,17 +721,34 @@ export default function TimelineCanvas({
   );
 }
 
+function inferFlow(playbook: string): AutomationFlow {
+  if (playbook.startsWith('pre_sale') || playbook.startsWith('post_booking')) return 'post_booking';
+  if (playbook.startsWith('first_payment') || playbook.startsWith('onboarding')) return 'onboarding';
+  return 'wins_ascension';
+}
+
+function inferTrigger(playbook: string): 'booking' | 'payment' | 'win' | 'offboarding' {
+  if (playbook.includes('offboarding')) return 'offboarding';
+  if (playbook.includes('win')) return 'win';
+  if (playbook.includes('payment') || playbook.includes('onboarding') || playbook.includes('referral')) {
+    return 'payment';
+  }
+  return 'booking';
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
 
 function CanvasHeader({
+  title = 'Automation timeline',
   previewClient,
   previewClientId,
   previewClientOptions,
   onPreviewClientChange,
   jobsLoading,
 }: {
+  title?: string;
   previewClient: Client | null;
   previewClientId: string | null;
   previewClientOptions: Client[];
@@ -555,11 +759,12 @@ function CanvasHeader({
     <div className="flex flex-col gap-4 border-b border-gray-200/80 dark:border-white/10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm p-4 sm:p-5 sm:flex-row sm:items-end sm:justify-between">
       <div className="min-w-0">
         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600 dark:text-violet-400">
-          Client journey
+          Flow canvas
         </p>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Automation timeline</h3>
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
         <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 max-w-md leading-relaxed">
-          Click an email node to edit its playbook, or a wait node to change the delay.
+          Click <span className="font-semibold text-violet-600 dark:text-violet-300">+</span> on a connector to
+          insert a wait or email. Hover any step to remove it.
         </p>
       </div>
       <div className="w-full sm:w-auto sm:min-w-[14rem] space-y-1.5">
@@ -652,61 +857,80 @@ function TriggerNode({
   onClick?: () => void;
   editable?: boolean;
 }) {
-  const accentBg = {
-    emerald: 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-emerald-500/30',
-    amber: 'bg-amber-500/15 text-amber-700 dark:text-amber-300 ring-amber-500/30',
-    violet: 'bg-violet-500/15 text-violet-700 dark:text-violet-300 ring-violet-500/30',
+  const fill = {
+    emerald: fired
+      ? 'bg-emerald-600 text-white shadow-[0_0_28px_rgba(16,185,129,0.35)]'
+      : 'bg-emerald-700/90 text-emerald-50',
+    amber: fired
+      ? 'bg-amber-600 text-white shadow-[0_0_28px_rgba(245,158,11,0.35)]'
+      : 'bg-amber-700/90 text-amber-50',
+    violet: fired
+      ? 'bg-violet-600 text-white shadow-[0_0_28px_rgba(139,92,246,0.4)]'
+      : 'bg-violet-700/90 text-violet-50',
   }[accent];
-  const accentGlow = {
-    emerald: 'shadow-[0_0_20px_rgba(16,185,129,0.2)] ring-emerald-500/40',
-    amber: 'shadow-[0_0_20px_rgba(245,158,11,0.2)] ring-amber-500/40',
-    violet: 'shadow-[0_0_20px_rgba(139,92,246,0.25)] ring-violet-500/40',
+  const tip = {
+    emerald: fired ? 'bg-emerald-600' : 'bg-emerald-700/90',
+    amber: fired ? 'bg-amber-600' : 'bg-amber-700/90',
+    violet: fired ? 'bg-violet-600' : 'bg-violet-700/90',
+  }[accent];
+  const dash = {
+    emerald: 'border-emerald-400/50',
+    amber: 'border-amber-400/50',
+    violet: 'border-violet-400/50',
   }[accent];
 
-  const inner = (
+  const body = (
     <>
-      <div
-        className={`shrink-0 inline-flex h-9 w-9 items-center justify-center rounded-lg ring-1 ${accentBg}`}
-        aria-hidden
-      >
-        <NodeIcon kind={kind} />
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500 dark:text-gray-400">
-          Trigger
+      <div className="flex items-center gap-3">
+        <div
+          className="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25"
+          aria-hidden
+        >
+          <NodeIcon kind={kind} />
         </div>
-        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">{title}</div>
-        <div className="text-[11px] text-gray-500 dark:text-gray-400">{subtitle}</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-white/70">
+              Trigger
+            </span>
+            {fired ? (
+              <span className="rounded-sm bg-white/20 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                Fired
+              </span>
+            ) : null}
+          </div>
+          <div className="text-base font-semibold leading-tight">{title}</div>
+          <div className="text-[11px] text-white/70">{subtitle}</div>
+        </div>
+        {editable ? (
+          <span className="text-[10px] font-semibold text-white/80 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+            Edit
+          </span>
+        ) : null}
       </div>
-      {editable ? (
-        <span className="text-[10px] font-medium text-violet-700 dark:text-violet-300 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-          Edit
-        </span>
-      ) : null}
+      <div
+        className={`pointer-events-none absolute left-1/2 -bottom-2 h-4 w-4 -translate-x-1/2 rotate-45 ${tip}`}
+        aria-hidden
+      />
     </>
   );
 
   return (
-    <div className="relative">
+    <div className="relative mb-2">
+      <div className={`absolute -inset-1 rounded-md border border-dashed ${dash} opacity-70`} aria-hidden />
       {editable && onClick ? (
         <button
           type="button"
           onClick={onClick}
-          className={`group relative z-10 flex items-center gap-3 rounded-xl px-4 py-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm ring-1 w-full transition-all ${
-            fired ? accentGlow : 'ring-gray-200/80 dark:ring-white/10 shadow-sm'
-          } hover:shadow-lg hover:-translate-y-0.5 cursor-pointer text-left`}
+          className={`group relative z-10 w-full overflow-visible rounded-md px-4 py-3.5 text-left transition-transform hover:-translate-y-0.5 ${fill}`}
           title="Edit booking trigger"
           aria-label={`Edit booking trigger (${title})`}
         >
-          {inner}
+          {body}
         </button>
       ) : (
-        <div
-          className={`relative z-10 flex items-center gap-3 rounded-xl px-4 py-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm ring-1 w-full transition-all ${
-            fired ? accentGlow : 'ring-gray-200/80 dark:ring-white/10 shadow-sm'
-          }`}
-        >
-          {inner}
+        <div className={`relative z-10 w-full overflow-visible rounded-md px-4 py-3.5 ${fill}`}>
+          {body}
         </div>
       )}
       <Port active={fired} side="bottom" tone={accent} />
@@ -784,6 +1008,7 @@ function PlaybookNode({
   kind,
   shortLabel,
   onClick,
+  onEditDelay,
 }: {
   rule: AutomationRule | undefined;
   runtime: NodeRuntime;
@@ -791,6 +1016,7 @@ function PlaybookNode({
   kind: 'email' | 'gift' | 'handshake' | 'recap';
   shortLabel: string;
   onClick: () => void;
+  onEditDelay?: () => void;
 }) {
   const enabled = rule?.enabled ?? false;
   const accentDef = NODE_ACCENT[accent];
@@ -801,6 +1027,10 @@ function PlaybookNode({
     amber: 'bg-amber-500/12 text-amber-700 dark:text-amber-300',
     violet: 'bg-violet-500/12 text-violet-700 dark:text-violet-300',
   }[accent];
+  const delayChip =
+    rule && onEditDelay
+      ? compactDelayLabel(rule.delay_seconds ?? 0, waitModeForSchedule(rule.schedule_mode))
+      : null;
 
   return (
     <div className="relative">
@@ -830,7 +1060,7 @@ function PlaybookNode({
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-gray-500 dark:text-gray-400">
-                  {shortLabel}
+                  Action · {shortLabel}
                 </span>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${pill.cls}`}>
                   {pill.label}
@@ -856,6 +1086,27 @@ function PlaybookNode({
                   />
                   {enabled ? 'On' : 'Off'}
                 </span>
+                {delayChip && onEditDelay ? (
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditDelay();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        onEditDelay();
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-amber-500/25 bg-amber-500/10 text-amber-800 dark:text-amber-200 hover:ring-amber-500/50"
+                    title="Edit send timing on this action"
+                  >
+                    ⏱ {delayChip}
+                  </span>
+                ) : null}
                 <span>
                   {rule?.content_mode === 'html_template' ? 'Template' : 'AI'}
                   {rule?.require_approval ? ' · Approval' : ''}
@@ -958,11 +1209,6 @@ function SectionFrame({
     amber: activated ? 'ring-amber-500/40' : 'ring-amber-500/15',
     violet: activated ? 'ring-violet-500/40' : 'ring-violet-500/15',
   }[accent];
-  const headerBg = {
-    emerald: 'text-emerald-800 dark:text-emerald-200',
-    amber: 'text-amber-900 dark:text-amber-200',
-    violet: 'text-violet-800 dark:text-violet-200',
-  }[accent];
   const innerBg = {
     emerald: 'bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06]',
     amber: 'bg-amber-500/[0.05] dark:bg-amber-500/[0.08]',
@@ -971,15 +1217,26 @@ function SectionFrame({
 
   return (
     <div
-      className={`relative rounded-xl ring-1 ${ring} ${innerBg} ${
+      className={`relative rounded-md ring-1 ${ring} ${innerBg} ${
         activated ? '' : 'opacity-75'
       } transition-all ${activatedStrong ? 'shadow-[0_0_24px_rgba(139,92,246,0.08)]' : ''}`}
     >
-      <div className={`flex items-center gap-2 rounded-t-xl px-3 py-2 text-[11px] font-bold uppercase tracking-[0.1em] border-b border-black/5 dark:border-white/5 ${headerBg}`}>
-        <span className="inline-flex h-6 w-6 items-center justify-center rounded-md bg-white/50 dark:bg-black/20">
+      <div
+        className={`flex items-center gap-2 rounded-t-md px-3 py-2.5 text-[11px] font-black uppercase tracking-[0.16em] ${
+          accent === 'amber'
+            ? 'bg-amber-700/90 text-amber-50'
+            : accent === 'emerald'
+              ? 'bg-emerald-700/90 text-emerald-50'
+              : 'bg-violet-700/90 text-violet-50'
+        }`}
+      >
+        <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-white/15 ring-1 ring-white/25">
           {kind === 'win' ? '🏆' : '🎓'}
         </span>
-        <span>{title}</span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[9px] font-bold tracking-[0.2em] text-white/70">Trigger</div>
+          <div className="text-[12px] font-semibold normal-case tracking-normal text-white">{title}</div>
+        </div>
       </div>
       <div className="px-3 pt-2 pb-3">
         <p className="text-[11px] text-gray-600 dark:text-gray-400 mb-3 leading-relaxed">{subtitle}</p>
@@ -1047,62 +1304,143 @@ const CONNECTOR_CFG: Record<
 function Connector({
   state,
   extraTall = false,
+  onAdd,
+  adding = false,
+  addLabel = 'Add step',
 }: {
   state: ConnectorState;
   extraTall?: boolean;
+  onAdd?: () => void;
+  adding?: boolean;
+  addLabel?: string;
 }) {
-  const height = extraTall ? 'h-20' : 'h-14';
-
-  if (state === 'idle') {
-    return (
-      <div className={`relative ${height} flex items-center justify-center`} aria-hidden>
-        <div className="h-full border-l-2 border-dashed border-gray-300 dark:border-gray-700" />
-      </div>
-    );
-  }
-
-  const cfg = CONNECTOR_CFG[state];
+  const height = extraTall ? 'h-20' : onAdd ? 'h-16' : 'h-14';
+  const showStatus = state !== 'idle' && !onAdd;
+  const cfg = state === 'idle' ? null : CONNECTOR_CFG[state];
 
   return (
     <div
       className={`relative ${height} flex items-center justify-center`}
-      role="img"
-      aria-label={`Edge state: ${cfg.label}`}
+      role={onAdd ? 'group' : 'img'}
+      aria-label={onAdd ? 'Insert step on this connector' : cfg ? `Edge state: ${cfg.label}` : undefined}
     >
-      {/* The energized line itself: 4px wide, fully saturated, with a soft halo
-          glow so even at a quick glance it pops against the dotted canvas. */}
-      <div
-        className={`relative h-full w-[4px] rounded-full overflow-hidden ${cfg.line} ${cfg.halo}`}
-      >
-        {cfg.flow ? (
-          // "Data flowing through" — a bright shimmer rides downward continuously
-          // to communicate that this edge is currently in flight (pending) or
-          // about to be (eligible).
-          <span
-            aria-hidden
-            className="absolute inset-x-0 -top-1/3 h-1/2 bg-gradient-to-b from-transparent via-white/85 to-transparent"
-            style={{ animation: 'wire-flow-vert 1.4s linear infinite' }}
-          />
-        ) : (
-          // Sent — gentle interior pulse so the edge feels "settled & traversed"
-          // without distracting from the active (pending) edges below it.
-          <span
-            aria-hidden
-            className={`absolute inset-0 ${cfg.line} opacity-40 animate-pulse`}
-          />
-        )}
-      </div>
+      {state === 'idle' || !cfg ? (
+        <div className="h-full border-l-2 border-dashed border-gray-300 dark:border-gray-700" aria-hidden />
+      ) : (
+        <div
+          className={`relative h-full w-[4px] rounded-full overflow-hidden ${cfg.line} ${cfg.halo}`}
+          aria-hidden
+        >
+          {cfg.flow ? (
+            <span
+              className="absolute inset-x-0 -top-1/3 h-1/2 bg-gradient-to-b from-transparent via-white/85 to-transparent"
+              style={{ animation: 'wire-flow-vert 1.4s linear infinite' }}
+            />
+          ) : (
+            <span className={`absolute inset-0 ${cfg.line} opacity-40 animate-pulse`} />
+          )}
+        </div>
+      )}
 
-      {/* Centered status badge — sits on top of the line and is the single
-          biggest "this edge has fired" affordance. */}
-      <span
-        className={`absolute z-10 inline-flex items-center gap-1 rounded-full ring-2 ring-white dark:ring-gray-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-md ${cfg.badgeBg}`}
-      >
-        <span aria-hidden className="leading-none">
-          {cfg.icon}
+      {onAdd ? (
+        <button
+          type="button"
+          onClick={onAdd}
+          disabled={adding}
+          title={addLabel}
+          aria-label={addLabel}
+          className="absolute z-20 inline-flex h-8 w-8 items-center justify-center rounded-full bg-white dark:bg-gray-950 text-violet-600 dark:text-violet-300 ring-2 ring-violet-500/40 shadow-md hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:ring-violet-500/70 hover:scale-110 transition-all disabled:opacity-60 disabled:hover:scale-100"
+        >
+          {adding ? (
+            <span className="h-3.5 w-3.5 rounded-full border-2 border-violet-400 border-t-transparent animate-spin" />
+          ) : (
+            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 5v14M5 12h14" />
+            </svg>
+          )}
+        </button>
+      ) : showStatus && cfg ? (
+        <span
+          className={`absolute z-10 inline-flex items-center gap-1 rounded-full ring-2 ring-white dark:ring-gray-950 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-md ${cfg.badgeBg}`}
+        >
+          <span aria-hidden className="leading-none">
+            {cfg.icon}
+          </span>
+          <span>{cfg.label}</span>
         </span>
-        <span>{cfg.label}</span>
-      </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Mini chooser: Wait vs Action (email) when inserting on a connector. */
+function AddNodeMiniModal({
+  open,
+  busy,
+  onClose,
+  onChoose,
+}: {
+  open: boolean;
+  busy: boolean;
+  onClose: () => void;
+  onChoose: (kind: AutomationNodeKind) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        aria-label="Close"
+        onClick={onClose}
+        disabled={busy}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add automation node"
+        className="relative z-10 w-full max-w-xs rounded-2xl bg-white dark:bg-gray-950 ring-1 ring-gray-200 dark:ring-white/10 shadow-2xl p-4"
+      >
+        <div className="text-sm font-semibold text-gray-900 dark:text-gray-100">Add a node</div>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          Choose a wait delay or an email action.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onChoose('wait')}
+            className="flex flex-col items-center gap-2 rounded-xl px-3 py-4 ring-1 ring-amber-500/30 bg-amber-500/10 hover:bg-amber-500/15 hover:ring-amber-500/50 transition-all disabled:opacity-60"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/20 text-amber-700 dark:text-amber-300">
+              <NodeIcon kind="wait" />
+            </span>
+            <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">Wait</span>
+            <span className="text-[10px] text-gray-500 text-center leading-snug">Delay only</span>
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onChoose('action')}
+            className="flex flex-col items-center gap-2 rounded-xl px-3 py-4 ring-1 ring-violet-500/30 bg-violet-500/10 hover:bg-violet-500/15 hover:ring-violet-500/50 transition-all disabled:opacity-60"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-violet-500/20 text-violet-700 dark:text-violet-300">
+              <NodeIcon kind="email" />
+            </span>
+            <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">Email</span>
+            <span className="text-[10px] text-gray-500 text-center leading-snug">Send action</span>
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          disabled={busy}
+          className="mt-3 w-full rounded-lg px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 disabled:opacity-60"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }

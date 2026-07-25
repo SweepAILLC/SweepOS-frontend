@@ -128,6 +128,15 @@ export default function WaitDelayModal({
         combine_top_n: rule.combine_top_n,
         require_approval: rule.require_approval,
         approval_ttl_hours: rule.approval_ttl_hours ?? null,
+        flow: rule.flow ?? null,
+        trigger_kind: rule.trigger_kind ?? null,
+        schedule_mode:
+          mode === 'before_meeting'
+            ? 'before_meeting'
+            : mode === 'after_booking'
+              ? 'after_booking'
+              : rule.schedule_mode ?? 'after_previous',
+        step_index: rule.step_index ?? null,
       });
       onSaved(next);
       onClose();

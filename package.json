@@ -13,12 +13,21 @@
     "@dnd-kit/sortable": "^7.0.0",
     "@dnd-kit/utilities": "^3.2.1",
     "@headlessui/react": "^1.7.17",
+    "@tiptap/extension-link": "^3.29.0",
+    "@tiptap/extension-placeholder": "^3.29.0",
+    "@tiptap/extension-task-item": "^3.29.0",
+    "@tiptap/extension-task-list": "^3.29.0",
+    "@tiptap/extension-underline": "^3.29.0",
+    "@tiptap/pm": "^3.29.0",
+    "@tiptap/react": "^3.29.0",
+    "@tiptap/starter-kit": "^3.29.0",
     "axios": "^1.6.2",
     "js-cookie": "^3.0.5",
     "next": "14.2.35",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "recharts": "^2.15.4"
+    "recharts": "^2.15.4",
+    "tiptap-markdown": "^0.9.0"
   },
   "devDependencies": {
     "@types/js-cookie": "^3.0.6",

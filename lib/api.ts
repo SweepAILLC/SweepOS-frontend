@@ -288,8 +288,6 @@ export type CallLibraryDealBilling =
   | 'recurring_annual'
   | null;
 
-export type CallLibraryAnalysisKind = 'sales' | 'glance';
-
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -298,8 +296,6 @@ export interface CallLibraryItem {
   status: string;
   failure_reason?: string | null;
   client_name: string | null;
-  /** sales = full audit; glance = Fathom summary + light LLM. */
-  analysis_kind?: CallLibraryAnalysisKind | string | null;
   call_score: number | null;
   /** True only when the LLM is confident the sale was closed on this call. */
   deal_closed?: boolean;
@@ -419,13 +415,15 @@ export function isSweepSessionAuthFailure(error: AxiosError): boolean {
 }
 
 // ----- Automation engine types ------------------------------------------------
-export type AutomationPlaybook =
-  | 'pre_sale_post_booking'
-  | 'pre_sale_pre_meeting'
-  | 'first_payment_onboarding'
-  | 'first_payment_referral'
-  | 'win_combined_ask'
-  | 'offboarding_recap_ask';
+export type AutomationPlaybook = string;
+
+export type AutomationFlow = 'post_booking' | 'onboarding' | 'wins_ascension';
+export type AutomationTriggerKind = 'booking' | 'payment' | 'win' | 'offboarding';
+export type AutomationScheduleMode =
+  | 'after_trigger'
+  | 'after_booking'
+  | 'after_previous'
+  | 'before_meeting';
 
 export type AutomationContentMode = 'ai_generated' | 'html_template';
 
@@ -461,6 +459,8 @@ export interface AutomationTriggerConfig {
   match_all_events?: boolean | null;
 }
 
+export type AutomationNodeKind = 'action' | 'wait';
+
 export interface AutomationRule {
   id: string;
   org_id: string;
@@ -478,6 +478,13 @@ export interface AutomationRule {
   combine_top_n: number;
   require_approval: boolean;
   approval_ttl_hours?: number | null;
+  flow?: AutomationFlow | null;
+  trigger_kind?: AutomationTriggerKind | null;
+  schedule_mode?: AutomationScheduleMode | null;
+  step_index?: number | null;
+  /** Canvas node type: action sends email; wait only advances the chain clock. */
+  node_kind?: AutomationNodeKind | null;
+  is_protected?: boolean;
   last_modified_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -496,6 +503,20 @@ export interface AutomationRuleUpdate {
   combine_top_n: number;
   require_approval: boolean;
   approval_ttl_hours?: number | null;
+  flow?: AutomationFlow | null;
+  trigger_kind?: AutomationTriggerKind | null;
+  schedule_mode?: AutomationScheduleMode | null;
+  step_index?: number | null;
+  node_kind?: AutomationNodeKind | null;
+}
+
+export interface AutomationFlowStepCreate {
+  trigger_kind: AutomationTriggerKind;
+  node_kind?: AutomationNodeKind;
+  schedule_mode?: AutomationScheduleMode;
+  delay_seconds?: number;
+  subject_template?: string | null;
+  insert_before_playbook?: string | null;
 }
 
 export interface AutomationEmailJob {
@@ -2580,6 +2601,18 @@ class ApiClient {
   ): Promise<AutomationRule> {
     const response = await this.client.put(`/automations/rules/${playbook}`, body);
     return response.data as AutomationRule;
+  }
+
+  async addAutomationFlowStep(
+    flow: AutomationFlow,
+    body: AutomationFlowStepCreate
+  ): Promise<AutomationRule> {
+    const response = await this.client.post(`/automations/flows/${flow}/steps`, body);
+    return response.data as AutomationRule;
+  }
+
+  async deleteAutomationRule(playbook: AutomationPlaybook): Promise<void> {
+    await this.client.delete(`/automations/rules/${playbook}`);
   }
 
   async listAutomationJobs(params?: {

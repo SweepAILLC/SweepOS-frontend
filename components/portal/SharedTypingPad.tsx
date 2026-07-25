@@ -1,4 +1,12 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { EditorContent, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Link from '@tiptap/extension-link';
+import Placeholder from '@tiptap/extension-placeholder';
+import Underline from '@tiptap/extension-underline';
+import { Markdown } from 'tiptap-markdown';
 import {
   apiClient,
   MAX_PORTAL_SHARED_PADS,
@@ -10,65 +18,159 @@ const POLL_MS = 2000;
 const SAVE_DEBOUNCE_MS = 350;
 const TAB_LIST_POLL_MS = 8000;
 
-/** Match http(s) URLs for live link rendering. */
-const URL_RE = /(https?:\/\/[^\s<>"')\]]+)/gi;
-
-function linkifyText(text: string): ReactNode[] {
-  if (!text) return [];
-  const nodes: ReactNode[] = [];
-  let last = 0;
-  let match: RegExpExecArray | null;
-  const re = new RegExp(URL_RE.source, 'gi');
-  while ((match = re.exec(text)) !== null) {
-    if (match.index > last) {
-      nodes.push(text.slice(last, match.index));
-    }
-    const href = match[0];
-    nodes.push(
-      <a
-        key={`${match.index}-${href}`}
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-sky-600 dark:text-sky-400 underline underline-offset-2 break-all hover:text-sky-500"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {href}
-      </a>
-    );
-    last = match.index + href.length;
-  }
-  if (last < text.length) nodes.push(text.slice(last));
-  return nodes;
+/** Convert legacy □ / ☑ checklist lines into Markdown task items. */
+function normalizePadMarkdown(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/^(\s*)□\s+/gm, '$1- [ ] ')
+    .replace(/^(\s*)☑\s+/gm, '$1- [x] ')
+    .replace(/^(\s*)✓\s+/gm, '$1- [x] ');
 }
 
-function LinkifiedContent({ text, onStartEdit }: { text: string; onStartEdit: () => void }) {
-  const lines = text.split('\n');
+function readEditorMarkdown(editor: unknown): string {
+  if (!editor || typeof editor !== 'object') return '';
+  try {
+    const storage = (editor as { storage?: { markdown?: { getMarkdown?: () => string } } }).storage;
+    return storage?.markdown?.getMarkdown?.() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+type ToolbarBtnProps = {
+  onClick: () => void;
+  active?: boolean;
+  disabled?: boolean;
+  title: string;
+  children: ReactNode;
+};
+
+function ToolbarBtn({ onClick, active, disabled, title, children }: ToolbarBtnProps) {
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onStartEdit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          onStartEdit();
-        }
-      }}
-      className="w-full min-h-[220px] sm:min-h-[280px] resize-y rounded-lg border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-black/20 px-3 py-3 text-sm text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap break-words cursor-text text-left"
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={active}
+      disabled={disabled}
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className={`inline-flex h-7 min-w-[1.75rem] items-center justify-center rounded px-1.5 text-xs font-semibold transition-colors disabled:opacity-40 ${
+        active
+          ? 'bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-100'
+          : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'
+      }`}
     >
-      {text.trim() ? (
-        lines.map((line, i) => (
-          <Fragment key={i}>
-            {linkifyText(line)}
-            {i < lines.length - 1 ? '\n' : null}
-          </Fragment>
-        ))
-      ) : (
-        <span className="text-gray-400 dark:text-gray-500">
-          Start typing — your consultant and team see this live. Click to edit; links stay clickable when viewing.
-        </span>
-      )}
+      {children}
+    </button>
+  );
+}
+
+function EditorToolbar({
+  editor,
+}: {
+  editor: NonNullable<ReturnType<typeof useEditor>>;
+}) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick((n) => n + 1);
+    editor.on('selectionUpdate', bump);
+    editor.on('transaction', bump);
+    return () => {
+      editor.off('selectionUpdate', bump);
+      editor.off('transaction', bump);
+    };
+  }, [editor]);
+
+  const setLink = () => {
+    const prev = editor.getAttributes('link').href as string | undefined;
+    const next = window.prompt('Link URL', prev || 'https://');
+    if (next === null) return;
+    const href = next.trim();
+    if (!href) {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
+      return;
+    }
+    editor.chain().focus().extendMarkRange('link').setLink({ href }).run();
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-0.5 border-b border-gray-200/80 dark:border-white/10 px-2 py-1.5 bg-gray-50/80 dark:bg-white/[0.03]">
+      <ToolbarBtn
+        title="Heading 1"
+        active={editor.isActive('heading', { level: 1 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+      >
+        H1
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Heading 2"
+        active={editor.isActive('heading', { level: 2 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+      >
+        H2
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Heading 3"
+        active={editor.isActive('heading', { level: 3 })}
+        onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+      >
+        H3
+      </ToolbarBtn>
+      <span className="mx-1 h-4 w-px bg-gray-200 dark:bg-white/15" aria-hidden />
+      <ToolbarBtn
+        title="Bold"
+        active={editor.isActive('bold')}
+        onClick={() => editor.chain().focus().toggleBold().run()}
+      >
+        B
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Italic"
+        active={editor.isActive('italic')}
+        onClick={() => editor.chain().focus().toggleItalic().run()}
+      >
+        <span className="italic font-serif">I</span>
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Underline"
+        active={editor.isActive('underline')}
+        onClick={() => editor.chain().focus().toggleUnderline().run()}
+      >
+        <span className="underline">U</span>
+      </ToolbarBtn>
+      <span className="mx-1 h-4 w-px bg-gray-200 dark:bg-white/15" aria-hidden />
+      <ToolbarBtn
+        title="Bullet list"
+        active={editor.isActive('bulletList')}
+        onClick={() => editor.chain().focus().toggleBulletList().run()}
+      >
+        • List
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Numbered list"
+        active={editor.isActive('orderedList')}
+        onClick={() => editor.chain().focus().toggleOrderedList().run()}
+      >
+        1. List
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="To-do checklist"
+        active={editor.isActive('taskList')}
+        onClick={() => editor.chain().focus().toggleTaskList().run()}
+      >
+        ☐ To-do
+      </ToolbarBtn>
+      <span className="mx-1 h-4 w-px bg-gray-200 dark:bg-white/15" aria-hidden />
+      <ToolbarBtn title="Add or edit link" active={editor.isActive('link')} onClick={setLink}>
+        Link
+      </ToolbarBtn>
+      <ToolbarBtn
+        title="Clear formatting"
+        onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
+      >
+        Clear
+      </ToolbarBtn>
     </div>
   );
 }
@@ -87,7 +189,7 @@ export default function SharedTypingPad({
   isActive = true,
   className = '',
   title = 'Shared space',
-  subtitle = 'Live notes — typing syncs for everyone in this org’s consulting portal.',
+  subtitle = 'Live notes — formatting and typing sync for everyone in this org’s consulting portal.',
 }: SharedTypingPadProps) {
   const [tabs, setTabs] = useState<PortalSharedPadSummary[]>([]);
   const [activePadId, setActivePadId] = useState<string | null>(null);
@@ -98,7 +200,6 @@ export default function SharedTypingPad({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [syncState, setSyncState] = useState<'live' | 'saving' | 'saved' | 'error'>('live');
-  const [editing, setEditing] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
   const [creating, setCreating] = useState(false);
@@ -114,25 +215,97 @@ export default function SharedTypingPad({
   const failStreakRef = useRef(0);
   const mountedRef = useRef(true);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const applyingRemoteRef = useRef(false);
+  const persistRef = useRef<() => Promise<void>>(async () => undefined);
+  const scheduleSaveRef = useRef<() => void>(() => undefined);
 
   contentRef.current = content;
   revisionRef.current = revision;
   activePadIdRef.current = activePadId;
 
-  const applyRemote = useCallback((pad: PortalSharedPad) => {
-    if (pad.unchanged) return;
-    setContent(pad.content ?? '');
-    setRevision(pad.revision ?? 0);
-    setUpdatedByName(pad.updated_by_name ?? null);
-    setUpdatedAt(pad.updated_at ?? null);
-    contentRef.current = pad.content ?? '';
-    revisionRef.current = pad.revision ?? 0;
-    if (pad.title) {
-      setTabs((prev) =>
-        prev.map((t) => (t.id === pad.id ? { ...t, title: pad.title, revision: pad.revision } : t))
-      );
-    }
-  }, []);
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3] },
+        // Link is configured separately with open-on-click + autolink.
+        link: false,
+      }),
+      Underline,
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Link.configure({
+        openOnClick: true,
+        autolink: true,
+        linkOnPaste: true,
+        defaultProtocol: 'https',
+        HTMLAttributes: {
+          class:
+            'text-sky-600 dark:text-sky-400 underline underline-offset-2 break-all hover:text-sky-500',
+          target: '_blank',
+          rel: 'noopener noreferrer',
+        },
+      }),
+      Placeholder.configure({
+        placeholder: 'Start writing — headings, bullets, and to-dos sync live…',
+      }),
+      Markdown.configure({
+        html: false,
+        tightLists: true,
+        bulletListMarker: '-',
+        linkify: true,
+        breaks: true,
+        transformPastedText: true,
+        transformCopiedText: true,
+      }),
+    ],
+    editorProps: {
+      attributes: {
+        class: 'shared-pad-editor focus:outline-none min-h-[220px] sm:min-h-[280px] px-3 py-3',
+      },
+    },
+    onUpdate: ({ editor: ed }) => {
+      if (applyingRemoteRef.current) return;
+      const md = readEditorMarkdown(ed);
+      setContent(md);
+      contentRef.current = md;
+      scheduleSaveRef.current();
+    },
+  });
+
+  const setEditorMarkdown = useCallback(
+    (md: string) => {
+      if (!editor) return;
+      const current = readEditorMarkdown(editor);
+      if (current === md) return;
+      applyingRemoteRef.current = true;
+      editor.commands.setContent(md || '', { emitUpdate: false });
+      applyingRemoteRef.current = false;
+    },
+    [editor]
+  );
+
+  const applyRemote = useCallback(
+    (pad: PortalSharedPad) => {
+      if (pad.unchanged) return;
+      const next = normalizePadMarkdown(pad.content ?? '');
+      setContent(next);
+      setRevision(pad.revision ?? 0);
+      setUpdatedByName(pad.updated_by_name ?? null);
+      setUpdatedAt(pad.updated_at ?? null);
+      contentRef.current = next;
+      revisionRef.current = pad.revision ?? 0;
+      if (!dirtyRef.current) {
+        setEditorMarkdown(next);
+      }
+      if (pad.title) {
+        setTabs((prev) =>
+          prev.map((t) => (t.id === pad.id ? { ...t, title: pad.title, revision: pad.revision } : t))
+        );
+      }
+    },
+    [setEditorMarkdown]
+  );
 
   const loadTabs = useCallback(async () => {
     if (!isActive) return;
@@ -261,7 +434,7 @@ export default function SharedTypingPad({
       inFlightSaveRef.current = false;
       if (dirtyRef.current && mountedRef.current) {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => void persist(), SAVE_DEBOUNCE_MS);
+        saveTimerRef.current = setTimeout(() => void persistRef.current(), SAVE_DEBOUNCE_MS);
       }
     }
   }, [orgId]);
@@ -270,8 +443,17 @@ export default function SharedTypingPad({
     dirtyRef.current = true;
     setSyncState('saving');
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => void persist(), SAVE_DEBOUNCE_MS);
-  }, [persist]);
+    saveTimerRef.current = setTimeout(() => void persistRef.current(), SAVE_DEBOUNCE_MS);
+  }, []);
+
+  persistRef.current = persist;
+  scheduleSaveRef.current = scheduleSave;
+
+  // If the editor mounts after content was fetched, push it in once.
+  useEffect(() => {
+    if (!editor || dirtyRef.current || loading) return;
+    setEditorMarkdown(contentRef.current);
+  }, [editor, activePadId, loading, setEditorMarkdown]);
 
   const flushAndSwitch = useCallback(
     async (nextId: string) => {
@@ -284,11 +466,12 @@ export default function SharedTypingPad({
       revisionRef.current = 0;
       setRevision(0);
       setContent('');
-      setEditing(false);
+      contentRef.current = '';
+      setEditorMarkdown('');
       setRenamingId(null);
       setActivePadId(nextId);
     },
-    [persist]
+    [persist, setEditorMarkdown]
   );
 
   const handleAddTab = async () => {
@@ -302,7 +485,6 @@ export default function SharedTypingPad({
         : await apiClient.createPortalSharedPad();
       await loadTabs();
       setActivePadId(created.id);
-      setEditing(true);
     } catch (err: unknown) {
       const message =
         (err as { response?: { data?: { detail?: string } }; message?: string })?.response?.data
@@ -364,9 +546,10 @@ export default function SharedTypingPad({
         const next = remaining[0];
         setActivePadId(next?.id ?? null);
         setContent('');
+        contentRef.current = '';
         setRevision(0);
         revisionRef.current = 0;
-        setEditing(false);
+        setEditorMarkdown('');
       }
     } catch (err: unknown) {
       const message =
@@ -451,8 +634,8 @@ export default function SharedTypingPad({
             {title}
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {subtitle} Double-click a tab name to rename. Use × to delete (keep at least one). Up to{' '}
-            {MAX_PORTAL_SHARED_PADS} tabs.
+            {subtitle} Use the toolbar for headings, lists, and to-dos. Double-click a tab name to
+            rename. Use × to delete (keep at least one). Up to {MAX_PORTAL_SHARED_PADS} tabs.
           </p>
         </div>
         <div className="flex items-center gap-2 text-[11px] tabular-nums">
@@ -565,34 +748,18 @@ export default function SharedTypingPad({
 
       {error ? <p className="text-sm text-red-600 dark:text-red-300 mb-2">{error}</p> : null}
 
-      {loading && !content && !editing ? (
+      {loading && !content && !editor ? (
         <p className="text-sm text-gray-500 dark:text-gray-400 py-8 text-center">Loading…</p>
-      ) : editing ? (
-        <textarea
-          value={content}
-          autoFocus
-          onChange={(e) => {
-            setContent(e.target.value);
-            contentRef.current = e.target.value;
-            scheduleSave();
-          }}
-          onBlur={() => {
-            if (dirtyRef.current) void persist();
-            setEditing(false);
-          }}
-          placeholder="Start typing — your consultant and team see this live…"
-          spellCheck
-          className="w-full min-h-[220px] sm:min-h-[280px] resize-y rounded-lg border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-black/20 px-3 py-3 text-sm text-gray-900 dark:text-gray-100 leading-relaxed focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-        />
       ) : (
-        <LinkifiedContent text={content} onStartEdit={() => setEditing(true)} />
+        <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-white/70 dark:bg-black/20 overflow-hidden">
+          {editor ? <EditorToolbar editor={editor} /> : null}
+          <EditorContent editor={editor} />
+        </div>
       )}
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-500 dark:text-gray-400">
         <span>
-          {updatedByName
-            ? `Last edit by ${updatedByName}`
-            : 'Waiting for the first edit'}
+          {updatedByName ? `Last edit by ${updatedByName}` : 'Waiting for the first edit'}
           {updatedAt
             ? ` · ${new Date(updatedAt).toLocaleString(undefined, {
                 month: 'short',
@@ -601,7 +768,7 @@ export default function SharedTypingPad({
                 minute: '2-digit',
               })}`
             : ''}
-          {!editing ? ' · Click text to edit · Links open in a new tab' : ''}
+          {' · Links open in a new tab'}
         </span>
         <span className="tabular-nums">rev {revision || 1}</span>
       </div>
