@@ -1171,23 +1171,29 @@ export default function IntegrationsPanel() {
       {modal === 'claude' && (
         <SquareModalShell title="Claude custom connector" onClose={() => setModal(null)}>
           <div className="flex min-h-0 flex-col space-y-5">
+            <div className="overflow-hidden rounded-xl border-2 border-zinc-200 bg-black dark:border-zinc-700">
+              <video
+                className="aspect-video w-full"
+                controls
+                preload="metadata"
+                playsInline
+                src="/ClaudeMCPSetUp.mp4"
+              >
+                Your browser does not support the video tag.
+              </video>
+            </div>
+
             <BeginnerSetupGuide
-              intro="Claude connects to SweepOS with a remote MCP URL (no API key in Sweep). When you connect, Claude opens Google sign-in so it can access the same org you use in Sweep. Use a public HTTPS API URL in production — localhost only works for local Claude Desktop testing."
+              intro="Connect Claude to SweepOS with the Remote MCP URL below (no API key). Claude signs in with Google and binds to your Sweep org."
               steps={[
                 <>
-                  In Sweep, open <strong>Settings → Profile</strong> and <strong>Connect Google</strong> (or sign in with Google on login) so your account can authorize Claude.
+                  In Sweep, connect Google under <strong>Settings → Profile</strong> (or sign in with Google).
                 </>,
                 <>
-                  In Claude (claude.ai or Desktop), go to <strong>Settings → Connectors → Add custom connector</strong>.
+                  In Claude: <strong>Settings → Connectors → Add custom connector</strong>. Paste the URL below; leave Client ID/Secret empty.
                 </>,
                 <>
-                  Paste the <strong>Remote MCP URL</strong> below. Leave OAuth Client ID and Secret empty (Sweep supports dynamic client registration).
-                </>,
-                <>
-                  Click <strong>Add</strong>, then <strong>Connect</strong>, and finish Google sign-in for your Sweep account.
-                </>,
-                <>
-                  In a chat, open <strong>+ → Connectors</strong> and enable SweepOS. Claude can then read clients, Marketing Intel, Terminal, and (with Brevo connected) send client email after you confirm.
+                  Click <strong>Add</strong>, then <strong>Connect</strong>, finish Google sign-in, and enable SweepOS in a chat via <strong>+ → Connectors</strong>.
                 </>,
               ]}
             />
@@ -1198,9 +1204,8 @@ export default function IntegrationsPanel() {
               </p>
               {/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\b/i.test(MCP_RESOURCE_URL) && (
                 <p className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
-                  This URL is local-only. <strong>Claude.ai</strong> cannot reach localhost — use your public HTTPS API
-                  (e.g. <code className="text-[11px]">https://api.sweepai.site/mcp</code>) for Claude.ai. Localhost works
-                  only with Claude Desktop / Claude Code on this machine.
+                  Localhost only works with Claude Desktop / Claude Code on this machine. Use a public{' '}
+                  <strong>https://</strong> API URL for Claude.ai.
                 </p>
               )}
               {!MCP_RESOURCE_URL.startsWith('https://') &&
@@ -1229,17 +1234,6 @@ export default function IntegrationsPanel() {
                   {mcpUrlCopied ? 'Copied' : 'Copy URL'}
                 </button>
               </div>
-              <p className={mutedClass}>
-                Built from <code className="text-[11px]">NEXT_PUBLIC_API_BASE_URL</code>. In production it must be HTTPS
-                and match the backend <code className="text-[11px]">MCP_RESOURCE_URL</code> exactly (Claude sends that
-                value as the OAuth <code className="text-[11px]">resource</code> parameter).
-              </p>
-              <p className={mutedClass}>
-                Browser console noise: a <code className="text-[11px]">405</code> on{" "}
-                <code className="text-[11px]">claude.ai/v1/toolbox/shttp/mcp/…</code> or{" "}
-                <code className="text-[11px]">user_settings</code> 404 is Claude’s own UI — check your API logs for{" "}
-                <code className="text-[11px]">POST /mcp/oauth/token</code> instead.
-              </p>
             </div>
 
             <div className="space-y-2">
@@ -1249,17 +1243,14 @@ export default function IntegrationsPanel() {
               <pre className="overflow-x-auto rounded-lg border-2 border-zinc-300 bg-zinc-50 p-3 text-xs leading-relaxed text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-50">
                 {`claude mcp add --transport http sweepos ${MCP_RESOURCE_URL}`}
               </pre>
-              <p className={mutedClass}>Then run <code className="text-[11px]">/mcp</code> in Claude Code to authenticate.</p>
+              <p className={mutedClass}>Then run <code className="text-[11px]">/mcp</code> to authenticate.</p>
             </div>
 
             <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
               <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">What Claude can access</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
-                <li>Client profiles and call insights</li>
-                <li>Marketing Intel (objections, wins, themes, ICP)</li>
-                <li>Org Intelligence profile (business context, offers + pricing, sales approach)</li>
-                <li>Terminal dashboard (cash, MRR, calendar, failed payments)</li>
-                <li>Brevo senders + send client email (requires Brevo connected; confirm before send)</li>
+                <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal</li>
+                <li>Brevo email send (when connected; confirm before send)</li>
               </ul>
             </div>
           </div>
