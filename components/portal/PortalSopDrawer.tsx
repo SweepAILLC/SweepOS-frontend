@@ -32,6 +32,7 @@ import {
   toVideoThumbnailUrl,
   toMediaEmbedUrl,
   getMediaEmbedKind,
+  resourceEmbedUrls,
   type Resource,
   type SopCategory,
 } from '@/lib/resources';
@@ -60,9 +61,18 @@ function SopRowBody({
   onOpen: (sop: Resource) => void;
   dragHandle?: ReactNode;
 }) {
-  const embedKind = getMediaEmbedKind(sop.videoUrl);
-  const thumb = embedKind === 'video' ? toVideoThumbnailUrl(sop.videoUrl) : null;
-  const showFigmaBadge = embedKind === 'figma';
+  const urls = resourceEmbedUrls(sop);
+  const kinds = urls.map((u) => getMediaEmbedKind(u));
+  const showLoomBadge = kinds.includes('loom');
+  const showFathomBadge = kinds.includes('fathom');
+  const showFigmaBadge = kinds.includes('figma');
+  // Prefer a Loom/YouTube thumb when present (even if Figma is listed first).
+  const thumbSource =
+    urls.find((u, i) => kinds[i] === 'loom' || kinds[i] === 'video') || urls[0] || null;
+  const thumbKind = getMediaEmbedKind(thumbSource);
+  const thumb =
+    thumbKind === 'video' || thumbKind === 'loom' ? toVideoThumbnailUrl(thumbSource) : null;
+  const extraCount = Math.max(0, urls.length - 1);
 
   return (
     <div className="flex items-stretch gap-0.5 rounded-md border border-transparent hover:border-sky-300/50 hover:bg-sky-50/80 dark:hover:bg-sky-950/30 transition-colors">
@@ -80,7 +90,10 @@ function SopRowBody({
             {sop.description}
           </span>
           {thumb ? (
-            <span className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-gray-200/70 dark:border-white/10 bg-black/40">
+            <span
+              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-gray-200/70 dark:border-white/10 bg-black/40"
+              title={showLoomBadge ? 'Loom video embedded' : 'Video embedded'}
+            >
               <img
                 src={thumb}
                 alt=""
@@ -98,6 +111,46 @@ function SopRowBody({
                   <path d="M6.5 4.5v11l9-5.5-9-5.5z" />
                 </svg>
               </span>
+              {showLoomBadge ? (
+                <span className="absolute bottom-0.5 left-0.5 rounded px-0.5 text-[7px] font-bold uppercase tracking-wide bg-violet-600/90 text-white">
+                  Loom
+                </span>
+              ) : null}
+              {extraCount > 0 ? (
+                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
+                  +{extraCount}
+                </span>
+              ) : null}
+            </span>
+          ) : showLoomBadge ? (
+            <span
+              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-violet-500/30 bg-gradient-to-br from-violet-500/25 via-fuchsia-500/15 to-indigo-500/20 flex flex-col items-center justify-center gap-0.5"
+              title="Loom video embedded"
+            >
+              <svg className="w-4 h-4 text-violet-300" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M12 2a5 5 0 015 5v1.1A5 5 0 0119.9 12 5 5 0 0117 16.9V18a5 5 0 11-10 0v-1.1A5 5 0 014.1 12 5 5 0 017 7.1V6a5 5 0 015-4zm0 7a3 3 0 100 6 3 3 0 000-6z" />
+              </svg>
+              <span className="text-[8px] font-bold uppercase tracking-wide text-violet-200/90">Loom</span>
+              {extraCount > 0 ? (
+                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
+                  +{extraCount}
+                </span>
+              ) : null}
+            </span>
+          ) : showFathomBadge ? (
+            <span
+              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-teal-500/30 bg-gradient-to-br from-teal-500/25 via-cyan-500/15 to-emerald-500/20 flex flex-col items-center justify-center gap-0.5"
+              title="Fathom recording embedded"
+            >
+              <svg className="w-4 h-4 text-teal-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
+                <path d="M6.5 4.5v11l9-5.5-9-5.5z" />
+              </svg>
+              <span className="text-[8px] font-bold uppercase tracking-wide text-teal-200/90">Fathom</span>
+              {extraCount > 0 ? (
+                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
+                  +{extraCount}
+                </span>
+              ) : null}
             </span>
           ) : showFigmaBadge ? (
             <span
@@ -112,6 +165,11 @@ function SopRowBody({
                 <path d="M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z" />
               </svg>
               <span className="text-[8px] font-bold uppercase tracking-wide text-fuchsia-300/90">Figma</span>
+              {extraCount > 0 ? (
+                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
+                  +{extraCount}
+                </span>
+              ) : null}
             </span>
           ) : null}
         </span>
@@ -243,7 +301,7 @@ export default function PortalSopDrawer({
   const [search, setSearch] = useState('');
   const [activeSop, setActiveSop] = useState<Resource | null>(null);
   const [content, setContent] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState('');
+  const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isSystemOwner, setIsSystemOwner] = useState(false);
@@ -370,7 +428,7 @@ export default function PortalSopDrawer({
   useEffect(() => {
     if (!activeSop) {
       setContent(null);
-      setVideoUrl('');
+      setVideoUrls([]);
       return;
     }
     let cancelled = false;
@@ -380,11 +438,22 @@ export default function PortalSopDrawer({
         const doc = await apiClient.getDoc(activeSop.id);
         if (cancelled) return;
         setContent(doc.content || '');
-        setVideoUrl(doc.video_url || activeSop.videoUrl || '');
+        const fromDoc =
+          Array.isArray((doc as { video_urls?: string[] }).video_urls) &&
+          (doc as { video_urls?: string[] }).video_urls!.length > 0
+            ? (doc as { video_urls: string[] }).video_urls
+            : null;
+        setVideoUrls(
+          fromDoc ||
+            resourceEmbedUrls({
+              videoUrl: doc.video_url || activeSop.videoUrl,
+              videoUrls: activeSop.videoUrls,
+            })
+        );
       } catch {
         if (!cancelled) {
           setContent('*Failed to load document.*');
-          setVideoUrl(activeSop.videoUrl || '');
+          setVideoUrls(resourceEmbedUrls(activeSop));
         }
       } finally {
         if (!cancelled) setContentLoading(false);
@@ -412,8 +481,11 @@ export default function PortalSopDrawer({
     }
   };
 
-  const embed = videoUrl ? toMediaEmbedUrl(videoUrl) : null;
-  const embedKind = getMediaEmbedKind(videoUrl);
+  const embeds = videoUrls
+    .map((raw) => ({ raw, src: toMediaEmbedUrl(raw), kind: getMediaEmbedKind(raw) }))
+    .filter((e): e is { raw: string; src: string; kind: NonNullable<ReturnType<typeof getMediaEmbedKind>> } =>
+      Boolean(e.src && e.kind)
+    );
 
   return (
     <>
@@ -622,20 +694,25 @@ export default function PortalSopDrawer({
                   ) : null}
                 </div>
 
-                {embed ? (
-                  <div
-                    className={`mb-3 overflow-hidden rounded-lg border border-gray-200/60 dark:border-white/10 bg-black ${
-                      embedKind === 'figma' ? 'aspect-[4/3] min-h-[280px]' : 'aspect-video'
-                    }`}
-                  >
-                    <iframe
-                      src={embed}
-                      title={`${activeSop.title} ${embedKind === 'figma' ? 'Figma board' : 'video'}`}
-                      className="h-full w-full"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                      allowFullScreen
-                      loading="lazy"
-                    />
+                {embeds.length > 0 ? (
+                  <div className="mb-3 space-y-3">
+                    {embeds.map((item) => (
+                      <div
+                        key={item.raw}
+                        className={`overflow-hidden rounded-lg border border-gray-200/60 dark:border-white/10 bg-black ${
+                          item.kind === 'figma' ? 'aspect-[4/3] min-h-[280px]' : 'aspect-video'
+                        }`}
+                      >
+                        <iframe
+                          src={item.src}
+                          title={`${activeSop.title} ${item.kind} embed`}
+                          className="h-full w-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                      </div>
+                    ))}
                   </div>
                 ) : null}
 

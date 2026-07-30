@@ -6,6 +6,7 @@ export type TabId =
   | 'funnels'
   | 'content_studio'
   | 'call_library'
+  | 'kpi_command_center'
   | 'resources'
   | 'integrations'
   | 'owner'
@@ -22,6 +23,7 @@ export const VALID_TAB_IDS: TabId[] = [
   'funnels',
   'content_studio',
   'call_library',
+  'kpi_command_center',
   'resources',
   'integrations',
   'owner',
@@ -39,6 +41,7 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
   funnels: 'Funnels',
   content_studio: 'Marketing Intel',
   call_library: 'Call Library',
+  kpi_command_center: 'KPI Command Center',
   resources: 'Resources',
   integrations: 'Integrations',
   owner: 'Owner',

@@ -14,7 +14,6 @@ export interface OrgPortalPanelProps {
   organizationName: string | null;
   consultingTier: ConsultingTier | null;
   bookingUrl: string | null;
-  /** When false, skip fetching (e.g. tab not active). Defaults to true. */
   isActive?: boolean;
 }
 

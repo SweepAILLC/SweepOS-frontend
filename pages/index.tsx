@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar, { type TabId } from '@/components/ui/Navbar';
@@ -13,6 +13,7 @@ import SettingsPanel from '@/components/ui/SettingsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
 import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
+import KpiCommandCenterPanel from '@/components/kpi/KpiCommandCenterPanel';
 import ResourcesPanel from '@/components/ui/ResourcesPanel';
 import AutomationsTab from '@/components/automations/AutomationsTab';
 import OrgPortalPanel from '@/components/portal/OrgPortalPanel';
@@ -27,8 +28,6 @@ import {
   canAccessTab,
   canAccessTerminalPriorities,
   defaultTabPermissions,
-  hasConsultingTier,
-  MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
 } from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
@@ -74,6 +73,10 @@ export default function Dashboard() {
   const [pipelineMounted, setPipelineMounted] = useState(
     () => getInitialTab() === 'pipeline',
   );
+  /** KPI Command Center stays mounted after first visit to avoid cold-load flicker. */
+  const [kpiMounted, setKpiMounted] = useState(
+    () => getInitialTab() === 'kpi_command_center',
+  );
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   /** Platform operators (sudo / Sweep Internal admin|owner) — see AdminPanel on org portal. */
@@ -103,6 +106,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (activeTab === 'pipeline') setPipelineMounted(true);
+    if (activeTab === 'kpi_command_center') setKpiMounted(true);
   }, [activeTab]);
 
   // Lightweight poll for awaiting-approval automation jobs so the navbar badge stays fresh
@@ -224,6 +228,10 @@ export default function Dashboard() {
     };
   }, []); // Only run once on mount
 
+  // Prevent sticky deep-links (esp. KPI ?tab=&view=) from re-forcing activeTab on every
+  // router.query identity change while the URL is unchanged.
+  const lastConsumedDeepLinkRef = useRef<string | null>(null);
+
   useEffect(() => {
     // Handle query parameters after router is ready
     if (!router.isReady) return;
@@ -327,16 +335,30 @@ export default function Dashboard() {
       }
       if (VALID_TAB_IDS.includes(tab as TabId)) {
         const tabValue = tab as TabId;
-        setActiveTab(tabValue);
         const rawFid = router.query.funnelId;
-        if (tabValue === 'funnels' && rawFid && typeof rawFid === 'string') {
-          router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: rawFid } }, undefined, { shallow: true });
+        const viewParam = typeof router.query.view === 'string' ? router.query.view : '';
+        const fidParam = typeof rawFid === 'string' ? rawFid : '';
+        const consumeKey = `${tabValue}|${viewParam}|${fidParam}`;
+        // Same deep-link already applied — do not re-setActiveTab (would fight navbar clicks
+        // while sticky ?tab=kpi_command_center&view=… remains in the URL).
+        if (lastConsumedDeepLinkRef.current === consumeKey) {
+          return;
+        }
+        lastConsumedDeepLinkRef.current = consumeKey;
+        setActiveTab(tabValue);
+        if (tabValue === 'funnels' && fidParam) {
+          router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: fidParam } }, undefined, { shallow: true });
         } else if (tabValue === 'settings' && (router.query.section || router.query.google || router.query.google_error)) {
           // Keep settings deep-link query for SettingsPanel
+        } else if (tabValue === 'kpi_command_center' && viewParam) {
+          // Leave ?tab=&view= for KpiCommandCenterPanel — do not replace (avoids re-trigger loops).
         } else {
+          lastConsumedDeepLinkRef.current = null;
           router.replace('/', undefined, { shallow: true });
         }
       }
+    } else {
+      lastConsumedDeepLinkRef.current = null;
     }
   }, [router.isReady, router.query]);
 
@@ -348,19 +370,15 @@ export default function Dashboard() {
     }
   }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
 
-  // Members must not stay on admin-only tabs (URL/localStorage). Settings stays open for logout/org switch.
+  // Clear sticky KPI deep-link when leaving the KPI tab so it cannot override later navigation.
   useEffect(() => {
-    if (loading) return;
-    const roleLower = String(userRole || 'member').toLowerCase().trim();
-    if (roleLower !== 'member') return;
-    if (
-      MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS.includes(activeTab) ||
-      activeTab === 'automations'
-    ) {
-      setActiveTab('terminal');
-      setGlobalLoading(false);
+    if (!router.isReady) return;
+    if (activeTab === 'kpi_command_center') return;
+    if (router.query.tab === 'kpi_command_center' || router.query.view != null) {
+      lastConsumedDeepLinkRef.current = null;
+      void router.replace('/', undefined, { shallow: true });
     }
-  }, [loading, activeTab, userRole, setGlobalLoading]);
+  }, [activeTab, router.isReady, router.query.tab, router.query.view, router.replace]);
 
   // System owners open Owner Panel via logo/org_portal — redirect legacy owner tab.
   useEffect(() => {
@@ -370,15 +388,6 @@ export default function Dashboard() {
       setGlobalLoading(false);
     }
   }, [loading, activeTab, isSystemOwner, setGlobalLoading]);
-
-  // Client portal requires a consulting tier (system owners keep Owner Panel).
-  useEffect(() => {
-    if (loading || activeTab !== 'org_portal' || isSystemOwner) return;
-    if (!hasConsultingTier(consultingTier)) {
-      setActiveTab('terminal');
-      setGlobalLoading(false);
-    }
-  }, [loading, activeTab, isSystemOwner, consultingTier, setGlobalLoading]);
 
   // Integrations live under Settings → Integrations.
   useEffect(() => {
@@ -449,7 +458,13 @@ export default function Dashboard() {
       <Navbar 
         activeTab={activeTab} 
         onTabChange={(tab) => {
-          if (tab !== activeTab) setActiveTab(tab);
+          if (tab === activeTab) return;
+          setActiveTab(tab);
+          // Drop deep-link leftovers immediately so sticky ?tab=/&view= can't snap back to KPI.
+          if (router.query.tab || router.query.view || router.query.funnelId) {
+            lastConsumedDeepLinkRef.current = null;
+            void router.replace('/', undefined, { shallow: true });
+          }
         }} 
         isOwner={isOwner && !isSystemOwner}
         tabPermissions={tabPermissions}
@@ -541,6 +556,17 @@ export default function Dashboard() {
             <RestrictedTabView tabName="call_library" />
           )
         )}
+
+        {hasTabAccess('kpi_command_center') && kpiMounted ? (
+          <div
+            className={activeTab === 'kpi_command_center' ? undefined : 'hidden'}
+            aria-hidden={activeTab !== 'kpi_command_center'}
+          >
+            <KpiCommandCenterPanel />
+          </div>
+        ) : activeTab === 'kpi_command_center' ? (
+          <RestrictedTabView tabName="kpi_command_center" />
+        ) : null}
 
         {activeTab === 'resources' && (
           hasTabAccess('resources') ? (

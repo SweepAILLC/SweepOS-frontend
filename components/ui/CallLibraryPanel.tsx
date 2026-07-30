@@ -43,6 +43,36 @@ function formatCtx(ctx: Record<string, unknown> | undefined): string {
   return parts.join(' ');
 }
 
+function isGlanceCallLibraryItem(item: CallLibraryItem | null | undefined): boolean {
+  if (!item) return false;
+  const kind = (item.analysis_kind || (item.report?.analysis_kind as string | undefined) || '')
+    .toString()
+    .toLowerCase();
+  if (kind === 'glance') return true;
+  if (kind === 'sales') return false;
+  const report = item.report;
+  if (!report || typeof report !== 'object') return false;
+  // Non-sales payload: Fathom summary / AI paragraph, or legacy glance block.
+  if (report.fathom_summary || report.ai_summary || report.glance) return true;
+  return false;
+}
+
+function glanceAiSummary(report: Record<string, unknown> | null | undefined): string {
+  if (!report || typeof report !== 'object') return '';
+  const direct = String(report.ai_summary || '').trim();
+  if (direct) return direct;
+  const glance = report.glance;
+  if (glance && typeof glance === 'object') {
+    return String((glance as { analysis?: unknown }).analysis || '').trim();
+  }
+  return '';
+}
+
+function glanceFathomSummary(report: Record<string, unknown> | null | undefined): string {
+  if (!report || typeof report !== 'object') return '';
+  return String(report.fathom_summary || '').trim();
+}
+
 const BILLING_SUFFIX: Record<string, string> = {
   recurring_monthly: '/mo',
   recurring_annual: '/yr',
@@ -476,12 +506,17 @@ export default function CallLibraryPanel() {
                             ) : null}
                           </div>
                           <div className="shrink-0 flex flex-col items-end gap-1">
-                            {item.call_score != null && item.status === 'complete' ? (
+                            {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                              <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                                Non-sales
+                              </span>
+                            ) : null}
+                            {item.call_score != null && item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <span className="text-xs font-bold tabular-nums text-violet-600 dark:text-violet-400">
                                 {Math.round(item.call_score)}
                               </span>
                             ) : null}
-                            {item.status === 'complete' ? (
+                            {item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <ClosedDealBadge item={item} size="xs" />
                             ) : null}
                             {isPending ? (
@@ -544,7 +579,11 @@ export default function CallLibraryPanel() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{item.call_title}</p>
-                          {item.status === 'complete' ? (
+                          {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                            <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full shrink-0">
+                              Non-sales
+                            </span>
+                          ) : item.status === 'complete' ? (
                             <ClosedDealBadge item={item} size="xs" />
                           ) : null}
                         </div>
@@ -674,10 +713,17 @@ export default function CallLibraryPanel() {
                           Open recording
                         </a>
                       ) : null}
-                      {selectedItem.status === 'complete' ? (
+                      {selectedItem.status === 'complete' && !isGlanceCallLibraryItem(selectedItem) ? (
                         <ClosedDealBadge item={selectedItem} size="sm" />
                       ) : null}
-                      {selectedItem.call_score != null && selectedItem.status === 'complete' ? (
+                      {isGlanceCallLibraryItem(selectedItem) && selectedItem.status === 'complete' ? (
+                        <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                          Non-sales
+                        </span>
+                      ) : null}
+                      {selectedItem.call_score != null &&
+                      selectedItem.status === 'complete' &&
+                      !isGlanceCallLibraryItem(selectedItem) ? (
                         <span
                           title="Sales call quality score (0-100)"
                           className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400"
@@ -708,6 +754,73 @@ export default function CallLibraryPanel() {
                   {selectedItem.status !== 'complete' ? (
                     <div className="px-4 py-4 text-sm text-amber-800 dark:text-amber-200 bg-amber-500/10">
                       {callLibraryStatusMessage(selectedItem.status, selectedItem.failure_reason)}
+                    </div>
+                  ) : selectedItem.report && isGlanceCallLibraryItem(selectedItem) ? (
+                    <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
+                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
+                        <section>
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
+                            <div className="flex items-center gap-2">
+                              {selectedItem.share_url ? (
+                                <a
+                                  href={selectedItem.share_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open share link
+                                </a>
+                              ) : null}
+                              {selectedItem.video_url ? (
+                                <a
+                                  href={selectedItem.video_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open video
+                                </a>
+                              ) : selectedItem.recording_url ? (
+                                <a
+                                  href={selectedItem.recording_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open recording
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                        </section>
+                      ) : null}
+
+                      {(() => {
+                        const ai = glanceAiSummary(selectedItem.report);
+                        if (!ai) return null;
+                        return (
+                          <section>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                              Summary
+                            </h4>
+                            <p className="leading-relaxed">{ai}</p>
+                          </section>
+                        );
+                      })()}
+
+                      {(() => {
+                        const fathom = glanceFathomSummary(selectedItem.report);
+                        if (!fathom) return null;
+                        return (
+                          <section>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                              Fathom summary
+                            </h4>
+                            <p className="leading-relaxed whitespace-pre-wrap">{fathom}</p>
+                          </section>
+                        );
+                      })()}
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">

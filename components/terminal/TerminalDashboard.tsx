@@ -148,7 +148,7 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
       }
     };
     document.addEventListener('visibilitychange', onVis);
-    const interval = setInterval(checkWebhook, 45_000);
+    const interval = setInterval(checkWebhook, 15_000);
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVis);

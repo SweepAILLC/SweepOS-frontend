@@ -1,6 +1,10 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import type { TabId } from '@/lib/tabs';
-import { canAccessBottomNavTab, canAccessTab } from '@/lib/tabAccess';
+import {
+  canAccessBottomNavTab,
+  canAccessTab,
+  shouldShowNavTab as shouldShowNavTabFn,
+} from '@/lib/tabAccess';
 import { useSidebar } from '@/contexts/SidebarContext';
 
 export type { TabId };
@@ -57,6 +61,11 @@ const TAB_ICONS: Partial<Record<TabId, ReactNode>> = {
   call_library: (
     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+    </svg>
+  ),
+  kpi_command_center: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
     </svg>
   ),
   resources: (
@@ -119,7 +128,22 @@ export default function Navbar({
     isSystemOwner,
   };
 
-  const shouldShowTab = (tab: string): boolean => canAccessTab(tab, accessCtx);
+  const shouldShowTab = (tab: string): boolean => {
+    if (typeof shouldShowNavTabFn === 'function') {
+      return shouldShowNavTabFn(tab, accessCtx);
+    }
+    // Fallback if HMR briefly leaves the named export undefined.
+    if (tab === 'owner') return Boolean(isOwner);
+    if (tab === 'settings') return true;
+    if (tab === 'org_portal') {
+      return Boolean(isSystemOwner) || consultingTier === 'pro_consulting' || consultingTier === 'core_consulting';
+    }
+    if (tab === 'intelligence') {
+      const role = String(userRole || 'member').toLowerCase();
+      return role === 'admin' || role === 'owner';
+    }
+    return true;
+  };
 
   const shouldShowBottomNavTab = (tab: TabId): boolean =>
     canAccessBottomNavTab(tab, {
@@ -128,6 +152,8 @@ export default function Navbar({
       consultingTier,
       isSystemOwner,
     });
+
+  const isTabUnlocked = (tab: string): boolean => canAccessTab(tab, accessCtx);
 
   const canOpenOrgPortal = shouldShowTab('org_portal');
 
@@ -141,17 +167,32 @@ export default function Navbar({
     closeMobileNav();
   };
 
+  const lockIcon = (
+    <svg className="w-3.5 h-3.5 flex-shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+      />
+    </svg>
+  );
+
   const tabBtn = (tab: TabId, label: string) => {
     const active = activeTab === tab;
+    const unlocked = isTabUnlocked(tab);
     const icon = TAB_ICONS[tab];
+    const title = unlocked ? label : `${label} (locked — upgrade via consultant)`;
     return (
       <button
         key={tab}
         type="button"
         onClick={() => handleTabChange(tab)}
-        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive}`}
-        title={label}
-        aria-label={label}
+        className={`relative ${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${
+          unlocked ? '' : 'opacity-80'
+        }`}
+        title={title}
+        aria-label={title}
         aria-current={active ? 'page' : undefined}
         style={
           active
@@ -160,7 +201,11 @@ export default function Navbar({
         }
       >
         {icon ? <NavIcon>{icon}</NavIcon> : null}
-        <span className={iconOnly ? 'sr-only' : 'truncate'}>{label}</span>
+        <span className={iconOnly ? 'sr-only' : 'truncate flex-1'}>{label}</span>
+        {!unlocked && !iconOnly ? lockIcon : null}
+        {!unlocked && iconOnly ? (
+          <span className="absolute right-0.5 top-0.5">{lockIcon}</span>
+        ) : null}
       </button>
     );
   };
@@ -172,14 +217,19 @@ export default function Navbar({
     opts?: { ariaLabel?: string; title?: string; extraClass?: string; badge?: number }
   ) => {
     const active = activeTab === tab;
+    const unlocked = isTabUnlocked(tab);
+    const baseTitle = opts?.title ?? label;
+    const title = unlocked ? baseTitle : `${baseTitle} (locked — upgrade via consultant)`;
     return (
       <button
         key={tab}
         type="button"
         onClick={() => handleTabChange(tab)}
-        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''}`}
-        aria-label={opts?.ariaLabel ?? label}
-        title={opts?.title ?? label}
+        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''} ${
+          unlocked ? '' : 'opacity-80'
+        }`}
+        aria-label={opts?.ariaLabel ?? title}
+        title={title}
         aria-current={active ? 'page' : undefined}
       >
         <span className="relative flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5">
@@ -191,7 +241,8 @@ export default function Navbar({
           ) : null}
         </span>
         <span className={iconOnly ? 'sr-only' : 'truncate flex-1'}>{label}</span>
-        {!iconOnly && (opts?.badge ?? 0) > 0 ? (
+        {!unlocked && !iconOnly ? lockIcon : null}
+        {!iconOnly && unlocked && (opts?.badge ?? 0) > 0 ? (
           <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
             {(opts?.badge ?? 0) > 99 ? '99+' : opts?.badge}
           </span>
@@ -266,6 +317,7 @@ export default function Navbar({
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
+        {shouldShowTab('kpi_command_center') && tabBtn('kpi_command_center', 'KPI')}
         {shouldShowTab('automations') &&
           iconBtn('automations', 'Automations', TAB_ICONS.automations!, {
             title: 'Automated email playbooks & worker health',

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, type ReactNode } from 'react';
-import { apiClient, type FathomStatusResponse } from '@/lib/api';
+import { apiClient, type FathomStatusResponse, type StripeConnectionStatus } from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
@@ -131,6 +131,43 @@ function FathomWebhookStatusRow({
   );
 }
 
+function StripeWebhookStatusRow({
+  status,
+  repairing,
+}: {
+  status: StripeConnectionStatus | null;
+  repairing: boolean;
+}) {
+  if (!status?.connected && !repairing) return null;
+
+  let dotClass = 'bg-zinc-400';
+  let label = 'Webhook not configured';
+  if (repairing) {
+    dotClass = 'bg-sky-500 animate-pulse';
+    label = 'Repairing webhook…';
+  } else if (status?.webhook_active || status?.webhook_status === 'active') {
+    dotClass = 'bg-emerald-500';
+    label = 'Instant webhooks active — new payments sync automatically';
+  } else if (status?.connected) {
+    dotClass = 'bg-amber-500';
+    label = 'Webhook not registered — payments may lag until Sync or Repair';
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50/80 dark:bg-white/5 px-3 py-2.5 space-y-1">
+      <div className="flex items-center gap-2">
+        <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${dotClass}`} aria-hidden />
+        <span className="text-xs font-medium text-gray-800 dark:text-gray-200">{label}</span>
+      </div>
+      {status?.last_webhook_processed_at && !repairing ? (
+        <p className="text-[11px] text-gray-500 dark:text-gray-400 pl-[1.125rem]">
+          Last update {new Date(status.last_webhook_processed_at).toLocaleString()}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function IntegrationsPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
   const [loading, setLoading] = useState(true);
@@ -144,6 +181,8 @@ export default function IntegrationsPanel() {
   const [brevoSummary, setBrevoSummary] = useState<BrevoStatus | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
+  const [stripeStatus, setStripeStatus] = useState<StripeConnectionStatus | null>(null);
+  const [stripeWebhookRepairing, setStripeWebhookRepairing] = useState(false);
   const [calcomSummary, setCalcomSummary] = useState<CalComStatus | null>(null);
   const [calendlySummary, setCalendlySummary] = useState<CalendlyStatus | null>(null);
   const [whopSummary, setWhopSummary] = useState<{ connected: boolean; company_id?: string | null } | null>(null);
@@ -185,7 +224,8 @@ export default function IntegrationsPanel() {
         apiClient.getCalendlyStatus().catch(() => null),
         apiClient.getWhopStatus(true).catch(() => null),
       ]);
-      const s = stripeSt as { connected?: boolean; account_id?: string } | null;
+      const s = stripeSt as StripeConnectionStatus | null;
+      setStripeStatus(s);
       setStripeConnected(s?.connected === true);
       setStripeAccountId(typeof s?.account_id === 'string' ? s.account_id : null);
       setCalcomSummary(calcom);
@@ -194,6 +234,7 @@ export default function IntegrationsPanel() {
       setWhopSummary(w ? { connected: !!w.connected, company_id: w.company_id } : { connected: false });
     } catch {
       setStripeConnected(false);
+      setStripeStatus(null);
       setCalcomSummary(null);
       setCalendlySummary(null);
       setWhopSummary({ connected: false });
@@ -332,16 +373,47 @@ export default function IntegrationsPanel() {
     setStripeErr(null);
     setStripeBusy(true);
     try {
-      const result = (await apiClient.connectStripeDirect(k)) as { success?: boolean; account_id?: string };
+      const result = (await apiClient.connectStripeDirect(k)) as {
+        success?: boolean;
+        account_id?: string;
+        webhook_active?: boolean;
+      };
       setStripeApiKey('');
       if (result?.success) {
-        setSuccess(`Stripe connected${result.account_id ? ` (${result.account_id})` : ''}.`);
+        const base = `Stripe connected${result.account_id ? ` (${result.account_id})` : ''}.`;
+        setSuccess(
+          result.webhook_active
+            ? `${base} Instant webhooks are active.`
+            : `${base} Webhooks need repair for instant updates.`
+        );
       }
       await refreshIntegrationSummaries();
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } }; message?: string };
       setStripeErr(ax?.response?.data?.detail || ax?.message || 'Stripe connect failed.');
     } finally {
+      setStripeBusy(false);
+    }
+  };
+
+  const handleStripeWebhookRepair = async () => {
+    if (!canManageIntegrations) return;
+    setStripeErr(null);
+    setStripeWebhookRepairing(true);
+    setStripeBusy(true);
+    try {
+      const result = await apiClient.setupStripeWebhook({ force: true });
+      await refreshIntegrationSummaries();
+      if (result.webhook_active) {
+        setSuccess(result.message || 'Stripe webhook repaired. New payments will sync automatically.');
+      } else {
+        setStripeErr(result.message || 'Webhook repair did not activate. Check BACKEND_PUBLIC_URL.');
+      }
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } }; message?: string };
+      setStripeErr(ax?.response?.data?.detail || ax?.message || 'Webhook repair failed.');
+    } finally {
+      setStripeWebhookRepairing(false);
       setStripeBusy(false);
     }
   };
@@ -623,10 +695,18 @@ export default function IntegrationsPanel() {
             </div>
             <p
               className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
-                stripeConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+                stripeConnected && (stripeStatus?.webhook_active || stripeStatus?.webhook_status === 'active')
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : stripeConnected
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-zinc-500 dark:text-zinc-400'
               }`}
             >
-              {stripeConnected ? 'Connected' : 'Not connected'}
+              {stripeConnected
+                ? stripeStatus?.webhook_active || stripeStatus?.webhook_status === 'active'
+                  ? 'Connected'
+                  : 'Webhook needed'
+                : 'Not connected'}
             </p>
           </div>
         </button>
@@ -836,15 +916,35 @@ export default function IntegrationsPanel() {
                 {stripeAccountId ? (
                   <p className={`${mutedClass} font-mono`}>Account: {stripeAccountId}</p>
                 ) : null}
+                <StripeWebhookStatusRow status={stripeStatus} repairing={stripeWebhookRepairing} />
                 {canManageIntegrations ? (
                   <div className="flex flex-col gap-2">
+                    {!(stripeStatus?.webhook_active || stripeStatus?.webhook_status === 'active') ? (
+                      <button
+                        type="button"
+                        disabled={stripeBusy}
+                        onClick={() => void handleStripeWebhookRepair()}
+                        className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-900/40"
+                      >
+                        {stripeWebhookRepairing ? 'Repairing…' : 'Repair webhook'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={stripeBusy}
+                        onClick={() => void handleStripeWebhookRepair()}
+                        className="rounded-lg border-2 border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                      >
+                        {stripeWebhookRepairing ? 'Repairing…' : 'Re-register webhook'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled={stripeBusy}
                       onClick={() => void handleStripeSync()}
                       className="rounded-lg border-2 border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
                     >
-                      {stripeBusy ? 'Working…' : 'Sync Stripe data'}
+                      {stripeBusy && !stripeWebhookRepairing ? 'Working…' : 'Sync Stripe data'}
                     </button>
                     <button
                       type="button"
@@ -1249,7 +1349,7 @@ export default function IntegrationsPanel() {
             <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
               <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">What Claude can access</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
-                <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal</li>
+                <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal, KPIs</li>
                 <li>Brevo email send (when connected; confirm before send)</li>
               </ul>
             </div>

@@ -124,6 +124,17 @@ export interface FathomWebhookSetupResponse {
   error?: string;
 }
 
+export interface StripeConnectionStatus {
+  connected: boolean;
+  message?: string | null;
+  account_id?: string | null;
+  webhook_active?: boolean;
+  webhook_status?: 'active' | 'not_registered' | 'not_configured' | string | null;
+  webhook_endpoint_id?: string | null;
+  webhook_url?: string | null;
+  last_webhook_processed_at?: string | null;
+}
+
 /** Response from POST /integrations/fathom/sync */
 export interface FathomSyncResponse {
   skipped?: boolean;
@@ -288,6 +299,8 @@ export type CallLibraryDealBilling =
   | 'recurring_annual'
   | null;
 
+export type CallLibraryAnalysisKind = 'sales' | 'glance';
+
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -296,6 +309,8 @@ export interface CallLibraryItem {
   status: string;
   failure_reason?: string | null;
   client_name: string | null;
+  /** sales = full audit; glance = AI paragraph + Fathom summary only. */
+  analysis_kind?: CallLibraryAnalysisKind | string | null;
   call_score: number | null;
   /** True only when the LLM is confident the sale was closed on this call. */
   deal_closed?: boolean;
@@ -1692,15 +1707,31 @@ class ApiClient {
   }
 
   // Integrations (Stripe endpoints cached for fast dashboard tab switching)
-  async getStripeStatus(bypassCache?: boolean) {
+  async getStripeStatus(bypassCache?: boolean): Promise<StripeConnectionStatus> {
     if (!bypassCache) {
-      const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
+      const cached = cache.get<StripeConnectionStatus>(CACHE_KEYS.STRIPE_STATUS);
       if (cached != null) return cached;
     }
     const response = await this.client.get('/integrations/stripe/status');
-    const data = response.data;
+    const data = response.data as StripeConnectionStatus;
     if (!bypassCache) cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
     return data;
+  }
+
+  /** Create or repair the per-org Stripe webhook for instant payment updates. */
+  async setupStripeWebhook(options?: { force?: boolean }) {
+    const response = await this.client.post('/integrations/stripe/webhook/setup', null, {
+      params: { force: options?.force !== false },
+    });
+    cache.delete(CACHE_KEYS.STRIPE_STATUS);
+    return response.data as {
+      success: boolean;
+      webhook_active: boolean;
+      webhook_id?: string;
+      webhook_url?: string;
+      skipped?: boolean;
+      message?: string;
+    };
   }
 
   /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
@@ -2656,6 +2687,7 @@ class ApiClient {
     description: string;
     powered_by: string | null;
     video_url: string | null;
+    video_urls?: string[];
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
@@ -2686,6 +2718,7 @@ class ApiClient {
     content: string;
     powered_by: string | null;
     video_url: string | null;
+    video_urls?: string[];
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
@@ -2718,6 +2751,7 @@ class ApiClient {
       content: string;
       powered_by?: string | null;
       video_url?: string | null;
+      video_urls?: string[];
     }
   ): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.put(`/resources/docs/${resourceId}`, body);
@@ -2732,6 +2766,7 @@ class ApiClient {
     content: string;
     powered_by?: string | null;
     video_url?: string | null;
+    video_urls?: string[];
   }): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.post('/resources/docs', body);
     return response.data as { resource_id: string; title: string; content: string };
@@ -2745,6 +2780,7 @@ class ApiClient {
     description: string;
     powered_by: string | null;
     video_url: string | null;
+    video_urls?: string[];
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
@@ -2940,6 +2976,11 @@ class ApiClient {
 
   // ----- Org Portal shared pads (multi-tab live notepad) ---------------------
 
+  async getPortalOrgInfo(): Promise<{ max_user_seats: number | null; total_users: number; funnel_count: number }> {
+    const response = await this.client.get('/portal/org-info', { timeout: 8000 });
+    return response.data;
+  }
+
   async listPortalSharedPads(): Promise<PortalSharedPadSummary[]> {
     const response = await this.client.get('/portal/shared-pads', { timeout: 8000 });
     return (response.data || []) as PortalSharedPadSummary[];
@@ -3092,6 +3133,125 @@ class ApiClient {
       { timeout: 8000 }
     );
     return response.data as PortalSharedPad;
+  }
+
+  // ---------------------------------------------------------------------------
+  // KPI Command Center
+  // ---------------------------------------------------------------------------
+
+  async getKpiEntries(params?: {
+    start?: string;
+    end?: string;
+    /** When false, skip live calendar/payment sync for faster month navigation. */
+    sync?: boolean;
+  }): Promise<import('@/types/kpi').KpiDailyEntry[]> {
+    const response = await this.client.get('/kpi/entries', { params: params || {} });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async getAdminKpiEntries(orgId: string, params?: {
+    start?: string;
+    end?: string;
+  }): Promise<import('@/types/kpi').KpiDailyEntry[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/kpi-entries`, { params: params || {} });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async upsertKpiEntry(
+    entryDate: string,
+    data: import('@/types/kpi').KpiEntryUpdatePayload
+  ): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.put(`/kpi/entries/${entryDate}`, data);
+    return response.data;
+  }
+
+  async bulkImportKpiEntries(
+    entries: Array<{ entry_date: string } & import('@/types/kpi').KpiEntryUpdatePayload>
+  ): Promise<{ imported: number; entries: import('@/types/kpi').KpiDailyEntry[] }> {
+    const response = await this.client.post('/kpi/entries/bulk', { entries }, { timeout: 60000 });
+    return response.data;
+  }
+
+  async deleteKpiEntry(entryDate: string): Promise<void> {
+    await this.client.delete(`/kpi/entries/${entryDate}`);
+  }
+
+  async getKpiRollups(months = 12): Promise<import('@/types/kpi').KpiMonthlyRollup[]> {
+    const response = await this.client.get('/kpi/rollups', { params: { months } });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async getKpiBenchmarks(): Promise<import('@/types/kpi').KpiBenchmarks> {
+    const response = await this.client.get('/kpi/benchmarks');
+    return response.data;
+  }
+
+  async updateKpiBenchmarks(data: {
+    thresholds?: Record<string, import('@/types/kpi').MetricThreshold>;
+    content_type_tags?: string[];
+  }): Promise<import('@/types/kpi').KpiBenchmarks> {
+    const response = await this.client.put('/kpi/benchmarks', data);
+    return response.data;
+  }
+
+  async getKpiFlags(): Promise<import('@/types/kpi').KpiFlagsResponse> {
+    const response = await this.client.get('/kpi/flags');
+    return response.data;
+  }
+
+
+  async getKpiSnapshot(params?: {
+    days?: number;
+    start?: string;
+    end?: string;
+    include_flags?: boolean;
+    include_series?: boolean;
+    sync?: boolean;
+  }): Promise<import('@/types/kpi').KpiSnapshotResponse> {
+    const response = await this.client.get('/kpi/snapshot', { params: params || {} });
+    return response.data;
+  }
+
+  async getAdminKpiSnapshot(
+    orgId: string,
+    params?: {
+      days?: number;
+      start?: string;
+      end?: string;
+      include_flags?: boolean;
+      include_series?: boolean;
+    }
+  ): Promise<import('@/types/kpi').KpiSnapshotResponse> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/kpi-snapshot`, {
+      params: params || {},
+    });
+    return response.data;
+  }
+
+  async getKpiAutopopulateStatus(): Promise<import('@/types/kpi').KpiAutopopulateStatusResponse> {
+    const response = await this.client.get('/kpi/autopopulate-status');
+    return response.data;
+  }
+
+  async getKpiEntryLink(regenerate = false): Promise<import('@/types/kpi').KpiEntryLinkResponse> {
+    const response = await this.client.get('/kpi/entry-link', {
+      params: regenerate ? { regenerate: true } : undefined,
+    });
+    return response.data;
+  }
+
+  async getPublicKpiEntry(token: string, entryDate: string): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.get(`/kpi/public/${token}/entries/${entryDate}`);
+    return response.data;
+  }
+
+  async upsertPublicKpiEntry(
+    token: string,
+    entryDate: string,
+    data: import('@/types/kpi').KpiEntryUpdatePayload
+  ): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data);
+    return response.data;
   }
 }
 

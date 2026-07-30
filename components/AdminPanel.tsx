@@ -39,6 +39,8 @@ import {
 /** Human-readable tab name for org tab permissions (internal keys stay snake_case). */
 function tabPermissionDisplayName(tab: string): string {
   if (tab === 'content_studio') return 'Marketing Intel';
+  if (tab === 'kpi_command_center') return 'KPI Command Center';
+  if (tab === 'call_library') return 'Call Library';
   return tab.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -320,16 +322,17 @@ export default function AdminPanel() {
       setOrgTabPermissions(permissions);
     } catch (err: any) {
       console.error('Failed to load tab permissions:', err);
-      // Set defaults if loading fails
+      // Set defaults if loading fails — keep in sync with backend AVAILABLE_TABS
       setOrgTabPermissions([
         { tab_name: 'terminal', enabled: true },
         { tab_name: 'pipeline', enabled: true },
-        { tab_name: 'clients', enabled: true },
-        { tab_name: 'stripe', enabled: true },
         { tab_name: 'funnels', enabled: true },
         { tab_name: 'content_studio', enabled: true },
         { tab_name: 'call_library', enabled: true },
-        { tab_name: 'integrations', enabled: true },
+        { tab_name: 'kpi_command_center', enabled: true },
+        { tab_name: 'automations', enabled: true },
+        { tab_name: 'resources', enabled: true },
+        { tab_name: 'intelligence', enabled: true },
       ]);
     } finally {
       setLoadingTabPermissions(false);

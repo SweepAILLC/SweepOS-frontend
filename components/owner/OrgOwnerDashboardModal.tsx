@@ -17,6 +17,7 @@ import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import { CashAndLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
+import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import {
   type DashboardTimeRange,
   dashboardPeriodLabel,
@@ -352,6 +353,99 @@ export default function OrgOwnerDashboardModal({
       </header>
 
       <div className="space-y-5">
+          {/* Shared space — top for quick access */}
+          <SharedTypingPad
+            orgId={orgId}
+            title="Shared space"
+            subtitle="Live notepad for this org's consulting portal — clients see updates as you type."
+          />
+
+          {/* Seats & consulting + Tab permissions — side by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
+                Seats &amp; consulting
+              </h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Unlimited seats"
+                  value={maxUserSeatsInput}
+                  onChange={(e) => setMaxUserSeatsInput(e.target.value)}
+                  className="w-28 px-3 py-1.5 glass-input rounded-md text-sm"
+                />
+                <ShinyButton onClick={onSaveSeats} disabled={savingSeats} className="px-3 py-1.5 text-sm">
+                  {savingSeats ? 'Saving…' : 'Save seats'}
+                </ShinyButton>
+              </div>
+              <select
+                value={consultingTierInput}
+                onChange={(e) =>
+                  setConsultingTierInput(
+                    e.target.value as '' | 'pro_consulting' | 'core_consulting'
+                  )
+                }
+                className="w-full px-3 py-2 glass-input rounded-md text-sm"
+              >
+                <option value="">No consulting tier</option>
+                <option value="core_consulting">Core Consulting</option>
+                <option value="pro_consulting">Pro Consulting</option>
+              </select>
+              <input
+                type="url"
+                value={bookingUrlInput}
+                onChange={(e) => setBookingUrlInput(e.target.value)}
+                placeholder="https://cal.com/your-user/30min"
+                className="w-full px-3 py-2 glass-input rounded-md text-sm"
+              />
+              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                Cal.com event link — embedded in the org portal so teams can book in-place.
+              </p>
+              <ShinyButton
+                onClick={onSaveConsulting}
+                disabled={savingConsulting}
+                className="px-3 py-1.5 text-sm"
+              >
+                {savingConsulting ? 'Saving…' : 'Save consulting'}
+              </ShinyButton>
+            </section>
+
+            <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text mb-2">
+                Tab permissions
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Off = tab stays in their nav but shows a locked upgrade screen. On = full access.
+              </p>
+              {loadingTabPermissions ? (
+                <p className="text-sm text-gray-500">Loading…</p>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {orgTabPermissions.map((permission) => (
+                    <label
+                      key={permission.tab_name}
+                      className="flex items-center justify-between gap-3 py-2.5 px-3 rounded-lg border border-gray-200/60 dark:border-white/10 cursor-pointer"
+                    >
+                      <span className="text-sm text-gray-900 dark:text-gray-100">
+                        {tabPermissionDisplayName(permission.tab_name)}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={permission.enabled}
+                        onChange={(e) => onToggleTabPermission(permission.tab_name, e.target.checked)}
+                        className="h-4 w-4 rounded border-gray-300 text-violet-600"
+                      />
+                    </label>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+
+          {/* KPI Snapshot for this org */}
+          <PortalKpiSnapshot isActive orgId={orgId} />
+
           {/* Terminal KPIs + time scope */}
           <section className="glass-card p-3 sm:p-4 rounded-xl border border-gray-200 dark:border-white/10">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
@@ -566,62 +660,7 @@ export default function OrgOwnerDashboardModal({
             </section>
           ) : null}
 
-          <SharedTypingPad
-            orgId={orgId}
-            title="Shared space"
-            subtitle="Live notepad for this org’s consulting portal — clients see updates as you type."
-          />
-
-          <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-4 max-w-xl">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text mb-2">
-              Seats & consulting
-            </h3>
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <input
-                type="number"
-                min={0}
-                placeholder="Unlimited seats"
-                value={maxUserSeatsInput}
-                onChange={(e) => setMaxUserSeatsInput(e.target.value)}
-                className="w-28 px-3 py-1.5 glass-input rounded-md text-sm"
-              />
-              <ShinyButton onClick={onSaveSeats} disabled={savingSeats} className="px-3 py-1.5 text-sm">
-                {savingSeats ? 'Saving…' : 'Save seats'}
-              </ShinyButton>
-            </div>
-            <select
-              value={consultingTierInput}
-              onChange={(e) =>
-                setConsultingTierInput(
-                  e.target.value as '' | 'pro_consulting' | 'core_consulting'
-                )
-              }
-              className="w-full px-3 py-2 glass-input rounded-md text-sm mb-2"
-            >
-              <option value="">No consulting tier</option>
-              <option value="core_consulting">Core Consulting</option>
-              <option value="pro_consulting">Pro Consulting</option>
-            </select>
-            <input
-              type="url"
-              value={bookingUrlInput}
-              onChange={(e) => setBookingUrlInput(e.target.value)}
-              placeholder="https://cal.com/your-user/30min"
-              className="w-full px-3 py-2 glass-input rounded-md text-sm mb-1"
-            />
-            <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
-              Cal.com event link — embedded in the org portal so teams can book in-place.
-            </p>
-            <ShinyButton
-              onClick={onSaveConsulting}
-              disabled={savingConsulting}
-              className="px-3 py-1.5 text-sm"
-            >
-              {savingConsulting ? 'Saving…' : 'Save consulting'}
-            </ShinyButton>
-          </section>
-
-          {/* Combined funnels section */}
+                    {/* Combined funnels section */}
           <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-4">
             <div className="flex flex-wrap items-end justify-between gap-2">
               <div>
@@ -781,37 +820,6 @@ export default function OrgOwnerDashboardModal({
             </div>
           </section>
 
-          {/* Tab permissions */}
-          <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text mb-2">
-              Tab permissions
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-              Control which product tabs this org can access.
-            </p>
-            {loadingTabPermissions ? (
-              <p className="text-sm text-gray-500">Loading…</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {orgTabPermissions.map((permission) => (
-                  <label
-                    key={permission.tab_name}
-                    className="flex items-center justify-between gap-3 py-2.5 px-3 rounded-lg border border-gray-200/60 dark:border-white/10 cursor-pointer"
-                  >
-                    <span className="text-sm text-gray-900 dark:text-gray-100">
-                      {tabPermissionDisplayName(permission.tab_name)}
-                    </span>
-                    <input
-                      type="checkbox"
-                      checked={permission.enabled}
-                      onChange={(e) => onToggleTabPermission(permission.tab_name, e.target.checked)}
-                      className="h-4 w-4 rounded border-gray-300 text-violet-600"
-                    />
-                  </label>
-                ))}
-              </div>
-            )}
-          </section>
       </div>
     </div>
   );

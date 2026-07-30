@@ -85,7 +85,7 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   }, [timeRange]);
 
   const pollDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const STRIPE_POLL_MS = 90000;
+  const STRIPE_POLL_MS = 20000;
   useEffect(() => {
     const interval = setInterval(async () => {
       try {

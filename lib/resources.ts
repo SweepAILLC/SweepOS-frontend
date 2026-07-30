@@ -13,7 +13,10 @@ export interface Resource {
   prerequisites?: string[];
   outputSummary?: string;
   poweredBy?: string | null;
+  /** Primary / first embed URL (back-compat). Prefer `videoUrls`. */
   videoUrl?: string | null;
+  /** All embed URLs for this SOP (YouTube, Loom, Figma, Fathom, …). */
+  videoUrls?: string[];
   sopCategory?: SopCategory | null;
   isCustom?: boolean;
   isBuiltin?: boolean;
@@ -31,9 +34,10 @@ export const SOP_CATEGORY_COLORS: Record<
     heading: 'text-amber-500 dark:text-amber-400',
   },
   marketing: {
-    badge: 'bg-fuchsia-500/10 text-fuchsia-400 border-fuchsia-500/20',
-    pillActive: 'bg-fuchsia-600 text-white shadow-md',
-    heading: 'text-fuchsia-500 dark:text-fuchsia-400',
+    badge: 'bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/25',
+    pillActive: 'bg-pink-600 text-white shadow-md',
+    // Match Content Studio short-form / marketing SOP title pink
+    heading: 'text-pink-700 dark:text-pink-300',
   },
   sales: {
     badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
@@ -143,6 +147,7 @@ export function docMetaToResource(row: {
   description: string;
   powered_by: string | null;
   video_url: string | null;
+  video_urls?: string[] | null;
   is_custom: boolean;
   is_builtin: boolean;
   updated_at: string | null;
@@ -155,7 +160,13 @@ export function docMetaToResource(row: {
     category: (row.category as ResourceCategory) || 'SOP',
     sopCategory: (row.sop_category as SopCategory | null) || null,
     poweredBy: row.powered_by,
-    videoUrl: row.video_url,
+    videoUrl: row.video_url ?? (row.video_urls && row.video_urls[0]) ?? null,
+    videoUrls:
+      Array.isArray(row.video_urls) && row.video_urls.length > 0
+        ? row.video_urls.filter(Boolean)
+        : row.video_url
+          ? [row.video_url]
+          : [],
     isCustom: row.is_custom,
     isBuiltin: row.is_builtin,
     updatedAt: row.updated_at,
@@ -214,7 +225,51 @@ export function toVideoEmbedUrl(raw: string): string | null {
   return toMediaEmbedUrl(raw);
 }
 
-export type MediaEmbedKind = 'video' | 'figma';
+export type MediaEmbedKind = 'video' | 'figma' | 'loom' | 'fathom';
+
+/** Normalize one-or-many embed URL fields into a clean list. */
+export function parseEmbedUrls(
+  videoUrl?: string | null,
+  videoUrls?: string[] | null
+): string[] {
+  const out: string[] = [];
+  const push = (raw: string) => {
+    const t = raw.trim();
+    if (!t) return;
+    if (!out.includes(t)) out.push(t);
+  };
+  if (Array.isArray(videoUrls)) {
+    for (const u of videoUrls) if (typeof u === 'string') push(u);
+  }
+  if (typeof videoUrl === 'string' && videoUrl.trim()) {
+    const s = videoUrl.trim();
+    if (s.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(s) as unknown;
+        if (Array.isArray(parsed)) {
+          for (const u of parsed) if (typeof u === 'string') push(u);
+          return out;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    if (s.includes('\n')) {
+      for (const line of s.split('\n')) push(line);
+      return out;
+    }
+    push(s);
+  }
+  return out;
+}
+
+/** Embed URLs for a resource (multi-URL aware). */
+export function resourceEmbedUrls(resource: {
+  videoUrl?: string | null;
+  videoUrls?: string[] | null;
+}): string[] {
+  return parseEmbedUrls(resource.videoUrl, resource.videoUrls);
+}
 
 /** Convert a share / watch / board URL into an iframe-ready embed URL. */
 export function toMediaEmbedUrl(raw: string): string | null {
@@ -227,6 +282,11 @@ export function toMediaEmbedUrl(raw: string): string | null {
     // --- Figma / FigJam (Embed Kit 2.0) ---
     if (host === 'figma.com' || host === 'embed.figma.com') {
       return toFigmaEmbedUrl(url);
+    }
+
+    // --- Fathom ---
+    if (host === 'fathom.video' || host.endsWith('.fathom.video')) {
+      return toFathomEmbedUrl(url);
     }
 
     // --- Video hosts ---
@@ -244,7 +304,14 @@ export function toMediaEmbedUrl(raw: string): string | null {
       const id = url.pathname.split('/').filter(Boolean)[0];
       return id ? `https://player.vimeo.com/video/${encodeURIComponent(id)}` : raw;
     }
-    if (host === 'loom.com' && url.pathname.startsWith('/share/')) {
+    if (host === 'loom.com') {
+      const parts = url.pathname.split('/').filter(Boolean);
+      if (parts[0] === 'share' && parts[1]) {
+        return `https://www.loom.com/embed/${encodeURIComponent(parts[1])}`;
+      }
+      if (parts[0] === 'embed' && parts[1]) {
+        return `https://www.loom.com/embed/${encodeURIComponent(parts[1])}`;
+      }
       return raw.replace('/share/', '/embed/');
     }
     return raw;
@@ -260,13 +327,14 @@ export function getMediaEmbedKind(raw: string | null | undefined): MediaEmbedKin
     if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
     const host = url.hostname.toLowerCase().replace(/^www\./, '');
     if (host === 'figma.com' || host === 'embed.figma.com') return 'figma';
+    if (host === 'loom.com') return 'loom';
+    if (host === 'fathom.video' || host.endsWith('.fathom.video')) return 'fathom';
     if (
       host === 'youtu.be' ||
       host === 'youtube.com' ||
       host === 'm.youtube.com' ||
       host === 'vimeo.com' ||
-      host === 'player.vimeo.com' ||
-      host === 'loom.com'
+      host === 'player.vimeo.com'
     ) {
       return 'video';
     }
@@ -275,6 +343,22 @@ export function getMediaEmbedKind(raw: string | null | undefined): MediaEmbedKin
   } catch {
     return null;
   }
+}
+
+function toFathomEmbedUrl(url: URL): string | null {
+  const parts = url.pathname.split('/').filter(Boolean);
+  // https://fathom.video/share/XXXX or /embed/XXXX or /calls/XXXX
+  if (parts[0] === 'embed' && parts[1]) {
+    return `https://fathom.video/embed/${encodeURIComponent(parts[1])}`;
+  }
+  if ((parts[0] === 'share' || parts[0] === 'calls') && parts[1]) {
+    return `https://fathom.video/embed/${encodeURIComponent(parts[1])}`;
+  }
+  // Already an embed-style path with a single id segment
+  if (parts.length === 1 && parts[0]) {
+    return `https://fathom.video/embed/${encodeURIComponent(parts[0])}`;
+  }
+  return url.toString();
 }
 
 function toFigmaEmbedUrl(url: URL): string | null {
@@ -353,6 +437,10 @@ export function toVideoThumbnailUrl(raw: string | null | undefined): string | nu
       return id
         ? `https://cdn.loom.com/sessions/thumbnails/${encodeURIComponent(id)}-with-play.gif`
         : null;
+    }
+    if (host === 'fathom.video' || host.endsWith('.fathom.video')) {
+      // Fathom does not expose a stable public thumbnail CDN; callers should use the badge.
+      return null;
     }
     return null;
   } catch {

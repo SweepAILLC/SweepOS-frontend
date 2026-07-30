@@ -12,6 +12,8 @@ import {
   renderMarkdown,
   toMediaEmbedUrl,
   getMediaEmbedKind,
+  parseEmbedUrls,
+  resourceEmbedUrls,
   type OrgLibraryKind,
   type OrgLibraryTag,
   type Resource,
@@ -53,7 +55,7 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
   const canEdit = canEditDocs && isEditableDoc;
 
   const [content, setContent] = useState<string | null>(null);
-  const [videoUrl, setVideoUrl] = useState(resource.videoUrl || '');
+  const [videoUrls, setVideoUrls] = useState<string[]>(() => resourceEmbedUrls(resource));
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -64,7 +66,9 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
   const [draftDescription, setDraftDescription] = useState(resource.description);
   const [draftContent, setDraftContent] = useState('');
   const [draftPoweredBy, setDraftPoweredBy] = useState(resource.poweredBy || '');
-  const [draftVideoUrl, setDraftVideoUrl] = useState(resource.videoUrl || '');
+  const [draftVideoUrlsText, setDraftVideoUrlsText] = useState(
+    () => resourceEmbedUrls(resource).join('\n')
+  );
   const [draftSopCategory, setDraftSopCategory] = useState<SopCategory | ''>(resource.sopCategory || '');
   const backdropRef = useRef<HTMLDivElement>(null);
 
@@ -78,8 +82,12 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
         setDraftDescription(doc.description);
         setDraftContent(doc.content || '');
         setDraftPoweredBy(doc.powered_by || '');
-        setVideoUrl(doc.video_url || '');
-        setDraftVideoUrl(doc.video_url || '');
+        const urls = parseEmbedUrls(
+          doc.video_url,
+          (doc as { video_urls?: string[] }).video_urls
+        );
+        setVideoUrls(urls);
+        setDraftVideoUrlsText(urls.join('\n'));
         setDraftSopCategory((doc.sop_category as SopCategory | null) || '');
       } else if (resource.fileName) {
         const res = await fetch(`/resources/${resource.fileName}`);
@@ -139,7 +147,7 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
     setDraftDescription(resource.description);
     setDraftContent(content || '');
     setDraftPoweredBy(resource.poweredBy || '');
-    setDraftVideoUrl(videoUrl);
+    setDraftVideoUrlsText(videoUrls.join('\n'));
     setDraftSopCategory(resource.sopCategory || '');
     setEditing(true);
     setSaveError(null);
@@ -155,9 +163,12 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
       setSaveError('Title is required.');
       return;
     }
-    if (draftVideoUrl.trim() && !toMediaEmbedUrl(draftVideoUrl.trim())) {
-      setSaveError('Embed URL must be a valid YouTube, Vimeo, Loom, or Figma https URL.');
-      return;
+    const urls = parseEmbedUrls(draftVideoUrlsText);
+    for (const u of urls) {
+      if (!toMediaEmbedUrl(u)) {
+        setSaveError(`Invalid embed URL: ${u}`);
+        return;
+      }
     }
     setSaving(true);
     setSaveError(null);
@@ -169,10 +180,11 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
         description: draftDescription.trim(),
         content: draftContent,
         powered_by: draftPoweredBy.trim() || null,
-        video_url: draftVideoUrl.trim() || null,
+        video_url: urls[0] || null,
+        video_urls: urls,
       });
       setContent(draftContent);
-      setVideoUrl(draftVideoUrl.trim());
+      setVideoUrls(urls);
       setEditing(false);
       onSaved();
     } catch (err: unknown) {
@@ -303,17 +315,17 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
               )}
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-                  Embed URL (optional)
+                  Embed URLs (optional)
                 </label>
-                <input
-                  type="url"
-                  value={draftVideoUrl}
-                  onChange={(e) => setDraftVideoUrl(e.target.value)}
+                <textarea
+                  value={draftVideoUrlsText}
+                  onChange={(e) => setDraftVideoUrlsText(e.target.value)}
+                  rows={3}
                   className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-                  placeholder="https://www.figma.com/board/… or YouTube / Loom URL"
+                  placeholder={"https://www.loom.com/share/…\nhttps://fathom.video/share/…\nhttps://www.figma.com/board/…"}
                 />
                 <p className="mt-1 text-[11px] text-gray-500">
-                  YouTube, Vimeo, Loom, or a Figma / FigJam board share link.
+                  One URL per line. YouTube, Vimeo, Loom, Fathom, or Figma / FigJam.
                 </p>
               </div>
               <div>
@@ -387,20 +399,30 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
             </div>
           ) : (
             <>
-              {videoUrl && toMediaEmbedUrl(videoUrl) && (
-                <div
-                  className={`mb-5 overflow-hidden rounded-lg border border-gray-200/40 dark:border-white/10 bg-black ${
-                    getMediaEmbedKind(videoUrl) === 'figma' ? 'aspect-[4/3] min-h-[280px]' : 'aspect-video'
-                  }`}
-                >
-                  <iframe
-                    src={toMediaEmbedUrl(videoUrl)!}
-                    title={`${resource.title} ${getMediaEmbedKind(videoUrl) === 'figma' ? 'Figma board' : 'video'}`}
-                    className="h-full w-full"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                    allowFullScreen
-                    loading="lazy"
-                  />
+              {videoUrls.length > 0 && (
+                <div className="mb-5 space-y-3">
+                  {videoUrls.map((raw) => {
+                    const src = toMediaEmbedUrl(raw);
+                    if (!src) return null;
+                    const kind = getMediaEmbedKind(raw);
+                    return (
+                      <div
+                        key={raw}
+                        className={`overflow-hidden rounded-lg border border-gray-200/40 dark:border-white/10 bg-black ${
+                          kind === 'figma' ? 'aspect-[4/3] min-h-[280px]' : 'aspect-video'
+                        }`}
+                      >
+                        <iframe
+                          src={src}
+                          title={`${resource.title} ${kind || 'media'} embed`}
+                          className="h-full w-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               )}
               {(resource.poweredBy || draftPoweredBy) && (
@@ -449,7 +471,7 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('# New SOP\n\n');
   const [poweredBy, setPoweredBy] = useState('');
-  const [videoUrl, setVideoUrl] = useState('');
+  const [videoUrlsText, setVideoUrlsText] = useState('');
   const [sopCategory, setSopCategory] = useState<SopCategory | ''>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -472,9 +494,12 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
       setError('Title is required.');
       return;
     }
-    if (videoUrl.trim() && !toMediaEmbedUrl(videoUrl.trim())) {
-      setError('Embed URL must be a valid YouTube, Vimeo, Loom, or Figma https URL.');
-      return;
+    const urls = parseEmbedUrls(videoUrlsText);
+    for (const u of urls) {
+      if (!toMediaEmbedUrl(u)) {
+        setError(`Invalid embed URL: ${u}`);
+        return;
+      }
     }
     setSaving(true);
     setError(null);
@@ -486,7 +511,8 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
         description: description.trim(),
         content,
         powered_by: poweredBy.trim() || null,
-        video_url: videoUrl.trim() || null,
+        video_url: urls[0] || null,
+        video_urls: urls,
       });
       onCreated(doc.resource_id);
     } catch (err: unknown) {
@@ -545,17 +571,17 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
           </div>
           <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
-              Embed URL (optional)
+              Embed URLs (optional)
             </label>
-            <input
-              type="url"
-              value={videoUrl}
-              onChange={(e) => setVideoUrl(e.target.value)}
+            <textarea
+              value={videoUrlsText}
+              onChange={(e) => setVideoUrlsText(e.target.value)}
+              rows={3}
               className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-              placeholder="https://www.figma.com/board/… or YouTube / Loom URL"
+              placeholder={"https://www.loom.com/share/…\nhttps://fathom.video/share/…"}
             />
             <p className="mt-1 text-[11px] text-gray-500">
-              Video or Figma / FigJam board — shown above the document.
+              One URL per line — YouTube, Vimeo, Loom, Fathom, or Figma / FigJam.
             </p>
           </div>
           <div>
