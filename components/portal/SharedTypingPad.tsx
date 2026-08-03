@@ -14,7 +14,7 @@ import {
   type PortalSharedPadSummary,
 } from '@/lib/api';
 
-const POLL_MS = 2000;
+const POLL_MS = 10_000;
 const SAVE_DEBOUNCE_MS = 350;
 const TAB_LIST_POLL_MS = 8000;
 
