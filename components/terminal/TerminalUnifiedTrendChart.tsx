@@ -586,9 +586,9 @@ export default function TerminalUnifiedTrendChart() {
                         fill="#f59e0b"
                         fillOpacity={0.15}
                         strokeWidth={2}
-                        isAnimationActive={false}
                         clipPath={moneyClipPath}
                         {...PREMIUM_LINE_ANIMATION}
+                        isAnimationActive={false}
                       />
                       <Area
                         yAxisId="left"
@@ -599,9 +599,9 @@ export default function TerminalUnifiedTrendChart() {
                         fill="#6366f1"
                         fillOpacity={0.15}
                         strokeWidth={2}
-                        isAnimationActive={false}
                         clipPath={moneyClipPath}
                         {...PREMIUM_LINE_ANIMATION}
+                        isAnimationActive={false}
                       />
                     </ComposedChart>
                   </div>
@@ -739,9 +739,9 @@ export default function TerminalUnifiedTrendChart() {
                           strokeWidth={2}
                           dot={{ r: 2.5 }}
                           connectNulls
-                          isAnimationActive={false}
                           clipPath={activityClipPath}
                           {...PREMIUM_LINE_ANIMATION}
+                          isAnimationActive={false}
                         />
                       ))}
                     </ComposedChart>

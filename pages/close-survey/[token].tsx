@@ -134,7 +134,7 @@ function CloseSurveyClient() {
       .slice(0, 40);
   }, [meta, clientQuery]);
 
-  const offers: CloseSurveyOfferOption[] = meta?.offers || [];
+  const offers: CloseSurveyOfferOption[] = useMemo(() => meta?.offers || [], [meta?.offers]);
 
   useEffect(() => {
     if (offerSlot !== 'custom') return;
