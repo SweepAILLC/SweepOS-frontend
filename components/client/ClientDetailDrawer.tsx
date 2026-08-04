@@ -547,7 +547,7 @@ export default function ClientDetailDrawer({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black bg-opacity-25" />
+          <div className="fixed inset-0 bg-black/40" />
         </Transition.Child>
 
         <div className="fixed inset-0 overflow-hidden">
@@ -562,7 +562,7 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:glass-card rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:glass-card dark:bg-gray-950/95 rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
                     <div className="flex-shrink-0 px-3 py-3 sm:px-6 sm:py-4 border-b border-gray-200 dark:border-white/10">
@@ -800,7 +800,7 @@ export default function ClientDetailDrawer({
                     </div>
 
                     {showManualPaymentForm && (
-                      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+                      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
                           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                             Add Manual Payment

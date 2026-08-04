@@ -23,7 +23,14 @@ export interface HealthTrendPeriod {
   stripe_revenue_usd: number;
   /** Monthly cash matching Finances "combined" (Stripe + Whop) when API provides it; charts prefer this over stripe-only. */
   combined_revenue_usd?: number | null;
+  /** Monthly deal/contract revenue (KPI revenue from closes + drawer contract amounts). */
+  deal_revenue_usd?: number | null;
   calls_booked_count: number;
+  /** Monthly KPI Command Center volume (sum of daily entries). */
+  kpi_closes_count?: number;
+  kpi_show_ups_count?: number;
+  kpi_calls_booked_count?: number;
+  kpi_outreach_sent_count?: number;
   cumulative_total_clients: number;
   active_clients_cohort: number;
   /** When set by API, preferred over derived cumulative revenue ÷ roster for LTV charts. */

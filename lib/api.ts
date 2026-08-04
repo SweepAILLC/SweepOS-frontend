@@ -285,6 +285,116 @@ export interface ContentStudioBootstrap {
   batch_id: string | null;
 }
 
+/** Instagram Performance Intel (Composio-backed) */
+export interface InstagramCapabilities {
+  insights: boolean;
+  reason?: string | null;
+  followers_count?: number | null;
+}
+
+export interface InstagramStatus {
+  connected: boolean;
+  configured: boolean;
+  composio_configured?: boolean;
+  auth_config_id?: string | null;
+  username?: string | null;
+  ig_user_id?: string | null;
+  followers_count?: number | null;
+  capabilities: InstagramCapabilities;
+  last_sync_at?: string | null;
+  message?: string | null;
+}
+
+export interface InstagramWhatWorks {
+  dimension: string;
+  dimension_label?: string;
+  value: string;
+  value_label?: string;
+  n: number;
+  median_engagement_rate: number;
+  org_median_engagement_rate: number;
+  lift_vs_median_pct: number;
+  verdict: 'double_down' | 'keep' | 'stop';
+  confidence?: 'high' | 'low';
+  summary?: string;
+  example_hooks?: string[];
+}
+
+export interface InstagramPostCard {
+  ig_media_id: string;
+  permalink?: string | null;
+  thumbnail_url?: string | null;
+  caption?: string | null;
+  hook_text?: string | null;
+  hook_pattern?: string | null;
+  format_bucket?: string | null;
+  funnel_stage?: string | null;
+  theme_keys?: string[];
+  posted_at?: string | null;
+  views?: number | null;
+  reach?: number | null;
+  saved?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  total_interactions?: number | null;
+  engagement_rate_pct?: number | null;
+  save_rate_pct?: number | null;
+  insights_status?: string | null;
+  metrics_settled?: boolean;
+  linked_concept_id?: string | null;
+  avg_watch_time_sec?: number | null;
+}
+
+export interface InstagramTrendPoint {
+  week_start: string;
+  reach: number;
+  saved: number;
+  views: number;
+  posting_volume: number;
+  engagement_rate_pct?: number | null;
+}
+
+export interface InstagramPerformance {
+  connected: boolean;
+  org_id: string;
+  days: number;
+  range_start?: string;
+  range_end?: string;
+  summary: {
+    posts: number;
+    reach: number;
+    reach_delta_pct?: number | null;
+    views: number;
+    views_delta_pct?: number | null;
+    saved: number;
+    saved_delta_pct?: number | null;
+    engagement_rate_pct?: number | null;
+    engagement_rate_delta_pct?: number | null;
+    followers_count?: number | null;
+    follower_growth?: number | null;
+    prev_period_posts?: number;
+  } | null;
+  trend: InstagramTrendPoint[];
+  top_posts: InstagramPostCard[];
+  bottom_posts: InstagramPostCard[];
+  what_works: InstagramWhatWorks[];
+  verdicts: string[];
+  flags: Array<{
+    id: string;
+    severity: string;
+    title: string;
+    detail: string;
+    metric?: string;
+    drop_pct?: number;
+  }>;
+  capabilities: InstagramCapabilities;
+  unsettled_post_count: number;
+  last_synced_at?: string | null;
+  username?: string | null;
+  usage?: string;
+}
+
 /** GET /call-library — Fathom call coaching reports */
 export interface CallLibraryAttendee {
   email?: string;
@@ -1553,10 +1663,17 @@ class ApiClient {
     }
 
     const req = this.client
-      .get('/clients/terminal/monthly-trends', { timeout: 60000 })
+      .get('/clients/terminal/monthly-trends', {
+        timeout: 60000,
+        // Bypass server in-process cache so sales-call toggles update the graph immediately.
+        params: forceRefresh ? { force_refresh: true } : undefined,
+      })
       .then((response) => {
         const data = response.data as TerminalMonthlyTrendsPayload;
-        cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+        // Avoid writing a superseded response over a newer force-refresh.
+        if (!forceRefresh || terminalMonthlyTrendsInflight === req) {
+          cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+        }
         return data;
       })
       .finally(() => {
@@ -2535,6 +2652,65 @@ class ApiClient {
     return response.data as { completed_idea_ids: string[]; batch_id?: string; updated_at?: string };
   }
 
+  async getInstagramStatus(): Promise<InstagramStatus> {
+    const response = await this.client.get('/instagram/status', { timeout: 30000 });
+    return response.data;
+  }
+
+  async putInstagramComposioCredentials(body: {
+    api_key: string;
+    auth_config_id: string;
+  }): Promise<{ ok: boolean; composio_configured: boolean; auth_config_id?: string }> {
+    const response = await this.client.put('/instagram/composio-credentials', body, { timeout: 30000 });
+    return response.data;
+  }
+
+  async deleteInstagramComposioCredentials(): Promise<{
+    ok: boolean;
+    composio_configured: boolean;
+    deleted?: boolean;
+  }> {
+    const response = await this.client.delete('/instagram/composio-credentials', { timeout: 30000 });
+    return response.data;
+  }
+
+  async postInstagramConnect(): Promise<{ redirect_url: string; connection_request_id?: string | null }> {
+    const response = await this.client.post('/instagram/connect', null, { timeout: 60000 });
+    return response.data;
+  }
+
+  async postInstagramSync(full = false): Promise<{ ok: boolean; result: Record<string, unknown>; message?: string }> {
+    const response = await this.client.post('/instagram/sync', null, {
+      params: { full },
+      timeout: 180000,
+    });
+    return response.data;
+  }
+
+  async getInstagramPerformance(days = 90): Promise<InstagramPerformance> {
+    const response = await this.client.get('/instagram/performance', {
+      params: { days },
+      timeout: 60000,
+    });
+    return response.data;
+  }
+
+  async deleteInstagramDisconnect(
+    purge = true,
+    clearComposio = false
+  ): Promise<{
+    ok: boolean;
+    connected: boolean;
+    composio_configured?: boolean;
+    composio_cleared?: boolean;
+  }> {
+    const response = await this.client.delete('/instagram/disconnect', {
+      params: { purge, clear_composio: clearComposio },
+      timeout: 60000,
+    });
+    return response.data;
+  }
+
   async postContentStudioTranscriptAnalyze(body: {
     transcript: string;
     purpose: 'TOF' | 'MOF' | 'BOF' | 'mixed';
@@ -3194,8 +3370,10 @@ class ApiClient {
     return response.data;
   }
 
-  async getKpiFlags(): Promise<import('@/types/kpi').KpiFlagsResponse> {
-    const response = await this.client.get('/kpi/flags');
+  async getKpiFlags(params?: {
+    month?: string;
+  }): Promise<import('@/types/kpi').KpiFlagsResponse> {
+    const response = await this.client.get('/kpi/flags', { params: params || {} });
     return response.data;
   }
 
@@ -3251,6 +3429,26 @@ class ApiClient {
     data: import('@/types/kpi').KpiEntryUpdatePayload
   ): Promise<import('@/types/kpi').KpiDailyEntry> {
     const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data);
+    return response.data;
+  }
+
+  async getCloseSurveyEntryLink(regenerate = false): Promise<import('@/types/closeSurvey').CloseSurveyEntryLinkResponse> {
+    const response = await this.client.get('/close-survey/entry-link', {
+      params: regenerate ? { regenerate: true } : undefined,
+    });
+    return response.data;
+  }
+
+  async getCloseSurveyMeta(token: string): Promise<import('@/types/closeSurvey').CloseSurveyMetaResponse> {
+    const response = await this.client.get(`/close-survey/public/${token}/meta`);
+    return response.data;
+  }
+
+  async submitCloseSurvey(
+    token: string,
+    data: import('@/types/closeSurvey').CloseSurveySubmitPayload
+  ): Promise<import('@/types/closeSurvey').CloseSurveySubmitResponse> {
+    const response = await this.client.post(`/close-survey/public/${token}/submit`, data);
     return response.data;
   }
 }

@@ -6,6 +6,7 @@ import type {
   MetricThreshold,
 } from '@/types/kpi';
 import { apiClient } from '@/lib/api';
+import { TERMINAL_CHART_REFRESH_EVENT } from '@/lib/cache';
 import { debounce } from '@/lib/debounce';
 import {
   formatKpiValue,
@@ -251,6 +252,16 @@ export default function KpiGrid({
         if (idx >= 0) next[idx] = updated;
         else next.push(updated);
         onEntriesChange(next);
+        if (
+          typeof window !== 'undefined' &&
+          (field === 'revenue' ||
+            field === 'closes' ||
+            field === 'calls_taken' ||
+            field === 'calls_booked' ||
+            field === 'outreach_sent')
+        ) {
+          window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
+        }
       } catch (err: unknown) {
         const msg =
           err && typeof err === 'object' && 'message' in err

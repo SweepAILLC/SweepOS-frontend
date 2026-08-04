@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Client } from '@/types/client';
 import { apiClient } from '@/lib/api';
+import { TERMINAL_CHART_REFRESH_EVENT } from '@/lib/cache';
 import { normalizeOfferLadder, type OfferLadder } from '@/lib/offerLadder';
 
 export type OfferSlotValue = string;
@@ -136,6 +137,10 @@ export default function OfferEnrollmentSection({
             : body.offer_enrollment,
       };
       onSaved?.(merged);
+      // Contract amount feeds Terminal "Revenue" series.
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
+      }
     } catch (e: unknown) {
       onSaved?.(previous);
       const msg = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;

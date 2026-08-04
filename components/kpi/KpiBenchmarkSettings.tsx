@@ -66,6 +66,7 @@ export default function KpiBenchmarkSettings({ initial, onSaved }: Props) {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [entryLink, setEntryLink] = useState<string>('');
+  const [closeSurveyLink, setCloseSurveyLink] = useState<string>('');
 
   useEffect(() => {
     if (initial?.thresholds) {
@@ -76,8 +77,14 @@ export default function KpiBenchmarkSettings({ initial, onSaved }: Props) {
   useEffect(() => {
     const loadLink = async () => {
       try {
-        const res = await apiClient.getKpiEntryLink(false);
-        setEntryLink(res.url);
+        const kpi = await apiClient.getKpiEntryLink(false);
+        setEntryLink(kpi.url);
+      } catch {
+        // ignore
+      }
+      try {
+        const close = await apiClient.getCloseSurveyEntryLink(false);
+        setCloseSurveyLink(close.url);
       } catch {
         // ignore
       }
@@ -140,6 +147,16 @@ export default function KpiBenchmarkSettings({ initial, onSaved }: Props) {
     }
   };
 
+  const regenerateCloseLink = async () => {
+    try {
+      const res = await apiClient.getCloseSurveyEntryLink(true);
+      setCloseSurveyLink(res.url);
+      setMessage('New close-survey link created.');
+    } catch {
+      setError('Could not create a new close-survey link');
+    }
+  };
+
   const copyLink = async () => {
     if (!entryLink) return;
     try {
@@ -147,6 +164,16 @@ export default function KpiBenchmarkSettings({ initial, onSaved }: Props) {
       setMessage('Link copied.');
     } catch {
       setError('Could not copy link');
+    }
+  };
+
+  const copyCloseLink = async () => {
+    if (!closeSurveyLink) return;
+    try {
+      await navigator.clipboard.writeText(closeSurveyLink);
+      setMessage('Close-survey link copied.');
+    } catch {
+      setError('Could not copy close-survey link');
     }
   };
 
@@ -221,35 +248,74 @@ export default function KpiBenchmarkSettings({ initial, onSaved }: Props) {
         })}
       </div>
 
-      <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-4">
-        <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
-          Private survey link
-        </h4>
-        <p className="text-xs text-gray-600 dark:text-gray-300 mb-2">
-          Share this private link so you (or a teammate) can log daily KPIs in a simple form —
-          no login needed.
-        </p>
-        <div className="flex flex-wrap items-center gap-2">
-          <input
-            type="text"
-            readOnly
-            value={entryLink}
-            className="flex-1 min-w-[260px] rounded border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100"
-          />
-          <button
-            type="button"
-            onClick={() => void copyLink()}
-            className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
-          >
-            Copy
-          </button>
-          <button
-            type="button"
-            onClick={() => void regenerateLink()}
-            className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
-          >
-            New link
-          </button>
+      <div className="rounded-xl border border-cyan-400/20 bg-cyan-500/10 p-4 space-y-4">
+        <div>
+          <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-1">
+            Public forms
+          </h4>
+          <p className="text-xs text-gray-600 dark:text-gray-300 mb-3">
+            Private tokenized links — no login needed. Regenerate if a link was shared too widely.
+          </p>
+        </div>
+        <div>
+          <h5 className="text-xs font-semibold text-gray-800 dark:text-gray-200 mb-1">
+            KPI daily entry
+          </h5>
+          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+            Log daily KPIs in a simple form.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={entryLink}
+              className="flex-1 min-w-[260px] rounded border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100"
+            />
+            <button
+              type="button"
+              onClick={() => void copyLink()}
+              className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => void regenerateLink()}
+              className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              New link
+            </button>
+          </div>
+        </div>
+        <div>
+          <h5 className="text-xs font-semibold text-gray-800 dark:text-gray-200 mb-1">
+            Post-sales close survey
+          </h5>
+          <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">
+            Log closes, cash, offer enrollment, and call notes against any client.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              readOnly
+              value={closeSurveyLink}
+              className="flex-1 min-w-[260px] rounded border border-white/10 bg-white/5 px-2 py-1.5 text-xs text-gray-900 dark:text-gray-100"
+            />
+            <button
+              type="button"
+              onClick={() => void copyCloseLink()}
+              className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              Copy
+            </button>
+            <button
+              type="button"
+              onClick={() => void regenerateCloseLink()}
+              className="rounded border border-white/10 px-3 py-1.5 text-xs hover:bg-white/5"
+            >
+              New link
+            </button>
+          </div>
         </div>
       </div>
 

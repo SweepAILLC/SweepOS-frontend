@@ -269,6 +269,11 @@ interface Props {
   loading?: boolean;
   refreshing?: boolean;
   onUpsertEntry: (entryDate: string, data: KpiEntryUpdatePayload) => Promise<KpiDailyEntry>;
+  /** Controlled visible month (shared with grid view via parent dashboard toggle). */
+  year: number;
+  month: number;
+  compareMonths?: boolean;
+  onCompareChange?: (compare: boolean) => void;
   /** Ask parent to load entries covering the months currently on screen (incl. compare). */
   onVisibleRangeChange?: (start: string, end: string) => void;
 }
@@ -279,11 +284,13 @@ export default function KpiCalendar({
   loading,
   refreshing,
   onUpsertEntry,
+  year,
+  month,
+  compareMonths = false,
+  onCompareChange,
   onVisibleRangeChange,
 }: Props) {
-  const now = new Date();
-  const [anchor, setAnchor] = useState({ year: now.getFullYear(), month: now.getMonth() });
-  const [compare, setCompare] = useState(false);
+  const compare = compareMonths;
   const [colorMetric, setColorMetric] = useState('overall');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -294,26 +301,19 @@ export default function KpiCalendar({
     return m;
   }, [entries]);
 
-  const shiftMonth = (delta: number) => {
-    setAnchor((a) => {
-      const d = new Date(a.year, a.month + delta, 1);
-      return { year: d.getFullYear(), month: d.getMonth() };
-    });
-  };
-
   const prevMonth = useMemo(() => {
-    const d = new Date(anchor.year, anchor.month - 1, 1);
+    const d = new Date(year, month - 1, 1);
     return { year: d.getFullYear(), month: d.getMonth() };
-  }, [anchor]);
+  }, [year, month]);
 
   // Load visible month(s) for color-by tiers — debounce is handled in the parent.
   useEffect(() => {
     if (!onVisibleRangeChange) return;
-    const startMonth = compare ? prevMonth : anchor;
+    const startMonth = compare ? prevMonth : { year, month };
     const start = toYmd(new Date(startMonth.year, startMonth.month, 1));
-    const end = toYmd(new Date(anchor.year, anchor.month + 1, 0));
+    const end = toYmd(new Date(year, month + 1, 0));
     onVisibleRangeChange(start, end);
-  }, [anchor, compare, prevMonth, onVisibleRangeChange]);
+  }, [year, month, compare, prevMonth, onVisibleRangeChange]);
 
   const selected = selectedDate ? entryByDate.get(selectedDate) : undefined;
   const [form, setForm] = useState<KpiEntryUpdatePayload>({});
@@ -380,55 +380,30 @@ export default function KpiCalendar({
           {loading && entries.length === 0 ? 'Loading…' : 'Updating…'}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3 justify-between">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => shiftMonth(-1)}
-            className="rounded-lg border border-white/10 px-2 py-1 text-sm hover:bg-white/5"
+      <div className="flex flex-wrap items-center gap-3 justify-end">
+        <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+          Color by
+          <select
+            className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+            value={colorMetric}
+            onChange={(e) => setColorMetric(e.target.value)}
           >
-            ←
-          </button>
-          <button
-            type="button"
-            onClick={() => setAnchor({ year: now.getFullYear(), month: now.getMonth() })}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs hover:bg-white/5"
-          >
-            Today
-          </button>
-          <button
-            type="button"
-            onClick={() => shiftMonth(1)}
-            className="rounded-lg border border-white/10 px-2 py-1 text-sm hover:bg-white/5"
-          >
-            →
-          </button>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-            Color by
-            <select
-              className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
-              value={colorMetric}
-              onChange={(e) => setColorMetric(e.target.value)}
-            >
-              {COLOR_METRICS.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={compare}
-              onChange={(e) => setCompare(e.target.checked)}
-              className="rounded"
-            />
-            Two-month compare
-          </label>
-        </div>
+            {COLOR_METRICS.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={compare}
+            onChange={(e) => onCompareChange?.(e.target.checked)}
+            className="rounded"
+          />
+          Two-month compare
+        </label>
       </div>
 
       <div className={`flex flex-col ${compare ? 'lg:flex-row' : ''} gap-4`}>
@@ -444,8 +419,8 @@ export default function KpiCalendar({
           />
         )}
         <MonthGrid
-          year={anchor.year}
-          month={anchor.month}
+          year={year}
+          month={month}
           entryByDate={entryByDate}
           thresholds={thresholds}
           colorMetric={colorMetric}

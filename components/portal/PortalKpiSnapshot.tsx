@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   Bar,
   BarChart,
@@ -32,9 +32,29 @@ type Props = {
   isActive?: boolean;
   /** When provided, loads KPI data for this org via the admin API (owner dashboard use). */
   orgId?: string;
+  /** Show bottleneck insights inside the snapshot (hide when parent already shows flags). */
+  showFlags?: boolean;
+  emptyHint?: string;
+  /**
+   * Controlled date window (YYYY-MM-DD). When set with rangeEnd, replaces the 7/30/90
+   * day toggle and loads this exact range.
+   */
+  rangeStart?: string;
+  rangeEnd?: string;
+  /** Custom controls rendered where the day-range toggle usually sits. */
+  rangeControls?: ReactNode;
 };
 
-export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
+export default function PortalKpiSnapshot({
+  isActive = true,
+  orgId,
+  showFlags = true,
+  emptyHint = 'No KPI entries logged yet for this period. Head to the KPI Command Center tab to start tracking.',
+  rangeStart,
+  rangeEnd,
+  rangeControls,
+}: Props) {
+  const controlled = Boolean(rangeStart && rangeEnd);
   const [range, setRange] = useState<Range>(30);
   const [snapshot, setSnapshot] = useState<KpiSnapshotResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,32 +62,37 @@ export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
   const [error, setError] = useState<string | null>(null);
   const hasPainted = useRef(false);
 
-  const load = useCallback(
-    async (r: Range) => {
-      if (!isActive) return;
-      if (hasPainted.current) setUpdating(true);
-      else setLoading(true);
-      setError(null);
-      try {
-        const params = { days: r, include_flags: true, include_series: true };
-        const data = orgId
-          ? await apiClient.getAdminKpiSnapshot(orgId, params)
-          : await apiClient.getKpiSnapshot(params);
-        setSnapshot(data);
-        hasPainted.current = true;
-      } catch {
-        setError('Could not load KPI snapshot.');
-      } finally {
-        setLoading(false);
-        setUpdating(false);
-      }
-    },
-    [isActive, orgId]
-  );
+  const load = useCallback(async () => {
+    if (!isActive) return;
+    if (hasPainted.current) setUpdating(true);
+    else setLoading(true);
+    setError(null);
+    try {
+      const params =
+        controlled && rangeStart && rangeEnd
+          ? {
+              start: rangeStart,
+              end: rangeEnd,
+              include_flags: showFlags,
+              include_series: true,
+            }
+          : { days: range, include_flags: showFlags, include_series: true };
+      const data = orgId
+        ? await apiClient.getAdminKpiSnapshot(orgId, params)
+        : await apiClient.getKpiSnapshot(params);
+      setSnapshot(data);
+      hasPainted.current = true;
+    } catch {
+      setError('Could not load KPI snapshot.');
+    } finally {
+      setLoading(false);
+      setUpdating(false);
+    }
+  }, [isActive, orgId, showFlags, controlled, rangeStart, rangeEnd, range]);
 
   useEffect(() => {
-    void load(range);
-  }, [load, range]);
+    void load();
+  }, [load]);
 
   const cards: KpiSnapshotCard[] = (snapshot?.cards || []).filter((c) => CARD_KEYS.has(c.key));
   const hasData = (snapshot?.days_with_data || 0) > 0;
@@ -77,7 +102,10 @@ export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
     Booked: e.calls_booked ?? 0,
     Closes: e.closes ?? 0,
   }));
-  const topFlags = (snapshot?.flags || []).slice(0, 3);
+  const topFlags = showFlags ? (snapshot?.flags || []).slice(0, 3) : [];
+  const periodLabel = controlled
+    ? `${snapshot?.days ?? '—'}d in view`
+    : `${range}d`;
 
   return (
     <section className="glass-card rounded-xl border border-gray-200 dark:border-white/10 overflow-hidden relative">
@@ -97,22 +125,26 @@ export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
             Logged activity from the KPI tracker — outreach through closes.
           </p>
         </div>
-        <div className="flex gap-1">
-          {([7, 30, 90] as Range[]).map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => setRange(r)}
-              className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                range === r
-                  ? 'bg-sky-500/20 text-sky-800 dark:text-sky-200 border border-sky-400/40'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 border border-transparent'
-              }`}
-            >
-              {r}d
-            </button>
-          ))}
-        </div>
+        {rangeControls ? (
+          <div className="flex flex-wrap items-center gap-2 text-xs">{rangeControls}</div>
+        ) : (
+          <div className="flex gap-1">
+            {([7, 30, 90] as Range[]).map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRange(r)}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  range === r
+                    ? 'bg-sky-500/20 text-sky-800 dark:text-sky-200 border border-sky-400/40'
+                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/10 border border-transparent'
+                }`}
+              >
+                {r}d
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {loading && !snapshot ? (
@@ -121,7 +153,7 @@ export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
         <div className="py-8 px-5 text-sm text-red-600 dark:text-red-300">{error}</div>
       ) : !hasData ? (
         <div className="py-12 px-5 text-center text-sm text-gray-400 dark:text-gray-500">
-          No KPI entries logged yet for this period. Head to the KPI Command Center tab to start tracking.
+          {emptyHint}
         </div>
       ) : (
         <div className="p-5 space-y-6">
@@ -149,7 +181,7 @@ export default function PortalKpiSnapshot({ isActive = true, orgId }: Props) {
                     </span>
                   ) : (
                     <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      {card.aggregation === 'sum' ? `${range}d total` : `${range}d avg`}
+                      {card.aggregation === 'sum' ? `${periodLabel} total` : `${periodLabel} avg`}
                     </span>
                   )}
                 </div>

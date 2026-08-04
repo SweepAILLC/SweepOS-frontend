@@ -7,13 +7,21 @@ export function periodFinancesCashUsd(p: HealthTrendPeriod): number {
   return Number(p.stripe_revenue_usd ?? 0);
 }
 
-/** Rows for Recharts: same keys as `HealthTrendPeriod` plus `finances_cash_usd` for bar/line series. */
+/** Monthly deal/contract revenue from KPI + close-survey / drawer contract amounts. */
+export function periodDealRevenueUsd(p: HealthTrendPeriod): number {
+  const r = p.deal_revenue_usd;
+  if (r != null && Number.isFinite(r)) return Number(r);
+  return 0;
+}
+
+/** Rows for Recharts: cash collected + deal revenue series for the Terminal money chart. */
 export function healthTrendPeriodsWithFinancesCash(
   periods: HealthTrendPeriod[]
-): Array<HealthTrendPeriod & { finances_cash_usd: number }> {
+): Array<HealthTrendPeriod & { finances_cash_usd: number; deal_revenue_usd: number }> {
   return periods.map((p) => ({
     ...p,
     finances_cash_usd: periodFinancesCashUsd(p),
+    deal_revenue_usd: periodDealRevenueUsd(p),
   }));
 }
 

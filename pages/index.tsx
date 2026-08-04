@@ -338,7 +338,8 @@ export default function Dashboard() {
         const rawFid = router.query.funnelId;
         const viewParam = typeof router.query.view === 'string' ? router.query.view : '';
         const fidParam = typeof rawFid === 'string' ? rawFid : '';
-        const consumeKey = `${tabValue}|${viewParam}|${fidParam}`;
+        const subParam = typeof router.query.sub === 'string' ? router.query.sub : '';
+        const consumeKey = `${tabValue}|${viewParam}|${fidParam}|${subParam}`;
         // Same deep-link already applied — do not re-setActiveTab (would fight navbar clicks
         // while sticky ?tab=kpi_command_center&view=… remains in the URL).
         if (lastConsumedDeepLinkRef.current === consumeKey) {
@@ -352,6 +353,9 @@ export default function Dashboard() {
           // Keep settings deep-link query for SettingsPanel
         } else if (tabValue === 'kpi_command_center' && viewParam) {
           // Leave ?tab=&view= for KpiCommandCenterPanel — do not replace (avoids re-trigger loops).
+        } else if (tabValue === 'content_studio') {
+          // Keep ?tab=content_studio&sub=… for Marketing Intel (Performance | Ideas | Signals).
+          // Stripping the query here snapped every sub-tab click back to Performance.
         } else {
           lastConsumedDeepLinkRef.current = null;
           router.replace('/', undefined, { shallow: true });
@@ -460,8 +464,8 @@ export default function Dashboard() {
         onTabChange={(tab) => {
           if (tab === activeTab) return;
           setActiveTab(tab);
-          // Drop deep-link leftovers immediately so sticky ?tab=/&view= can't snap back to KPI.
-          if (router.query.tab || router.query.view || router.query.funnelId) {
+          // Drop deep-link leftovers immediately so sticky ?tab=/&view=/&sub= can't snap back.
+          if (router.query.tab || router.query.view || router.query.funnelId || router.query.sub) {
             lastConsumedDeepLinkRef.current = null;
             void router.replace('/', undefined, { shallow: true });
           }

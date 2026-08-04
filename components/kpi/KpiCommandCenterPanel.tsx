@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
+import { TERMINAL_CHART_REFRESH_EVENT } from '@/lib/cache';
 import type {
   KpiAutopopulateStatusResponse,
   KpiBenchmarks,
@@ -11,6 +12,7 @@ import type {
   KpiMonthlyRollup,
 } from '@/types/kpi';
 import { DEFAULT_THRESHOLDS } from '@/lib/kpiBenchmarks';
+import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiGrid from './KpiGrid';
 import KpiCalendar from './KpiCalendar';
 import KpiBenchmarkSettings from './KpiBenchmarkSettings';
@@ -32,6 +34,30 @@ function startOfMonth(d: Date): Date {
 
 function endOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+function monthFromYmd(ymd: string): { year: number; month: number } {
+  const d = new Date(`${ymd}T12:00:00`);
+  return { year: d.getFullYear(), month: d.getMonth() };
+}
+
+function applyMonthRange(
+  year: number,
+  month: number,
+  compare: boolean
+): { start: string; end: string } {
+  const endMonth = new Date(year, month, 1);
+  if (compare) {
+    const startMonth = new Date(year, month - 1, 1);
+    return {
+      start: toYmd(startOfMonth(startMonth)),
+      end: toYmd(endOfMonth(endMonth)),
+    };
+  }
+  return {
+    start: toYmd(startOfMonth(endMonth)),
+    end: toYmd(endOfMonth(endMonth)),
+  };
 }
 
 export default function KpiCommandCenterPanel() {
@@ -59,6 +85,10 @@ export default function KpiCommandCenterPanel() {
 
   const [rangeStart, setRangeStart] = useState(() => toYmd(startOfMonth(new Date())));
   const [rangeEnd, setRangeEnd] = useState(() => toYmd(endOfMonth(new Date())));
+  /** Shared with calendar two-month compare so grid/calendar show the same window. */
+  const [compareMonths, setCompareMonths] = useState(false);
+
+  const visibleMonth = useMemo(() => monthFromYmd(rangeEnd), [rangeEnd]);
 
   // Deep-link: /?tab=kpi_command_center&view=settings|calendar|grid
   useEffect(() => {
@@ -172,14 +202,15 @@ export default function KpiCommandCenterPanel() {
     // Soft by default: keep painted flags while refreshing to avoid banner flicker.
     if (opts?.hard) setFlagsLoading(true);
     try {
-      const res = await apiClient.getKpiFlags();
+      // Focus bottlenecks on the dashboard's visible end month.
+      const res = await apiClient.getKpiFlags({ month: rangeEnd });
       setFlags(res.flags || []);
     } catch {
       if (opts?.hard) setFlags([]);
     } finally {
       setFlagsLoading(false);
     }
-  }, []);
+  }, [rangeEnd]);
 
   const forceReload = useCallback(() => {
     syncOnNextLoad.current = true;
@@ -193,7 +224,8 @@ export default function KpiCommandCenterPanel() {
   }, [loadCore]);
 
   useEffect(() => {
-    void loadFlags({ hard: true });
+    // Soft refresh when the shared month changes — keep painted flags until new ones arrive.
+    void loadFlags();
   }, [loadFlags]);
 
   useEffect(() => {
@@ -205,13 +237,25 @@ export default function KpiCommandCenterPanel() {
     [benchmarks]
   );
 
+  const setVisibleMonth = useCallback((year: number, month: number, compare = compareMonths) => {
+    const { start, end } = applyMonthRange(year, month, compare);
+    setRangeStart(start);
+    setRangeEnd(end);
+  }, [compareMonths]);
+
   const shiftMonth = (delta: number) => {
     // Always shift relative to the visible end month so compare ranges don't collapse oddly.
-    const base = new Date(rangeEnd + 'T12:00:00');
-    const next = new Date(base.getFullYear(), base.getMonth() + delta, 1);
-    setRangeStart(toYmd(startOfMonth(next)));
-    setRangeEnd(toYmd(endOfMonth(next)));
+    const next = new Date(visibleMonth.year, visibleMonth.month + delta, 1);
+    setVisibleMonth(next.getFullYear(), next.getMonth(), compareMonths);
   };
+
+  const onCompareChange = useCallback(
+    (compare: boolean) => {
+      setCompareMonths(compare);
+      setVisibleMonth(visibleMonth.year, visibleMonth.month, compare);
+    },
+    [setVisibleMonth, visibleMonth.year, visibleMonth.month]
+  );
 
   const rangeDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCalendarVisibleRangeChange = useCallback((start: string, end: string) => {
@@ -244,6 +288,16 @@ export default function KpiCommandCenterPanel() {
       return next;
     });
     void loadFlags();
+    if (
+      typeof window !== 'undefined' &&
+      ('revenue' in data ||
+        'closes' in data ||
+        'calls_taken' in data ||
+        'calls_booked' in data ||
+        'outreach_sent' in data)
+    ) {
+      window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
+    }
     return updated;
   }, [loadFlags]);
 
@@ -305,7 +359,48 @@ export default function KpiCommandCenterPanel() {
         </div>
       </div>
 
-      <KpiFlagsBanner flags={flags} loading={flagsLoading} />
+      {view !== 'settings' && (
+        <>
+          <KpiFlagsBanner flags={flags} loading={flagsLoading} />
+
+          <PortalKpiSnapshot
+            isActive
+            showFlags={false}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+            emptyHint="No KPI entries logged yet for this period. Log days in the calendar or grid below."
+            rangeControls={
+              <>
+                <button
+                  type="button"
+                  onClick={() => shiftMonth(-1)}
+                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100"
+                >
+                  ← Prev month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const n = new Date();
+                    setCompareMonths(false);
+                    setVisibleMonth(n.getFullYear(), n.getMonth(), false);
+                  }}
+                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 font-medium"
+                >
+                  This month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shiftMonth(1)}
+                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100"
+                >
+                  Next month →
+                </button>
+              </>
+            }
+          />
+        </>
+      )}
 
       {error && (
         <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-200 flex flex-wrap items-center justify-between gap-2">
@@ -317,58 +412,6 @@ export default function KpiCommandCenterPanel() {
           >
             Retry
           </button>
-        </div>
-      )}
-
-      {/* Grid owns this range bar; calendar has its own month nav + compare (avoids fighting ranges). */}
-      {view === 'grid' && (
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button
-            type="button"
-            onClick={() => shiftMonth(-1)}
-            className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5"
-          >
-            ← Prev month
-          </button>
-          <span className="text-gray-600 dark:text-gray-300 font-medium px-2">
-            {rangeStart} → {rangeEnd}
-          </span>
-          <button
-            type="button"
-            onClick={() => shiftMonth(1)}
-            className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5"
-          >
-            Next month →
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const n = new Date();
-              setRangeStart(toYmd(startOfMonth(n)));
-              setRangeEnd(toYmd(endOfMonth(n)));
-            }}
-            className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5"
-          >
-            This month
-          </button>
-          <label className="ml-2 text-gray-500 flex items-center gap-1">
-            From
-            <input
-              type="date"
-              value={rangeStart}
-              onChange={(e) => setRangeStart(e.target.value)}
-              className="rounded border border-white/10 bg-white/5 px-1 py-0.5"
-            />
-          </label>
-          <label className="text-gray-500 flex items-center gap-1">
-            To
-            <input
-              type="date"
-              value={rangeEnd}
-              onChange={(e) => setRangeEnd(e.target.value)}
-              className="rounded border border-white/10 bg-white/5 px-1 py-0.5"
-            />
-          </label>
         </div>
       )}
 
@@ -395,6 +438,10 @@ export default function KpiCommandCenterPanel() {
           loading={loading}
           refreshing={refreshing || softUpdating}
           onUpsertEntry={upsertEntry}
+          year={visibleMonth.year}
+          month={visibleMonth.month}
+          compareMonths={compareMonths}
+          onCompareChange={onCompareChange}
           onVisibleRangeChange={onCalendarVisibleRangeChange}
         />
       )}

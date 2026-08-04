@@ -1,14 +1,29 @@
 'use client';
 
 import { useState, useEffect, useCallback, useId, type ReactNode } from 'react';
-import { apiClient, type FathomStatusResponse, type StripeConnectionStatus } from '@/lib/api';
+import {
+  apiClient,
+  type FathomStatusResponse,
+  type InstagramStatus,
+  type StripeConnectionStatus,
+} from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
 import { isOrgAdminRole } from '@/lib/tabAccess';
+import { formatApiError } from '@/lib/apiError';
 import type { BrevoStatus, CalComStatus, CalendlyStatus } from '@/types/integration';
 
-type IntegrationModal = 'brevo' | 'fathom' | 'stripe' | 'calcom' | 'calendly' | 'whop' | 'claude' | null;
+type IntegrationModal =
+  | 'brevo'
+  | 'fathom'
+  | 'stripe'
+  | 'calcom'
+  | 'calendly'
+  | 'whop'
+  | 'claude'
+  | 'instagram'
+  | null;
 
 const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
 
@@ -41,6 +56,23 @@ function BrandTileImage({ src, alt }: { src: string; alt: string }) {
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:bg-zinc-900 dark:ring-zinc-600/80">
       {/* Static logos from /public */}
       <img src={src} alt={alt} className="h-full w-full object-contain" />
+    </div>
+  );
+}
+
+function InstagramTileMark() {
+  return (
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
+      style={{
+        background:
+          'radial-gradient(circle at 30% 107%, #fdf497 0%, #fdf497 5%, #fd5949 45%, #d6249f 60%, #285AEB 90%)',
+      }}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
+        <path d="M12 7.2A4.8 4.8 0 1 0 12 16.8 4.8 4.8 0 0 0 12 7.2Zm0 7.9a3.1 3.1 0 1 1 0-6.2 3.1 3.1 0 0 1 0 6.2Zm5.3-8.1a1.12 1.12 0 1 1-2.24 0 1.12 1.12 0 0 1 2.24 0ZM21.5 7.5c-.05-1.14-.25-1.92-.53-2.6a5.24 5.24 0 0 0-1.2-1.9 5.24 5.24 0 0 0-1.9-1.2c-.68-.28-1.46-.48-2.6-.53C14.13 1.2 13.77 1.2 12 1.2s-2.13 0-2.87.07c-1.14.05-1.92.25-2.6.53a5.24 5.24 0 0 0-1.9 1.2 5.24 5.24 0 0 0-1.2 1.9c-.28.68-.48 1.46-.53 2.6C2.83 8.24 2.83 8.6 2.83 10.37v3.26c0 1.77 0 2.13.07 2.87.05 1.14.25 1.92.53 2.6a5.24 5.24 0 0 0 1.2 1.9 5.24 5.24 0 0 0 1.9 1.2c.68.28 1.46.48 2.6.53.74.07 1.1.07 2.87.07s2.13 0 2.87-.07c1.14-.05 1.92-.25 2.6-.53a5.24 5.24 0 0 0 1.9-1.2 5.24 5.24 0 0 0 1.2-1.9c.28-.68.48-1.46.53-2.6.07-.74.07-1.1.07-2.87V10.37c0-1.77 0-2.13-.07-2.87Zm-1.7 6.3c0 1.73-.01 1.94-.07 2.63-.06 1.04-.22 1.6-.37 1.98-.19.5-.42.85-.8 1.23-.38.38-.73.61-1.23.8-.38.15-.94.31-1.98.37-.69.06-.9.07-2.63.07s-1.94-.01-2.63-.07c-1.04-.06-1.6-.22-1.98-.37a3.32 3.32 0 0 1-1.23-.8 3.32 3.32 0 0 1-.8-1.23c-.15-.38-.31-.94-.37-1.98-.06-.69-.07-.9-.07-2.63V10.2c0-1.73.01-1.94.07-2.63.06-1.04.22-1.6.37-1.98.19-.5.42-.85.8-1.23.38-.38.73-.61 1.23-.8.38-.15.94-.31 1.98-.37.69-.06.9-.07 2.63-.07s1.94.01 2.63.07c1.04.06 1.6.22 1.98.37.5.19.85.42 1.23.8.38.38.61.73.8 1.23.15.38.31.94.37 1.98.06.69.07.9.07 2.63v3.6Z" />
+      </svg>
     </div>
   );
 }
@@ -206,6 +238,10 @@ export default function IntegrationsPanel() {
   const [whopBusy, setWhopBusy] = useState(false);
   const [whopErr, setWhopErr] = useState<string | null>(null);
   const [mcpUrlCopied, setMcpUrlCopied] = useState(false);
+  const [instagramStatus, setInstagramStatus] = useState<InstagramStatus | null>(null);
+  const [instagramBusy, setInstagramBusy] = useState(false);
+  const [composioApiKey, setComposioApiKey] = useState('');
+  const [composioAuthConfigId, setComposioAuthConfigId] = useState('');
 
   const refreshBrevoSummary = useCallback(async () => {
     try {
@@ -218,11 +254,12 @@ export default function IntegrationsPanel() {
 
   const refreshIntegrationSummaries = useCallback(async () => {
     try {
-      const [stripeSt, calcom, calendly, whop] = await Promise.all([
+      const [stripeSt, calcom, calendly, whop, ig] = await Promise.all([
         apiClient.getStripeStatus(true).catch(() => null),
         apiClient.getCalComStatus().catch(() => null),
         apiClient.getCalendlyStatus().catch(() => null),
         apiClient.getWhopStatus(true).catch(() => null),
+        apiClient.getInstagramStatus().catch(() => null),
       ]);
       const s = stripeSt as StripeConnectionStatus | null;
       setStripeStatus(s);
@@ -232,12 +269,14 @@ export default function IntegrationsPanel() {
       setCalendlySummary(calendly);
       const w = whop as { connected?: boolean; company_id?: string | null } | null;
       setWhopSummary(w ? { connected: !!w.connected, company_id: w.company_id } : { connected: false });
+      setInstagramStatus(ig);
     } catch {
       setStripeConnected(false);
       setStripeStatus(null);
       setCalcomSummary(null);
       setCalendlySummary(null);
       setWhopSummary({ connected: false });
+      setInstagramStatus(null);
     }
   }, []);
 
@@ -614,6 +653,7 @@ export default function IntegrationsPanel() {
   const calcomConnected = calcomSummary?.connected === true;
   const calendlyConnected = calendlySummary?.connected === true;
   const whopConnected = whopSummary?.connected === true;
+  const instagramConnected = instagramStatus?.connected === true;
 
   const tileBtn =
     'group aspect-square w-full rounded-2xl border-2 border-zinc-200 bg-white p-3 text-left shadow-sm transition hover:border-zinc-400 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-zinc-700 dark:bg-zinc-900/80 dark:hover:border-zinc-500';
@@ -773,6 +813,25 @@ export default function IntegrationsPanel() {
             </div>
             <p className="mt-auto text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
               Setup guide
+            </p>
+          </div>
+        </button>
+
+        <button type="button" onClick={() => setModal('instagram')} className={tileBtn}>
+          <div className="flex h-full min-h-0 flex-col">
+            <InstagramTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Instagram</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Content performance (Composio)
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                instagramConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {instagramConnected ? 'Connected' : 'Not connected'}
             </p>
           </div>
         </button>
@@ -1350,9 +1409,270 @@ export default function IntegrationsPanel() {
               <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">What Claude can access</p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
                 <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal, KPIs</li>
+                <li>Instagram performance (when connected)</li>
                 <li>Brevo email send (when connected; confirm before send)</li>
               </ul>
             </div>
+          </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'instagram' && (
+        <SquareModalShell title="Instagram" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <BeginnerSetupGuide
+              intro="Each organization connects its own Instagram through Composio. You save your Composio API key here (not a Sweep server env var), then link Instagram so Marketing Intel can show content performance."
+              steps={[
+                <>
+                  Sign up / log in at{' '}
+                  <a href="https://platform.composio.dev" target="_blank" rel="noopener noreferrer" className={linkClass}>
+                    platform.composio.dev
+                  </a>
+                  . Open <strong>Settings → API Keys</strong> and create a key with{' '}
+                  <strong>connected_accounts write</strong> (full/project key — not a read-only key). Copy it.
+                </>,
+                <>
+                  Open{' '}
+                  <a
+                    href="https://platform.composio.dev/auth-configs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={linkClass}
+                  >
+                    Auth Configs
+                  </a>{' '}
+                  in the left sidebar (same as{' '}
+                  <a
+                    href="https://dashboard.composio.dev/~/project/auth-configs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={linkClass}
+                  >
+                    dashboard → Auth Configs
+                  </a>
+                  ). Click <strong>Create Auth Config</strong> → search and select <strong>Instagram</strong>.
+                </>,
+                <>
+                  Choose <strong>Composio managed</strong> / default OAuth (do <em>not</em> enter your own Meta Client ID —
+                  that would require a Meta developer app). Click <strong>Create</strong>. On the config detail page,
+                  copy the <strong>Auth Config ID</strong> — it looks like <strong>ac_xxxxxxxx</strong> (often shown near
+                  the top or next to a copy icon). That is what Sweep needs below — not a connection id (<strong>ca_</strong>
+                  ) and not your Instagram username.
+                </>,
+                <>
+                  Paste the API key and <strong>ac_…</strong> id below → <strong>Save credentials</strong> →{' '}
+                  <strong>Connect Instagram</strong>, then approve Meta for your Business/Creator account.
+                </>,
+              ]}
+            />
+
+            <div className="space-y-3 rounded-xl border-2 border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                Step 1 · Composio credentials
+              </p>
+              {(instagramStatus?.composio_configured ?? instagramStatus?.configured) ? (
+                <p className="text-sm text-emerald-800 dark:text-emerald-200">
+                  Credentials saved
+                  {instagramStatus?.auth_config_id ? (
+                    <span className="text-zinc-600 dark:text-zinc-400">
+                      {' '}
+                      · auth config {instagramStatus.auth_config_id}
+                    </span>
+                  ) : null}
+                </p>
+              ) : (
+                <p className={mutedClass}>Save your Composio API key before connecting Instagram.</p>
+              )}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  Composio API key
+                </label>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  disabled={!canManageIntegrations || instagramBusy}
+                  value={composioApiKey}
+                  onChange={(e) => setComposioApiKey(e.target.value)}
+                  placeholder={
+                    (instagramStatus?.composio_configured ?? instagramStatus?.configured)
+                      ? '•••••••• (enter to replace)'
+                      : 'Paste Composio API key'
+                  }
+                  className="w-full rounded-lg border-2 border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                  Instagram auth config ID
+                </label>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  disabled={!canManageIntegrations || instagramBusy}
+                  value={composioAuthConfigId}
+                  onChange={(e) => setComposioAuthConfigId(e.target.value)}
+                  placeholder={instagramStatus?.auth_config_id || 'ac_…'}
+                  className="w-full rounded-lg border-2 border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-600 dark:bg-zinc-800"
+                />
+                <p className="mt-1.5 text-[11px] leading-snug text-zinc-600 dark:text-zinc-400">
+                  From Composio →{' '}
+                  <a
+                    href="https://platform.composio.dev/auth-configs"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={linkClass}
+                  >
+                    Auth Configs
+                  </a>
+                  → open your Instagram config → copy <strong>Auth Config ID</strong> (<strong>ac_…</strong>). Not the
+                  Connected Account id (<strong>ca_…</strong>).
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!canManageIntegrations || instagramBusy}
+                  className="glass-button rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                  onClick={async () => {
+                    const key = composioApiKey.trim();
+                    const cfg = composioAuthConfigId.trim() || (instagramStatus?.auth_config_id || '').trim();
+                    if (!key) {
+                      setError('Enter your Composio API key.');
+                      return;
+                    }
+                    if (!cfg) {
+                      setError('Enter your Instagram auth config ID (ac_…).');
+                      return;
+                    }
+                    setInstagramBusy(true);
+                    setError(null);
+                    try {
+                      await apiClient.putInstagramComposioCredentials({
+                        api_key: key,
+                        auth_config_id: cfg,
+                      });
+                      setComposioApiKey('');
+                      setComposioAuthConfigId(cfg);
+                      await refreshIntegrationSummaries();
+                      setSuccess('Composio credentials saved');
+                    } catch (e) {
+                      setError(formatApiError(e, 'Failed to save credentials'));
+                    } finally {
+                      setInstagramBusy(false);
+                    }
+                  }}
+                >
+                  {instagramBusy ? 'Saving…' : 'Save credentials'}
+                </button>
+                {(instagramStatus?.composio_configured ?? instagramStatus?.configured) ? (
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || instagramBusy}
+                    className="rounded-lg border-2 border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold dark:border-zinc-600 dark:bg-zinc-800 disabled:opacity-50"
+                    onClick={async () => {
+                      if (!window.confirm('Remove stored Composio credentials for this organization?')) return;
+                      setInstagramBusy(true);
+                      try {
+                        await apiClient.deleteInstagramComposioCredentials();
+                        setComposioApiKey('');
+                        setComposioAuthConfigId('');
+                        await refreshIntegrationSummaries();
+                        setSuccess('Composio credentials cleared');
+                      } catch (e) {
+                        setError(formatApiError(e, 'Failed to clear credentials'));
+                      } finally {
+                        setInstagramBusy(false);
+                      }
+                    }}
+                  >
+                    Clear credentials
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            {instagramConnected ? (
+              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/80 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/40 space-y-2">
+                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
+                  Instagram connected{instagramStatus?.username ? ` · @${instagramStatus.username}` : ''}
+                </p>
+                {instagramStatus?.followers_count != null ? (
+                  <p className={mutedClass}>{instagramStatus.followers_count.toLocaleString()} followers</p>
+                ) : null}
+                {instagramStatus?.last_sync_at ? (
+                  <p className={mutedClass}>
+                    Last sync: {new Date(instagramStatus.last_sync_at).toLocaleString()} · auto-updates daily
+                  </p>
+                ) : (
+                  <p className={mutedClass}>
+                    Sync pending — metrics refresh automatically once a day in the background.
+                  </p>
+                )}
+                {instagramStatus?.capabilities?.reason ? (
+                  <p className="text-xs text-amber-800 dark:text-amber-200">{instagramStatus.capabilities.reason}</p>
+                ) : null}
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || instagramBusy}
+                    className="rounded-lg border-2 border-red-300 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-800 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100 disabled:opacity-50"
+                    onClick={async () => {
+                      if (!window.confirm('Disconnect Instagram and clear cached media?')) return;
+                      setInstagramBusy(true);
+                      try {
+                        await apiClient.deleteInstagramDisconnect(true, false);
+                        await refreshIntegrationSummaries();
+                        setSuccess('Instagram disconnected');
+                      } catch (e) {
+                        setError(formatApiError(e, 'Disconnect failed'));
+                      } finally {
+                        setInstagramBusy(false);
+                      }
+                    }}
+                  >
+                    Disconnect Instagram
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                  Step 2 · Connect Instagram
+                </p>
+                {!(instagramStatus?.composio_configured ?? instagramStatus?.configured) ? (
+                  <p className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                    Save your Composio credentials above first, then connect Instagram.
+                  </p>
+                ) : null}
+                <button
+                  type="button"
+                  disabled={
+                    !canManageIntegrations ||
+                    instagramBusy ||
+                    !(instagramStatus?.composio_configured ?? instagramStatus?.configured)
+                  }
+                  className="glass-button rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                  onClick={async () => {
+                    setInstagramBusy(true);
+                    setError(null);
+                    try {
+                      const { redirect_url } = await apiClient.postInstagramConnect();
+                      window.location.href = redirect_url;
+                    } catch (e) {
+                      setError(formatApiError(e, 'Connect failed'));
+                      setInstagramBusy(false);
+                    }
+                  }}
+                >
+                  {instagramBusy ? 'Redirecting…' : 'Connect Instagram'}
+                </button>
+                {!canManageIntegrations ? (
+                  <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                    Only admins and owners can connect Instagram.
+                  </p>
+                ) : null}
+              </div>
+            )}
           </div>
         </SquareModalShell>
       )}
