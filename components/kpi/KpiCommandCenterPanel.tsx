@@ -41,6 +41,13 @@ function monthFromYmd(ymd: string): { year: number; month: number } {
   return { year: d.getFullYear(), month: d.getMonth() };
 }
 
+function monthTitle(year: number, month: number): string {
+  return new Date(year, month, 1).toLocaleDateString(undefined, {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 function applyMonthRange(
   year: number,
   month: number,
@@ -89,6 +96,14 @@ export default function KpiCommandCenterPanel() {
   const [compareMonths, setCompareMonths] = useState(false);
 
   const visibleMonth = useMemo(() => monthFromYmd(rangeEnd), [rangeEnd]);
+  const visibleStartMonth = useMemo(() => monthFromYmd(rangeStart), [rangeStart]);
+  const visibleWindowLabel = useMemo(() => {
+    if (!compareMonths) return monthTitle(visibleMonth.year, visibleMonth.month);
+    const startLabel = monthTitle(visibleStartMonth.year, visibleStartMonth.month);
+    const endLabel = monthTitle(visibleMonth.year, visibleMonth.month);
+    if (startLabel === endLabel) return endLabel;
+    return `${startLabel} + ${endLabel}`;
+  }, [compareMonths, visibleMonth.year, visibleMonth.month, visibleStartMonth.year, visibleStartMonth.month]);
 
   // Deep-link: /?tab=kpi_command_center&view=settings|calendar|grid
   useEffect(() => {
@@ -378,6 +393,15 @@ export default function KpiCommandCenterPanel() {
                 >
                   ← Prev month
                 </button>
+                <div className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-gray-800 dark:text-gray-100">
+                  <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Viewing
+                  </span>
+                  <div className="text-xs font-semibold leading-tight">{visibleWindowLabel}</div>
+                  <div className="text-[10px] text-gray-500 dark:text-gray-400">
+                    {rangeStart} → {rangeEnd}
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => {

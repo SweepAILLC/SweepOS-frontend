@@ -1,4 +1,5 @@
 export type CloseSurveyPaymentSource = 'manual' | 'stripe' | 'whop' | 'none';
+export type CloseSurveyDealOutcome = 'yes' | 'no' | 'no_show';
 
 export interface CloseSurveyEntryLinkResponse {
   token: string;
@@ -27,6 +28,7 @@ export interface CloseSurveyMetaResponse {
 export interface CloseSurveySubmitPayload {
   client_id: string;
   closed: boolean;
+  deal_outcome?: CloseSurveyDealOutcome;
   payment_source: CloseSurveyPaymentSource;
   cash_collected?: number | null;
   offer_slot?: string | null;
@@ -41,6 +43,7 @@ export interface CloseSurveySubmitResponse {
   ok: boolean;
   client_id: string;
   closed: boolean;
+  deal_outcome: CloseSurveyDealOutcome;
   payment_source: CloseSurveyPaymentSource;
   manual_payment_id?: string | null;
   lifecycle_state?: string | null;

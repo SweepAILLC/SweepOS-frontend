@@ -4,6 +4,7 @@ import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import type {
   CloseSurveyClientOption,
+  CloseSurveyDealOutcome,
   CloseSurveyMetaResponse,
   CloseSurveyOfferOption,
   CloseSurveyPaymentSource,
@@ -71,7 +72,7 @@ function CloseSurveyClient() {
   const [clientQuery, setClientQuery] = useState('');
   const [clientId, setClientId] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [closed, setClosed] = useState<boolean | null>(null);
+  const [dealOutcome, setDealOutcome] = useState<CloseSurveyDealOutcome | null>(null);
   const [paymentSource, setPaymentSource] = useState<CloseSurveyPaymentSource>('none');
   const [cashCollected, setCashCollected] = useState('');
   const [offerSlot, setOfferSlot] = useState('');
@@ -154,8 +155,8 @@ function CloseSurveyClient() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !clientId || closed === null) {
-      setSaveError('Select a client and whether the deal closed.');
+    if (!token || !clientId || dealOutcome === null) {
+      setSaveError('Select a client and deal outcome.');
       return;
     }
     setSaving(true);
@@ -166,7 +167,8 @@ function CloseSurveyClient() {
       const contract = parseMoney(contractAmount);
       const payload: CloseSurveySubmitPayload = {
         client_id: clientId,
-        closed,
+        closed: dealOutcome === 'yes',
+        deal_outcome: dealOutcome,
         payment_source: paymentSource,
         cash_collected: paymentSource === 'manual' ? cash : null,
         offer_slot: offerSlot || null,
@@ -292,18 +294,19 @@ function CloseSurveyClient() {
         </div>
 
         <fieldset className="space-y-2">
-          <legend className="text-sm text-gray-300">Deal closed?</legend>
+          <legend className="text-sm text-gray-300">Deal outcome</legend>
           <div className="flex gap-3">
             {(
               [
-                [true, 'Yes'],
-                [false, 'No'],
+                ['yes', 'Yes'],
+                ['no', 'No'],
+                ['no_show', 'No-show'],
               ] as const
             ).map(([val, label]) => (
               <label
                 key={label}
                 className={`flex-1 cursor-pointer rounded-lg border px-3 py-2 text-center text-sm ${
-                  closed === val
+                  dealOutcome === val
                     ? 'border-cyan-400/50 bg-cyan-500/15 text-cyan-100'
                     : 'border-white/10 bg-white/5 text-gray-300'
                 }`}
@@ -311,9 +314,9 @@ function CloseSurveyClient() {
                 <input
                   type="radio"
                   className="sr-only"
-                  name="closed"
-                  checked={closed === val}
-                  onChange={() => setClosed(val)}
+                  name="dealOutcome"
+                  checked={dealOutcome === val}
+                  onChange={() => setDealOutcome(val)}
                 />
                 {label}
               </label>
@@ -440,7 +443,7 @@ function CloseSurveyClient() {
 
         <button
           type="submit"
-          disabled={saving || !clientId || closed === null}
+          disabled={saving || !clientId || dealOutcome === null}
           className="w-full rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 px-4 py-2.5 text-sm font-semibold text-white"
         >
           {saving ? 'Saving…' : 'Log close'}
