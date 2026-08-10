@@ -2281,6 +2281,45 @@ class ApiClient {
     return response.data;
   }
 
+  async getOrgNotificationSettings(orgId: string): Promise<{
+    funnel_leads: {
+      enabled: boolean;
+      window_minutes: number;
+      recipient_mode: 'admins' | 'custom';
+      recipients: string[];
+      include_returning_leads: boolean;
+    };
+  }> {
+    const response = await this.client.get(`/organizations/${orgId}/notification-settings`);
+    return response.data;
+  }
+
+  async updateOrgNotificationSettings(
+    orgId: string,
+    data: {
+      funnel_leads?: {
+        enabled?: boolean;
+        window_minutes?: number;
+        recipient_mode?: 'admins' | 'custom';
+        recipients?: string[];
+        include_returning_leads?: boolean;
+      };
+    }
+  ) {
+    const response = await this.client.patch(`/organizations/${orgId}/notification-settings`, data);
+    return response.data;
+  }
+
+  async sendTestLeadDigest(orgId: string): Promise<{
+    success: boolean;
+    message: string;
+    recipients: string[];
+    failed?: string[];
+  }> {
+    const response = await this.client.post(`/organizations/${orgId}/notification-settings/test`);
+    return response.data;
+  }
+
   async leaveOrganization(orgId: string) {
     const response = await this.client.delete(`/auth/organizations/${orgId}`);
     return response.data;
@@ -2310,6 +2349,18 @@ class ApiClient {
   // Funnel Analytics
   async getFunnelHealth(funnelId: string) {
     const response = await this.client.get(`/funnels/${funnelId}/health`);
+    return response.data;
+  }
+
+  async getFunnelLeads(funnelId: string, limit = 200) {
+    const response = await this.client.get(`/funnels/${funnelId}/leads`, {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  async deleteFunnelLead(funnelId: string, leadId: string) {
+    const response = await this.client.delete(`/funnels/${funnelId}/leads/${leadId}`);
     return response.data;
   }
 

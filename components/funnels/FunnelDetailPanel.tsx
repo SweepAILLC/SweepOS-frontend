@@ -5,6 +5,9 @@ import FunnelOverviewTab from '@/components/funnels/FunnelOverviewTab';
 import FunnelStepsTab from '@/components/funnels/FunnelStepsTab';
 import FunnelHealthTab from '@/components/funnels/FunnelHealthTab';
 import FunnelAnalyticsTab from '@/components/funnels/FunnelAnalyticsTab';
+import FunnelLeadsTab from '@/components/funnels/FunnelLeadsTab';
+
+type FunnelDetailTab = 'overview' | 'steps' | 'health' | 'analytics' | 'leads';
 
 type Props = {
   funnelId: string;
@@ -15,7 +18,7 @@ export default function FunnelDetailPanel({ funnelId, onBack }: Props) {
   const [funnel, setFunnel] = useState<FunnelWithSteps | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'steps' | 'health' | 'analytics'>('overview');
+  const [activeTab, setActiveTab] = useState<FunnelDetailTab>('overview');
 
   useEffect(() => {
     setActiveTab('overview');
@@ -124,7 +127,7 @@ export default function FunnelDetailPanel({ funnelId, onBack }: Props) {
 
       <div className="border-b border-white/10 mb-6">
         <nav className="-mb-px flex space-x-8 overflow-x-auto">
-          {(['overview', 'steps', 'health', 'analytics'] as const).map((tab) => (
+          {(['overview', 'steps', 'health', 'analytics', 'leads'] as const).map((tab) => (
             <button
               key={tab}
               type="button"
@@ -150,6 +153,7 @@ export default function FunnelDetailPanel({ funnelId, onBack }: Props) {
       {activeTab === 'steps' && <FunnelStepsTab funnel={funnel} onReload={loadFunnel} />}
       {activeTab === 'health' && <FunnelHealthTab funnelId={funnel.id} />}
       {activeTab === 'analytics' && <FunnelAnalyticsTab funnelId={funnel.id} />}
+      {activeTab === 'leads' && <FunnelLeadsTab funnelId={funnel.id} />}
     </div>
   );
 }

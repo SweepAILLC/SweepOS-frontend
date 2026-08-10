@@ -7,8 +7,16 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import UsersPanel from '@/components/UsersPanel';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
+import NotificationSettingsCard from '@/components/ui/NotificationSettingsCard';
 
-type SettingsSection = 'appearance' | 'accounts' | 'team' | 'profile' | 'privacy' | 'integrations';
+type SettingsSection =
+  | 'appearance'
+  | 'accounts'
+  | 'team'
+  | 'profile'
+  | 'privacy'
+  | 'integrations'
+  | 'notifications';
 
 interface OrgOption {
   id: string;
@@ -21,6 +29,7 @@ const SIDEBAR_ITEMS: { id: SettingsSection; label: string; adminOnly?: boolean }
   { id: 'accounts', label: 'Accounts' },
   { id: 'team', label: 'Team', adminOnly: true },
   { id: 'integrations', label: 'Integrations', adminOnly: true },
+  { id: 'notifications', label: 'Notifications', adminOnly: true },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
@@ -126,7 +135,7 @@ export default function SettingsPanel() {
         setSection('profile');
       } else if (
         typeof sectionQ === 'string' &&
-        ['appearance', 'accounts', 'team', 'profile', 'privacy', 'integrations'].includes(sectionQ)
+        ['appearance', 'accounts', 'team', 'profile', 'privacy', 'integrations', 'notifications'].includes(sectionQ)
       ) {
         setSection(sectionQ as SettingsSection);
       }
@@ -146,7 +155,11 @@ export default function SettingsPanel() {
   const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner';
 
   useEffect(() => {
-    if (!loading && section === 'integrations' && !isAdminOrOwner) {
+    if (
+      !loading &&
+      (section === 'integrations' || section === 'notifications') &&
+      !isAdminOrOwner
+    ) {
       setSection('appearance');
     }
   }, [loading, section, isAdminOrOwner]);
@@ -581,6 +594,10 @@ export default function SettingsPanel() {
                 {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </form>
+          )}
+
+          {section === 'notifications' && isAdminOrOwner && currentOrgId && (
+            <NotificationSettingsCard orgId={currentOrgId} />
           )}
 
           {section === 'privacy' && (
