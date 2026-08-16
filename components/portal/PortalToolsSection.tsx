@@ -10,6 +10,15 @@ import {
   type Resource,
 } from '@/lib/resources';
 import { ResourceModal } from '@/components/ui/ResourcesPanel';
+import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
+
+const FUNNEL_SIMULATOR_TILE: Resource = {
+  id: 'funnel-simulator',
+  title: 'Funnel Simulator',
+  description:
+    'Model a paid VSL call funnel or organic DM funnel. Autofill show rate, close rate, AOV, and unique new-lead booking rate from historic SweepOS data, then save named scenarios.',
+  category: 'Template',
+};
 
 type PortalToolsSectionProps = {
   isActive?: boolean;
@@ -20,7 +29,7 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [openResource, setOpenResource] = useState<Resource | null>(null);
-  const [isSystemOwner, setIsSystemOwner] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -44,25 +53,8 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
     };
   }, [isActive, loadDocs]);
 
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .getCurrentUser()
-      .then((user) => {
-        if (!cancelled) {
-          setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setIsSystemOwner(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const tools = useMemo(() => {
-    const all = mergeDocsWithAiSkills(docs).filter(isToolResource);
+    const all = [FUNNEL_SIMULATOR_TILE, ...mergeDocsWithAiSkills(docs).filter(isToolResource)];
     const q = search.trim().toLowerCase();
     if (!q) return all;
     return all.filter(
@@ -122,7 +114,10 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
               <button
                 key={resource.id}
                 type="button"
-                onClick={() => setOpenResource(resource)}
+                onClick={() => {
+                  if (resource.id === 'funnel-simulator') setSimulatorOpen(true);
+                  else setOpenResource(resource);
+                }}
                 className={`text-left rounded-lg border border-gray-200/60 dark:border-white/10 bg-gradient-to-br ${styles.bg} p-3.5 hover:border-sky-400/40 transition-colors`}
               >
                 <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${styles.badge}`}>
@@ -140,10 +135,12 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
         </div>
       )}
 
+      {simulatorOpen ? <FunnelSimulatorModal onClose={() => setSimulatorOpen(false)} /> : null}
+
       {openResource ? (
         <ResourceModal
           resource={openResource}
-          canEditDocs={isSystemOwner}
+          canEditDocs={false}
           onClose={() => setOpenResource(null)}
           onSaved={async () => {
             await loadDocs();

@@ -14,18 +14,18 @@ import IdeasTab from '@/components/marketing/IdeasTab';
 import SignalsTab from '@/components/marketing/SignalsTab';
 import PerformanceTab from '@/components/marketing/PerformanceTab';
 
-type SubTab = 'performance' | 'ideas' | 'signals';
+type SubTab = 'overview' | 'signals';
 
 const SUB_TABS: { id: SubTab; label: string }[] = [
-  { id: 'performance', label: 'Performance' },
-  { id: 'ideas', label: 'Ideas' },
+  { id: 'overview', label: 'Overview' },
   { id: 'signals', label: 'Signals' },
 ];
 
 function parseSub(raw: string | string[] | undefined): SubTab {
   const v = Array.isArray(raw) ? raw[0] : raw;
-  if (v === 'ideas' || v === 'signals' || v === 'performance') return v;
-  return 'performance';
+  // Legacy deep-links from Performance / Ideas tabs collapse into Overview.
+  if (v === 'signals') return 'signals';
+  return 'overview';
 }
 
 export default function ContentStudioPanel() {
@@ -72,7 +72,7 @@ export default function ContentStudioPanel() {
       setContentBundle(data.content_bundle);
       setBatchId(data.batch_id);
       setCompleted(new Set(data.completed_idea_ids || []));
-      if (data.content_bundle && data.content_bundle.version >= 4) {
+      if (data.content_bundle && data.content_bundle.version >= 7) {
         setConceptRegenPending(false);
       }
       return data;
@@ -93,7 +93,7 @@ export default function ContentStudioPanel() {
   // Poll while bundle regenerating or stale version
   useEffect(() => {
     const needsPoll =
-      conceptRegenPending || (contentBundle != null && contentBundle.version < 4) || !contentBundle;
+      conceptRegenPending || (contentBundle != null && contentBundle.version < 7) || !contentBundle;
     if (!needsPoll) {
       if (bundlePollRef.current) {
         clearInterval(bundlePollRef.current);
@@ -122,7 +122,7 @@ export default function ContentStudioPanel() {
       setConceptRegenPending(Boolean(res.bundle_regenerating));
       setReanalyzeMessage(
         res.bundle_regenerating
-          ? 'Fathom synced — regenerating TOF/MOF/BOF concepts (grounded in Instagram winners when available).'
+          ? 'Fathom synced — regenerating TOF/MOF/BOF concepts from call evidence and Instagram top posts.'
           : 'Re-analyze complete.'
       );
       await loadBootstrap();
@@ -133,16 +133,13 @@ export default function ContentStudioPanel() {
     }
   }, [loadBootstrap]);
 
-  const flushCompleted = useCallback(
-    async (ids: string[]) => {
-      try {
-        await apiClient.patchContentStudioCompletions(ids);
-      } catch {
-        /* ignore autosave blips */
-      }
-    },
-    []
-  );
+  const flushCompleted = useCallback(async (ids: string[]) => {
+    try {
+      await apiClient.patchContentStudioCompletions(ids);
+    } catch {
+      /* ignore autosave blips */
+    }
+  }, []);
 
   const toggleCompleted = (id: string) => {
     setCompleted((prev) => {
@@ -155,15 +152,13 @@ export default function ContentStudioPanel() {
   };
 
   const headerBlurb = useMemo(() => {
-    if (sub === 'performance') {
-      return 'See what Instagram content is working — then let Ideas draft the next round from those winners.';
-    }
     if (sub === 'signals') {
       return 'Sales playbook, objections, and reframes mined from calls — the raw signal behind your concepts.';
     }
     return (
       <>
-        Video concepts mined from Fathom calls and Instagram winners, tied to your{' '}
+        Instagram period metrics, top posts, and underperformers — then video concepts grounded in that performance
+        and your{' '}
         <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
           Intelligence
         </Link>{' '}
@@ -196,27 +191,44 @@ export default function ContentStudioPanel() {
         ))}
       </div>
 
-      {error && sub !== 'performance' && (
+      {error && sub === 'signals' && (
         <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm">
           {error}
         </div>
       )}
 
-      {sub === 'performance' && <PerformanceTab onGoToIdeas={() => setSub('ideas')} />}
-      {sub === 'ideas' && (
-        <IdeasTab
-          contentBundle={contentBundle}
-          batchId={batchId}
-          completed={completed}
-          salesPlaybookSource={salesPlaybookSource}
-          reanalyzeBusy={reanalyzeBusy}
-          conceptRegenPending={conceptRegenPending}
-          reanalyzeMessage={reanalyzeMessage}
-          loading={loading}
-          onReanalyze={() => void handleReanalyze()}
-          onToggleCompleted={toggleCompleted}
-        />
+      {sub === 'overview' && (
+        <div className="space-y-10">
+          <PerformanceTab />
+          <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Ideas</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                TOF / MOF / BOF concepts mined from calls and grounded in your top Instagram posts — not advice
+                labels.
+              </p>
+            </div>
+            {error ? (
+              <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm">
+                {error}
+              </div>
+            ) : null}
+            <IdeasTab
+              contentBundle={contentBundle}
+              batchId={batchId}
+              completed={completed}
+              salesPlaybookSource={salesPlaybookSource}
+              reanalyzeBusy={reanalyzeBusy}
+              conceptRegenPending={conceptRegenPending}
+              reanalyzeMessage={reanalyzeMessage}
+              loading={loading}
+              onReanalyze={() => void handleReanalyze()}
+              onToggleCompleted={toggleCompleted}
+            />
+          </div>
+        </div>
       )}
+
       {sub === 'signals' && (
         <SignalsTab
           salesPlaybookSource={salesPlaybookSource}

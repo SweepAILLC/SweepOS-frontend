@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ConsultingTier } from '@/types/admin';
+import { listPortalNotices, markPortalNoticeRead } from '@/lib/consultingNotices';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
 import PortalBookingEmbed from '@/components/portal/PortalBookingEmbed';
 import PortalSopDrawer, {
@@ -32,6 +33,22 @@ export default function OrgPortalPanel({
   const label = tierLabel(consultingTier);
   const canBook = Boolean(bookingUrl?.trim());
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [notices, setNotices] = useState<Array<{ id: string; title: string; body: string; created_at?: string; read?: boolean }>>([]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    listPortalNotices()
+      .then((rows) => {
+        if (!cancelled) setNotices(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setNotices([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive]);
 
   return (
     <div className="w-full min-h-[calc(100vh-1.5rem)]">
@@ -62,6 +79,36 @@ export default function OrgPortalPanel({
             ) : null}
           </div>
         </div>
+
+        {notices.filter((n) => !n.read).length > 0 ? (
+          <div className="pr-2 space-y-2">
+            {notices
+              .filter((n) => !n.read)
+              .map((n) => (
+                <div
+                  key={n.id}
+                  className="rounded-lg border border-amber-300/50 dark:border-amber-500/30 bg-amber-50/80 dark:bg-amber-950/20 px-4 py-3"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">{n.title}</p>
+                      <p className="text-sm text-amber-900/80 dark:text-amber-100/80 mt-1 whitespace-pre-wrap">{n.body}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="text-xs text-amber-800 dark:text-amber-200 shrink-0"
+                      onClick={async () => {
+                        await markPortalNoticeRead(n.id);
+                        setNotices((prev) => prev.map((x) => (x.id === n.id ? { ...x, read: true } : x)));
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        ) : null}
 
         <div className="pr-2">
           <SharedTypingPad

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
 import {
   CATEGORY_STYLES,
@@ -71,6 +72,11 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
   );
   const [draftSopCategory, setDraftSopCategory] = useState<SopCategory | ''>(resource.sopCategory || '');
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const loadContent = useCallback(async () => {
     setLoading(true);
@@ -228,13 +234,15 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
     }
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150 overflow-y-auto"
     >
-      <div className="relative w-full max-w-3xl max-h-[90vh] bg-white dark:bg-gray-900 border border-gray-200/30 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-3xl my-8 sm:my-0 max-h-[90vh] bg-white dark:bg-gray-900 border border-gray-200/30 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden">
         <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/40 dark:border-white/8">
           <div className="flex items-center gap-3 min-w-0">
             <CategoryBadge category={resource.category} />
@@ -453,7 +461,8 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -476,6 +485,11 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -526,7 +540,9 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
     }
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={(e) => e.target === backdropRef.current && onClose()}
@@ -612,7 +628,8 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -660,6 +677,11 @@ export function OrgLibraryItemModal({
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -744,7 +766,9 @@ export function OrgLibraryItemModal({
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={(e) => e.target === backdropRef.current && onClose()}
@@ -939,7 +963,8 @@ export function OrgLibraryItemModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

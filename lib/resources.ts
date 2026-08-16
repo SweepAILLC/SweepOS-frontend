@@ -94,37 +94,15 @@ export const CATEGORY_STYLES: Record<ResourceCategory, { badge: string; bg: stri
 
 export const AI_SKILL_RESOURCES: Resource[] = [
   {
-    id: 'instagram-content-audit',
-    title: 'Instagram Content Audit',
+    id: 'sweep',
+    title: '/sweep',
     description:
-      'Thorough content strategy audit via SweepOS remote MCP — buyer objections, wins, stories, ICP, and TOF/MOF/BOF fit. Optional Fathom for transcript gaps; optional pasted Reel notes for platform metrics (no TokScript).',
+      'One Claude skill: type /sweep + a prompt. Routes SweepOS MCP for Marketing Intel, Instagram performance, SOP library / org docs (strategic consulting KB), Terminal, KPIs, sales diagnostics, and client email — no TokScript.',
     category: 'AI Skill',
-    fileName: 'instagram-content-audit.md',
+    fileName: 'sweep.md',
     mcpRequired: ['SweepOS (https://api.sweepai.site/mcp)', 'Fathom MCP (optional)'],
     outputSummary:
-      'Full audit: buyer reality map, funnel gaps, credibility + lead-gen scores, top 5 fixes, 14-day sprint.',
-  },
-  {
-    id: 'shorts-content-ideation',
-    title: 'Shorts Content Ideation',
-    description:
-      'Generate 10 conversion-engineered short-form ideas from SweepOS Marketing Intel — themes, clips, wins, and ICP. Optional Fathom only when Sweep quotes are thin.',
-    category: 'AI Skill',
-    fileName: 'shorts-content-ideation.md',
-    mcpRequired: ['SweepOS (https://api.sweepai.site/mcp)', 'Fathom MCP (optional)'],
-    prerequisites: ['Prefer Instagram Content Audit first', 'Marketing Intel / Call Library data recommended'],
-    outputSummary: '10 ranked ideas with scripted hooks, Sweep citations, funnel balance, and filming order.',
-  },
-  {
-    id: 'sales-call-analysis',
-    title: 'Sales Call Analysis',
-    description:
-      'Complete sales diagnostic from SweepOS call themes, clips, and client insights — scores, quote banks, and root-cause losses. Fathom fills full-transcript gaps.',
-    category: 'AI Skill',
-    fileName: 'sales-call-analysis.md',
-    mcpRequired: ['SweepOS (https://api.sweepai.site/mcp)', 'Fathom MCP (optional for full transcripts)'],
-    outputSummary:
-      'Full diagnostic: scores, objection bank, discovery/pitch/close deep-dives, root causes, ranked fixes.',
+      'Intent-routed answer: data-backed pattern reports plus strategic SOP guidance, ideas/audits, sales diagnostics, business/KPI briefs, or email drafts — with tool citations.',
   },
 ];
 

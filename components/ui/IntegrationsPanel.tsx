@@ -1601,17 +1601,36 @@ export default function IntegrationsPanel() {
                 ) : null}
                 {instagramStatus?.last_sync_at ? (
                   <p className={mutedClass}>
-                    Last sync: {new Date(instagramStatus.last_sync_at).toLocaleString()} · auto-updates daily
+                    Last sync: {new Date(instagramStatus.last_sync_at).toLocaleString()} · auto-checks daily
                   </p>
                 ) : (
                   <p className={mutedClass}>
-                    Sync pending — metrics refresh automatically once a day in the background.
+                    Sync pending — use Sync now or wait for the daily background check.
                   </p>
                 )}
                 {instagramStatus?.capabilities?.reason ? (
                   <p className="text-xs text-amber-800 dark:text-amber-200">{instagramStatus.capabilities.reason}</p>
                 ) : null}
                 <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || instagramBusy}
+                    className="rounded-lg border-2 border-zinc-300 bg-white px-3 py-1.5 text-xs font-semibold dark:border-zinc-600 dark:bg-zinc-800 disabled:opacity-50"
+                    onClick={async () => {
+                      setInstagramBusy(true);
+                      try {
+                        const res = await apiClient.postInstagramSync(false);
+                        await refreshIntegrationSummaries();
+                        setSuccess(res.message || 'Instagram sync queued');
+                      } catch (e) {
+                        setError(formatApiError(e, 'Sync failed'));
+                      } finally {
+                        setInstagramBusy(false);
+                      }
+                    }}
+                  >
+                    {instagramBusy ? 'Working…' : 'Sync now'}
+                  </button>
                   <button
                     type="button"
                     disabled={!canManageIntegrations || instagramBusy}

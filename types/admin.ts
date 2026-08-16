@@ -12,6 +12,14 @@ export interface Organization {
   admin_password?: string;  // Only present when creating a new org
   consulting_tier?: ConsultingTier | null;
   booking_url?: string | null;
+  cash_collected_30d_usd?: number;
+  cash_collected_prev_30d_usd?: number;
+  cash_collected_all_time_usd?: number;
+  mrr_usd?: number;
+  active_seconds_7d?: number;
+  active_seconds_30d?: number;
+  last_seen_at?: string | null;
+  currently_online?: boolean;
 }
 
 export interface HealthTrendPeriod {
@@ -126,6 +134,32 @@ export interface GlobalHealth {
   close_rate_last_30d_pct: number | null;
   health_trend_periods: HealthTrendPeriod[];
   llm_usage_last_30d?: LlmUsageSummary | null;
+  org_activity?: OrgActivityRow[];
+  currently_online_orgs?: number;
+  currently_online_users?: number;
+  active_seconds_7d?: number;
+  active_seconds_30d?: number;
+}
+
+export interface OrgActivityRow {
+  org_id: string;
+  organization_name: string;
+  consulting_tier?: string | null;
+  active_seconds_7d: number;
+  active_seconds_30d: number;
+  last_seen_at?: string | null;
+  currently_online: boolean;
+  online_users: number;
+}
+
+export interface OwnerOrgNotice {
+  id: string;
+  org_id: string;
+  organization_name?: string | null;
+  title: string;
+  body: string;
+  created_at: string;
+  read?: boolean;
 }
 
 export interface GlobalSettings {

@@ -107,7 +107,7 @@ export default function IdeasTab({
   }).filter(Boolean) as ContentStudioStage[];
 
   const bundleLoading = loading && !contentBundle;
-  const bundleStale = Boolean(contentBundle && contentBundle.version < 4);
+  const bundleStale = Boolean(contentBundle && contentBundle.version < 7);
 
   return (
     <div className="space-y-6">
@@ -155,7 +155,7 @@ export default function IdeasTab({
         )}
         {bundleStale ? (
           <p className="text-xs text-amber-700/90 dark:text-amber-300/90 bg-amber-500/10 rounded-lg px-3 py-2 border border-amber-500/20">
-            Upgrading ideas with Instagram performance grounding — fresh concepts are drafting in the background.
+            Refreshing ideas with current Instagram top-post performance — new concepts are drafting in the background.
           </p>
         ) : null}
         {batchId ? (

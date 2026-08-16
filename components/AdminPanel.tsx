@@ -3,7 +3,6 @@ import { apiClient } from '@/lib/api';
 import {
   Organization,
   GlobalHealth,
-  GlobalSettings,
   OrganizationDashboardSummary,
   Invitation,
 } from '@/types/admin';
@@ -26,6 +25,7 @@ import {
 } from '@/components/owner/OwnerHealthTrendCharts';
 import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import OrgOwnerDashboardModal from '@/components/owner/OrgOwnerDashboardModal';
+import OwnerOrgsLeaderboard, { formatActiveTime } from '@/components/owner/OwnerOrgsLeaderboard';
 import PortalSopDrawer, {
   SOP_DRAWER_WIDTH_COLLAPSED,
   SOP_DRAWER_WIDTH_OPEN,
@@ -46,10 +46,9 @@ function tabPermissionDisplayName(tab: string): string {
 
 export default function AdminPanel() {
   const { setLoading: setGlobalLoading } = useLoading();
-  const [activeTab, setActiveTab] = useState<'organizations' | 'health' | 'settings'>('organizations');
+  const [activeTab, setActiveTab] = useState<'organizations' | 'health'>('organizations');
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [health, setHealth] = useState<GlobalHealth | null>(null);
-  const [settings, setSettings] = useState<GlobalSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingOrg, setEditingOrg] = useState<string | null>(null);
@@ -125,9 +124,6 @@ export default function AdminPanel() {
         if (Array.isArray(orgsData) && orgsData.length) {
           setOrganizations(orgsData);
         }
-      } else if (activeTab === 'settings') {
-        const data = await apiClient.getGlobalSettings();
-        setSettings(data);
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to load data');
@@ -394,18 +390,7 @@ export default function AdminPanel() {
     }
   };
 
-  const filteredOrganizations = useMemo(() => {
-    const q = orgSearch.trim().toLowerCase();
-    if (!q) return organizations;
-    return organizations.filter((org) => {
-      const name = String(org.name || '').toLowerCase();
-      const id = String(org.id || '').toLowerCase();
-      const tier = String(org.consulting_tier || '').toLowerCase();
-      return name.includes(q) || id.includes(q) || tier.includes(q);
-    });
-  }, [organizations, orgSearch]);
-
-  if (loading && !organizations.length && !health && !settings) {
+  if (loading && !organizations.length && !health) {
     return (
       <div className="text-center py-8">
         <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900 dark:border-gray-100"></div>
@@ -459,7 +444,7 @@ export default function AdminPanel() {
       {/* Tabs */}
       <div className="border-b border-white/20">
         <nav className="-mb-px flex space-x-8">
-          {(['organizations', 'health', 'settings'] as const).map((tab) => (
+          {(['organizations', 'health'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -495,35 +480,9 @@ export default function AdminPanel() {
         <div className="space-y-4 min-w-0 w-full max-w-full">
           <div className="flex flex-wrap justify-between items-center gap-3">
             <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Organizations</h2>
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:ml-auto">
-              <div className="relative flex-1 sm:flex-initial sm:w-64 min-w-0">
-                <svg
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                  aria-hidden
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-                <input
-                  type="search"
-                  value={orgSearch}
-                  onChange={(e) => setOrgSearch(e.target.value)}
-                  placeholder="Search orgs…"
-                  className="w-full pl-9 pr-3 py-2 text-sm glass-input rounded-md"
-                  aria-label="Search organizations"
-                />
-              </div>
-              <ShinyButton onClick={() => setShowInviteOrg(true)}>
-                Invite Organization
-              </ShinyButton>
-            </div>
+            <ShinyButton onClick={() => setShowInviteOrg(true)}>
+              Invite Organization
+            </ShinyButton>
           </div>
 
           {showInviteOrg && (
@@ -592,148 +551,25 @@ export default function AdminPanel() {
             </div>
           )}
 
-          <div className="glass-card w-full min-w-0 max-w-full overflow-hidden">
-            <div className="w-full min-w-0 overflow-x-auto">
-              <table className="w-full table-fixed divide-y divide-white/10 text-sm">
-                <colgroup>
-                  <col style={{ width: '30%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '10%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '26%' }} />
-                </colgroup>
-                <thead className="bg-white/10 dark:bg-white/5">
-                  <tr>
-                    <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Name
-                    </th>
-                    <th className="hidden sm:table-cell px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Users
-                    </th>
-                    <th className="hidden md:table-cell px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Clients
-                    </th>
-                    <th className="hidden lg:table-cell px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Funnels
-                    </th>
-                    <th className="hidden md:table-cell px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Created
-                    </th>
-                    <th className="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider digitized-text">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-transparent divide-y divide-white/10">
-                  {filteredOrganizations.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
-                      >
-                        {orgSearch.trim()
-                          ? `No organizations match “${orgSearch.trim()}”.`
-                          : 'No organizations yet.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredOrganizations.map((org) => (
-                      <tr key={org.id}>
-                        <td className="px-3 sm:px-4 py-3 align-middle min-w-0">
-                          {editingOrg === org.id ? (
-                            <input
-                              type="text"
-                              value={editOrgName}
-                              onChange={(e) => setEditOrgName(e.target.value)}
-                              className="w-full max-w-full px-2 py-1 border border-gray-300 dark:border-white/20 rounded bg-transparent"
-                              onKeyPress={(e) => e.key === 'Enter' && handleUpdateOrg(org.id)}
-                            />
-                          ) : (
-                            <div className="min-w-0">
-                              <span className="block text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={org.name}>
-                                {org.name}
-                              </span>
-                              <span className="sm:hidden text-[11px] text-gray-500 tabular-nums">
-                                {org.user_count || 0} users · {org.client_count || 0} clients
-                              </span>
-                            </div>
-                          )}
-                        </td>
-                        <td className="hidden sm:table-cell px-3 sm:px-4 py-3 text-gray-500 tabular-nums">
-                          {org.user_count || 0}
-                        </td>
-                        <td className="hidden md:table-cell px-3 sm:px-4 py-3 text-gray-500 tabular-nums">
-                          {org.client_count || 0}
-                        </td>
-                        <td className="hidden lg:table-cell px-3 sm:px-4 py-3 text-gray-500 tabular-nums">
-                          {org.funnel_count || 0}
-                        </td>
-                        <td className="hidden md:table-cell px-3 sm:px-4 py-3 text-gray-500 whitespace-nowrap">
-                          {new Date(org.created_at).toLocaleDateString()}
-                        </td>
-                        <td className="px-3 sm:px-4 py-3 font-medium">
-                          {editingOrg === org.id ? (
-                            <div className="flex flex-wrap gap-x-2 gap-y-1">
-                              <button
-                                type="button"
-                                onClick={() => handleUpdateOrg(org.id)}
-                                className="text-blue-600 hover:text-blue-900 dark:text-blue-400"
-                              >
-                                Save
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingOrg(null);
-                                  setEditOrgName('');
-                                }}
-                                className="text-gray-600 hover:text-gray-900 dark:text-gray-400"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-x-2 gap-y-1">
-                              <button
-                                type="button"
-                                onClick={() => handleViewDashboard(org.id)}
-                                className="text-green-600 hover:text-green-900 dark:text-green-400"
-                              >
-                                Dashboard
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingOrg(org.id);
-                                  setEditOrgName(org.name);
-                                }}
-                                className="text-blue-600 hover:text-blue-900 dark:text-blue-400"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteOrg(org.id)}
-                                className="text-red-600 hover:text-red-900 dark:text-red-400"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {orgSearch.trim() && filteredOrganizations.length > 0 ? (
-              <p className="px-4 py-2 text-[11px] text-gray-500 border-t border-white/10">
-                Showing {filteredOrganizations.length} of {organizations.length}
-              </p>
-            ) : null}
-          </div>
+          <OwnerOrgsLeaderboard
+            organizations={organizations}
+            orgSearch={orgSearch}
+            onOrgSearchChange={setOrgSearch}
+            editingOrg={editingOrg}
+            editOrgName={editOrgName}
+            onEditOrgNameChange={setEditOrgName}
+            onViewDashboard={handleViewDashboard}
+            onStartEdit={(org) => {
+              setEditingOrg(org.id);
+              setEditOrgName(org.name);
+            }}
+            onSaveEdit={handleUpdateOrg}
+            onCancelEdit={() => {
+              setEditingOrg(null);
+              setEditOrgName('');
+            }}
+            onDelete={handleDeleteOrg}
+          />
         </div>
       )}
 
@@ -744,7 +580,7 @@ export default function AdminPanel() {
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Platform health</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                Revenue, scale, funnel traffic, and 30-day growth signals across all organizations.
+                Revenue, coaching signals, API cost, and time on app across all organizations.
               </p>
             </div>
             <button
@@ -1137,36 +973,79 @@ export default function AdminPanel() {
             </div>
           </section>
 
-          {/* Scale */}
+          {/* Time on app */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
-              Platform scale
+              Time on app
             </h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+              Visible-tab time from org members (heartbeat while Sweep is open in the foreground).
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Organizations</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_organizations}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Online now</p>
+                <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                  {health.currently_online_users ?? 0}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">{health.currently_online_orgs ?? 0} orgs</p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Users</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_users}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Active time (7d)</p>
+                <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                  {formatActiveTime(health.active_seconds_7d)}
+                </p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Clients</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_clients}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Active time (30d)</p>
+                <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                  {formatActiveTime(health.active_seconds_30d)}
+                </p>
               </div>
               <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Funnels</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_funnels}</p>
+                <p className="text-sm text-gray-600 dark:text-gray-400">Orgs with activity (7d)</p>
+                <p className="text-2xl font-bold tabular-nums text-gray-900 dark:text-gray-100">
+                  {(health.org_activity ?? []).filter((r) => r.active_seconds_7d > 0).length}
+                </p>
               </div>
-              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Payment records</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_payments.toLocaleString()}</p>
-              </div>
-              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Subscriptions (all)</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.total_subscriptions.toLocaleString()}</p>
-                <p className="text-xs text-gray-500 mt-1">Active + trialing: {health.active_subscriptions}</p>
+            </div>
+            <div className="glass-card overflow-hidden rounded-lg border border-gray-200 dark:border-white/10">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-white/10 dark:bg-white/5">
+                    <tr className="text-left text-gray-500 dark:text-gray-400">
+                      <th className="px-3 py-2 font-medium">Organization</th>
+                      <th className="px-3 py-2 font-medium">7d</th>
+                      <th className="px-3 py-2 font-medium">30d</th>
+                      <th className="px-3 py-2 font-medium">Last seen</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(health.org_activity ?? []).slice(0, 15).map((row) => (
+                      <tr key={row.org_id} className="border-t border-white/10">
+                        <td className="px-3 py-2">
+                          <span className="inline-flex items-center gap-2">
+                            <span
+                              className={`h-2 w-2 rounded-full ${row.currently_online ? 'bg-emerald-500' : 'bg-gray-400/40'}`}
+                            />
+                            {row.organization_name}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 tabular-nums">{formatActiveTime(row.active_seconds_7d)}</td>
+                        <td className="px-3 py-2 tabular-nums">{formatActiveTime(row.active_seconds_30d)}</td>
+                        <td className="px-3 py-2 text-gray-500">
+                          {row.last_seen_at ? new Date(row.last_seen_at).toLocaleString() : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                    {(health.org_activity ?? []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-3 py-6 text-center text-gray-500">
+                          No in-app time recorded yet. Totals start as teams keep Sweep open.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
               </div>
             </div>
           </section>
@@ -1207,31 +1086,6 @@ export default function AdminPanel() {
             </div>
           </section>
 
-          {/* Growth (30 days) */}
-          <section>
-            <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
-              Growth (last 30 days)
-            </h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
-                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New organizations</p>
-                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.organizations_created_last_30_days}</p>
-              </div>
-              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
-                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New users</p>
-                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.users_created_last_30_days}</p>
-              </div>
-              <div className="glass-card p-4 rounded-lg border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/50 dark:bg-emerald-950/20">
-                <p className="text-sm text-gray-700 dark:text-gray-300 digitized-text">New clients</p>
-                <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-200">{health.clients_created_last_30_days}</p>
-              </div>
-              <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10">
-                <p className="text-sm text-gray-600 dark:text-gray-400 digitized-text">Pending invitations</p>
-                <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">{health.pending_invitations}</p>
-              </div>
-            </div>
-          </section>
-
           {/* Integrations */}
           <section>
             <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-3 digitized-text">
@@ -1250,53 +1104,15 @@ export default function AdminPanel() {
           </section>
         </div>
       )}
-
-      {/* Settings Tab */}
-      {activeTab === 'settings' && settings && (
-        <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Global Settings</h2>
-          <div className="glass-card p-6">
-            <dl className="grid grid-cols-1 gap-x-4 gap-y-6 sm:grid-cols-2">
-              <div>
-                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 digitized-text">Sudo Admin Email</dt>
-                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{settings.sudo_admin_email}</dd>
-              </div>
-              <div>
-                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 digitized-text">Frontend URL</dt>
-                <dd className="mt-1 text-sm text-gray-900 dark:text-gray-100">{settings.frontend_url}</dd>
-              </div>
-              <div>
-                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 digitized-text">Stripe Configured</dt>
-                <dd className="mt-1 text-sm">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                    settings.stripe_configured
-                      ? 'bg-green-500/20 text-green-900 border-green-400/30'
-                      : 'bg-red-500/20 text-red-900 border-red-400/30'
-                  }`}>
-                    {settings.stripe_configured ? 'Yes' : 'No'}
-                  </span>
-                </dd>
-              </div>
-              <div>
-                <dt className="text-sm font-medium text-gray-500 dark:text-gray-400 digitized-text">Brevo Configured</dt>
-                <dd className="mt-1 text-sm">
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                    settings.brevo_configured
-                      ? 'bg-green-500/20 text-green-900 border-green-400/30'
-                      : 'bg-red-500/20 text-red-900 border-red-400/30'
-                  }`}>
-                    {settings.brevo_configured ? 'Yes' : 'No'}
-                  </span>
-                </dd>
-              </div>
-            </dl>
-          </div>
-        </div>
-      )}
         </>
       )}
       </div>
-      <PortalSopDrawer isActive open={sopDrawerOpen} onOpenChange={setSopDrawerOpen} />
+      <PortalSopDrawer
+        isActive
+        allowManage
+        open={sopDrawerOpen}
+        onOpenChange={setSopDrawerOpen}
+      />
     </div>
   );
 }

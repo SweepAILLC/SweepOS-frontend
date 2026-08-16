@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   apiClient,
   InstagramPerformance,
+  InstagramPostCard,
   InstagramStatus,
   InstagramTrendPoint,
 } from '@/lib/api';
@@ -32,57 +33,93 @@ function fmtWeek(iso?: string | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function fmtPct(n?: number | null): string {
+  if (n == null || Number.isNaN(n)) return '—';
+  return `${n >= 0 ? '+' : ''}${n.toFixed(0)}%`;
+}
+
 function Delta({ value }: { value?: number | null }) {
   if (value == null) return null;
   const up = value >= 0;
   return (
-    <span className={`text-[10px] font-semibold ${up ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
-      {up ? '+' : ''}
-      {value.toFixed(0)}%
+    <span className={`text-[11px] font-semibold ${up ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
+      {fmtPct(value)}
     </span>
   );
 }
 
-function Sparkline({ points, metric }: { points: InstagramTrendPoint[]; metric: keyof InstagramTrendPoint }) {
-  const vals = points.map((p) => Number(p[metric] ?? 0));
-  if (vals.length < 2) return <div className="h-8" />;
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const span = max - min || 1;
-  const w = 120;
-  const h = 32;
-  const d = vals
-    .map((v, i) => {
-      const x = (i / (vals.length - 1)) * w;
-      const y = h - ((v - min) / span) * (h - 4) - 2;
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
+function PostMediaCard({
+  post,
+  tone = 'default',
+}: {
+  post: InstagramPostCard;
+  tone?: 'default' | 'under';
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const border =
+    tone === 'under'
+      ? 'border-rose-400/25 hover:ring-rose-400/30'
+      : 'border-gray-200/40 dark:border-gray-700/40 hover:ring-violet-400/30';
+  const showImg = Boolean(post.thumbnail_url) && !imgFailed;
+
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="w-full h-8 text-violet-500" aria-hidden>
-      <path d={d} fill="none" stroke="currentColor" strokeWidth="1.5" />
-    </svg>
+    <a
+      href={post.permalink || '#'}
+      target="_blank"
+      rel="noreferrer"
+      className={`group glass-card rounded-xl overflow-hidden border ${border} hover:ring-2 transition block`}
+    >
+      <div className="relative w-full aspect-[4/5] bg-gray-200 dark:bg-gray-800">
+        {showImg ? (
+          <img
+            src={post.thumbnail_url!}
+            alt=""
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            decoding="async"
+            onError={() => setImgFailed(true)}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-3 text-center">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+              {post.format_bucket || 'post'}
+            </span>
+            <span className="text-xs text-gray-500 line-clamp-4">
+              {post.hook_text || post.caption || 'Open on Instagram'}
+            </span>
+          </div>
+        )}
+      </div>
+      <div className="p-3 space-y-1.5">
+        <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+          {post.format_bucket || 'post'}
+          {post.engagement_rate_pct != null ? ` · ${post.engagement_rate_pct.toFixed(1)}% eng` : ''}
+        </p>
+        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 line-clamp-3 leading-snug">
+          {post.hook_text || post.caption || 'Untitled'}
+        </p>
+        <p className="text-[11px] text-gray-500">
+          {fmtNum(post.reach)} reach · {fmtNum(post.saved)} saves · {fmtNum(post.views)} views
+        </p>
+      </div>
+    </a>
   );
 }
 
-export type PerformanceTabProps = {
-  onGoToIdeas?: () => void;
-};
-
-const ACTION_DIMS = [
-  { id: 'funnel_stage', label: 'Awareness level (TOF / MOF / BOF)' },
-  { id: 'format_bucket', label: 'Format' },
-  { id: 'hook_pattern', label: 'Hook style' },
-] as const;
-
-export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
+export default function PerformanceTab() {
   const [status, setStatus] = useState<InstagramStatus | null>(null);
   const [perf, setPerf] = useState<InstagramPerformance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<'connect' | null>(null);
+  const [busy, setBusy] = useState<'connect' | 'sync' | null>(null);
   const [days, setDays] = useState(90);
   const [trendMetric, setTrendMetric] = useState<'reach' | 'saved' | 'engagement_rate_pct'>('reach');
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [, setTick] = useState(0);
+
+  const SYNC_COOLDOWN_MS = 15 * 60 * 1000;
 
   const load = useCallback(async () => {
     setError(null);
@@ -93,6 +130,16 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
       ]);
       setStatus(st);
       setPerf(pf);
+      if (st?.last_sync_at) {
+        const last = new Date(st.last_sync_at).getTime();
+        if (!Number.isNaN(last)) {
+          setCooldownUntil((prev) => {
+            const fromLast = last + SYNC_COOLDOWN_MS;
+            if (prev != null && prev > fromLast) return prev;
+            return fromLast;
+          });
+        }
+      }
     } catch (e) {
       setError(formatApiError(e));
     } finally {
@@ -104,6 +151,17 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
     setLoading(true);
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (cooldownUntil == null) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [cooldownUntil]);
+
+  const cooldownRemainingSec = useMemo(() => {
+    if (cooldownUntil == null) return 0;
+    return Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000));
+  }, [cooldownUntil]);
 
   const handleConnect = async () => {
     setBusy('connect');
@@ -117,32 +175,41 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
     }
   };
 
-  const doubleDown = useMemo(
-    () => (perf?.what_works || []).filter((w) => w.verdict === 'double_down'),
-    [perf]
-  );
-  const stopDoing = useMemo(
-    () => (perf?.what_works || []).filter((w) => w.verdict === 'stop'),
-    [perf]
-  );
-
-  const actionRows = useMemo(() => {
-    const rows = perf?.what_works || [];
-    return ACTION_DIMS.map((dim) => {
-      const options = rows.filter((r) => r.dimension === dim.id);
-      const best = options.length
-        ? [...options].sort((a, b) => (Number(b.lift_vs_median_pct) - Number(a.lift_vs_median_pct)))[0]
-        : null;
-      const worst = options.length
-        ? [...options].sort((a, b) => (Number(a.lift_vs_median_pct) - Number(b.lift_vs_median_pct)))[0]
-        : null;
-      return { ...dim, best, worst };
-    });
-  }, [perf]);
+  const handleSync = async () => {
+    if (cooldownRemainingSec > 0 || busy === 'sync') return;
+    setBusy('sync');
+    setError(null);
+    setSyncMessage(null);
+    try {
+      const res = await apiClient.postInstagramSync(false);
+      const cdSec = Number(res.cooldown_seconds || 900);
+      setCooldownUntil(Date.now() + cdSec * 1000);
+      setSyncMessage(res.message || 'Sync queued — refreshing shortly.');
+      // Poll a few times for last_sync_at / metrics to land.
+      for (const wait of [4000, 8000, 12000]) {
+        await new Promise((r) => setTimeout(r, wait));
+        await load();
+      }
+    } catch (e: unknown) {
+      const ax = e as { response?: { status?: number; data?: { detail?: unknown } } };
+      const detail = ax?.response?.data?.detail;
+      if (ax?.response?.status === 429 && detail && typeof detail === 'object') {
+        const d = detail as { message?: string; cooldown_seconds?: number };
+        if (typeof d.cooldown_seconds === 'number') {
+          setCooldownUntil(Date.now() + d.cooldown_seconds * 1000);
+        }
+        setError(d.message || formatApiError(e));
+      } else {
+        setError(formatApiError(e));
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const trendSeries = useMemo(() => {
     const rows = perf?.trend || [];
-    return rows.map((r) => ({
+    return rows.map((r: InstagramTrendPoint) => ({
       week: fmtWeek(r.week_start),
       week_start: r.week_start,
       reach: Number(r.reach || 0),
@@ -153,25 +220,28 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
 
   const trendMeta =
     trendMetric === 'reach'
-      ? { label: 'Reach', color: '#22d3ee', unit: '' }
+      ? { label: 'Reach', color: '#22d3ee' }
       : trendMetric === 'saved'
-      ? { label: 'Saves', color: '#a78bfa', unit: '' }
-      : { label: 'Engagement rate', color: '#34d399', unit: '%' };
+      ? { label: 'Saves', color: '#a78bfa' }
+      : { label: 'Engagement rate', color: '#34d399' };
+
+  const compareLabel = perf?.summary?.comparison_label || `vs prior ${days} days`;
 
   if (loading) {
     return (
       <div className="space-y-4 animate-pulse">
-        <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+        <div className="h-14 bg-gray-200 dark:bg-gray-700 rounded-xl" />
         <div className="h-28 bg-gray-200 dark:bg-gray-700 rounded-xl" />
-        <div className="h-48 bg-gray-200 dark:bg-gray-700 rounded-xl" />
+        <div className="h-56 bg-gray-200 dark:bg-gray-700 rounded-xl" />
       </div>
     );
   }
 
   const connected = Boolean(status?.connected);
+  const summary = perf?.summary;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {error && (
         <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm">
           {error}
@@ -179,11 +249,10 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
       )}
 
       {!connected && (
-        <section className="glass-card neon-glow rounded-xl p-4 space-y-3 border border-violet-400/30">
+        <section className="glass-card rounded-xl p-5 space-y-3 border border-violet-400/25">
           <h3 className="text-base font-semibold text-gray-900 dark:text-gray-100">Connect Instagram</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
-            Pull real content performance (reach, saves, engagement) so Marketing Intel can show what&apos;s working
-            and ground new ideas in results. Requires a Business or Creator account.
+            Pull reach, saves, and engagement so this dashboard can compare periods and ground ideas in real winners.
           </p>
           {!(status?.composio_configured ?? status?.configured) ? (
             <p className="text-xs text-amber-700 dark:text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
@@ -208,32 +277,59 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
 
       {connected && (
         <>
-          <section className="glass-card rounded-xl p-3.5 sm:p-4 flex flex-wrap items-center gap-2.5 justify-between">
+          <section className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">
+              <p className="text-base font-semibold text-gray-900 dark:text-gray-100 truncate">
                 @{status?.username || 'Instagram'}
-                <span className="text-xs font-normal text-gray-500 ml-1.5">
-                  {status?.followers_count != null ? `· ${fmtNum(status.followers_count)} followers` : ''}
-                </span>
+                {status?.followers_count != null ? (
+                  <span className="text-sm font-normal text-gray-500 ml-2">
+                    {fmtNum(status.followers_count)} followers
+                  </span>
+                ) : null}
               </p>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
                 Last sync:{' '}
                 {status?.last_sync_at ? new Date(status.last_sync_at).toLocaleString() : 'pending'}
-                {' · '}Auto-updates daily in the background
+                {' · '}Auto-checks daily (manual sync limited)
               </p>
             </div>
             <div className="flex items-center flex-wrap gap-2">
+              <label className="text-[11px] text-gray-500 font-medium">Period</label>
               <select
                 value={days}
                 onChange={(e) => setDays(Number(e.target.value))}
-                className="text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-2 py-1.5"
+                className="text-xs rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-2.5 py-1.5"
               >
+                <option value={7}>7 days</option>
                 <option value={30}>30 days</option>
                 <option value={90}>90 days</option>
                 <option value={180}>180 days</option>
               </select>
+              <button
+                type="button"
+                onClick={() => void handleSync()}
+                disabled={busy === 'sync' || cooldownRemainingSec > 0}
+                title={
+                  cooldownRemainingSec > 0
+                    ? `Available again in ${Math.ceil(cooldownRemainingSec / 60)} min`
+                    : 'Queue a background Instagram sync'
+                }
+                className="glass-button-secondary px-3 py-1.5 text-xs font-medium rounded-lg disabled:opacity-50"
+              >
+                {busy === 'sync'
+                  ? 'Queuing…'
+                  : cooldownRemainingSec > 0
+                  ? `Sync in ${Math.ceil(cooldownRemainingSec / 60)}m`
+                  : 'Sync now'}
+              </button>
             </div>
           </section>
+
+          {syncMessage ? (
+            <p className="text-xs text-violet-700 dark:text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded-lg px-3 py-2">
+              {syncMessage}
+            </p>
+          ) : null}
 
           {status?.capabilities?.reason ? (
             <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
@@ -243,41 +339,86 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
 
           {(perf?.unsettled_post_count || 0) > 0 ? (
             <p className="text-xs text-sky-800 dark:text-sky-200 bg-sky-500/10 border border-sky-500/20 rounded-lg px-3 py-2">
-              {perf!.unsettled_post_count} recent post{perf!.unsettled_post_count === 1 ? '' : 's'} still settling —
-              Instagram insights can lag ~48 hours.
+              {perf!.unsettled_post_count} recent post{perf!.unsettled_post_count === 1 ? '' : 's'} may still be
+              filling in — Instagram insights can lag up to ~48 hours. Sync again later if reach/views look empty
+              on brand-new posts.
             </p>
           ) : null}
 
-          {perf?.summary ? (
-            <section className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-              {(
-                [
-                  ['Reach', perf.summary.reach, perf.summary.reach_delta_pct, 'reach'],
-                  ['Views', perf.summary.views, perf.summary.views_delta_pct, 'views'],
-                  ['Saves', perf.summary.saved, perf.summary.saved_delta_pct, 'saved'],
-                  ['Eng. rate', perf.summary.engagement_rate_pct, perf.summary.engagement_rate_delta_pct, 'engagement_rate_pct'],
-                  ['Followers Δ', perf.summary.follower_growth, null, null],
-                ] as const
-              ).map(([label, value, delta, sparkKey]) => (
-                <div key={label} className="glass-card rounded-xl p-3 space-y-1">
-                  <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">{label}</p>
-                  <div className="flex items-baseline gap-2">
-                    <p className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                      {label === 'Eng. rate' && value != null ? `${Number(value).toFixed(1)}%` : fmtNum(value as number)}
+          {summary ? (
+            <section className="space-y-2">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Period comparison</h3>
+                <p className="text-[11px] text-gray-500">
+                  Current {days}d vs previous {days}d ({compareLabel})
+                </p>
+              </div>
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                {(
+                  [
+                    {
+                      label: 'Reach',
+                      cur: summary.reach,
+                      prev: summary.prev_reach,
+                      delta: summary.reach_delta_pct,
+                      fmt: (v: number | null | undefined) => fmtNum(v),
+                    },
+                    {
+                      label: 'Views',
+                      cur: summary.views,
+                      prev: summary.prev_views,
+                      delta: summary.views_delta_pct,
+                      fmt: (v: number | null | undefined) => fmtNum(v),
+                    },
+                    {
+                      label: 'Saves',
+                      cur: summary.saved,
+                      prev: summary.prev_saved,
+                      delta: summary.saved_delta_pct,
+                      fmt: (v: number | null | undefined) => fmtNum(v),
+                    },
+                    {
+                      label: 'Eng. rate',
+                      cur: summary.engagement_rate_pct,
+                      prev: summary.prev_engagement_rate_pct,
+                      delta: summary.engagement_rate_delta_pct,
+                      fmt: (v: number | null | undefined) =>
+                        v == null ? '—' : `${Number(v).toFixed(1)}%`,
+                    },
+                    {
+                      label: 'Posts',
+                      cur: summary.posts,
+                      prev: summary.prev_period_posts,
+                      delta: null,
+                      fmt: (v: number | null | undefined) => fmtNum(v),
+                    },
+                  ] as const
+                ).map((m) => (
+                  <div key={m.label} className="glass-card rounded-xl p-3.5 space-y-1.5">
+                    <p className="text-[10px] uppercase tracking-wide text-gray-500 font-semibold">{m.label}</p>
+                    <div className="flex items-baseline gap-2">
+                      <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{m.fmt(m.cur)}</p>
+                      <Delta value={m.delta} />
+                    </div>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                      Prior: {m.fmt(m.prev)}
                     </p>
-                    <Delta value={delta as number | null | undefined} />
                   </div>
-                  {sparkKey && perf.trend?.length ? (
-                    <Sparkline points={perf.trend} metric={sparkKey} />
-                  ) : (
-                    <div className="h-8" />
-                  )}
-                </div>
-              ))}
+                ))}
+              </div>
+              {summary.follower_growth != null ? (
+                <p className="text-[11px] text-gray-500">
+                  Followers change in window:{' '}
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">
+                    {summary.follower_growth >= 0 ? '+' : ''}
+                    {fmtNum(summary.follower_growth)}
+                  </span>
+                </p>
+              ) : null}
             </section>
           ) : null}
 
-          {(trendSeries || []).length > 1 ? (
+          {trendSeries.length > 1 ? (
             <section className="glass-card rounded-xl p-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Weekly trend</h3>
@@ -287,7 +428,7 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
                       key={m}
                       type="button"
                       onClick={() => setTrendMetric(m)}
-                      className={`text-[10px] px-2 py-1 rounded-full font-semibold ${
+                      className={`text-[10px] px-2 py-1 rounded-md font-semibold ${
                         trendMetric === m
                           ? 'bg-violet-500/20 text-violet-700 dark:text-violet-300'
                           : 'text-gray-500 hover:bg-gray-500/10'
@@ -298,8 +439,7 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
                   ))}
                 </div>
               </div>
-
-              <div className="h-56 w-full">
+              <div className="h-52 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={trendSeries} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
                     <CartesianGrid strokeDasharray="3 3" className="stroke-gray-200 dark:stroke-white/10" />
@@ -330,7 +470,6 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
-
               {(perf?.flags || []).length > 0 ? (
                 <ul className="space-y-1 pt-2 border-t border-gray-200/40 dark:border-gray-700/40">
                   {perf!.flags.map((f) => (
@@ -344,106 +483,30 @@ export default function PerformanceTab({ onGoToIdeas }: PerformanceTabProps) {
             </section>
           ) : null}
 
-          {(perf?.verdicts || []).length > 0 ? (
-            <section className="glass-card neon-glow rounded-xl p-4 space-y-2 border border-violet-400/25">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">What to do next</h3>
-              <p className="text-[11px] text-gray-500 dark:text-gray-400 leading-snug">
-                One action each for awareness level, format, and hook style. Early signals are marked when sample size is thin.
-              </p>
-              <ul className="space-y-2">
-                {perf!.verdicts.map((v, i) => (
-                  <li key={i} className="text-sm text-gray-800 dark:text-gray-200 leading-snug flex gap-2">
-                    <span className="text-violet-500 font-bold shrink-0">→</span>
-                    <span>{v}</span>
-                  </li>
+          <section className="space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Top posts</h3>
+            {(perf?.top_posts || []).length ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {(perf?.top_posts || []).slice(0, 5).map((p) => (
+                  <PostMediaCard key={p.ig_media_id} post={p} />
                 ))}
-              </ul>
-              {onGoToIdeas ? (
-                <button
-                  type="button"
-                  onClick={onGoToIdeas}
-                  className="text-xs font-semibold text-violet-600 dark:text-violet-400 underline"
-                >
-                  Generate ideas from these winners →
-                </button>
-              ) : null}
-            </section>
-          ) : null}
-
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            {actionRows.map((row) => (
-              <div key={row.id} className="glass-card rounded-xl p-4 space-y-2 border border-gray-300/20">
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">{row.label}</h3>
-                <div className="text-xs space-y-1.5">
-                  <p className="text-emerald-700 dark:text-emerald-300">
-                    <span className="font-semibold">What&apos;s working:</span>{' '}
-                    {row.best?.summary || 'Not enough posts yet.'}
-                  </p>
-                  <p className="text-sky-700 dark:text-sky-300">
-                    <span className="font-semibold">What to test next:</span>{' '}
-                    {row.worst
-                      ? `Test a new variation of ${row.worst.value_label || row.worst.value} to improve results in this dimension.`
-                      : 'No clear gap yet — keep scaling the current winner while testing one variant.'}
-                  </p>
-                </div>
               </div>
-            ))}
+            ) : (
+              <p className="text-sm text-gray-500">No ranked posts in this period yet.</p>
+            )}
           </section>
 
           <section className="space-y-3">
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Top posts</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-              {(perf?.top_posts || []).slice(0, 8).map((p) => (
-                <a
-                  key={p.ig_media_id}
-                  href={p.permalink || '#'}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="glass-card rounded-xl overflow-hidden hover:ring-2 hover:ring-violet-400/40 transition"
-                >
-                  {p.thumbnail_url ? (
-                    <img src={p.thumbnail_url} alt="" className="w-full h-28 object-cover bg-gray-200 dark:bg-gray-800" />
-                  ) : (
-                    <div className="w-full h-28 bg-gray-200 dark:bg-gray-800" />
-                  )}
-                  <div className="p-3 space-y-1">
-                    <p className="text-[10px] uppercase text-gray-500 font-semibold">
-                      {p.format_bucket || 'post'} · {p.engagement_rate_pct != null ? `${p.engagement_rate_pct.toFixed(1)}% eng` : '—'}
-                    </p>
-                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100 line-clamp-2">
-                      {p.hook_text || p.caption || 'Untitled'}
-                    </p>
-                    <p className="text-[10px] text-gray-500">
-                      {fmtNum(p.reach)} reach · {fmtNum(p.saved)} saves
-                    </p>
-                  </div>
-                </a>
-              ))}
-            </div>
-
-            {(perf?.bottom_posts || []).length > 0 ? (
-              <>
-                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 pt-2">Underperformers</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {perf!.bottom_posts.slice(0, 3).map((p) => (
-                    <a
-                      key={p.ig_media_id}
-                      href={p.permalink || '#'}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="glass-card rounded-xl p-3 space-y-1 border border-rose-400/15"
-                    >
-                      <p className="text-[10px] uppercase text-rose-500 font-semibold">
-                        {p.format_bucket} · {p.engagement_rate_pct != null ? `${p.engagement_rate_pct.toFixed(1)}%` : '—'}
-                      </p>
-                      <p className="text-xs text-gray-800 dark:text-gray-200 line-clamp-2">
-                        {p.hook_text || p.caption || 'Untitled'}
-                      </p>
-                    </a>
-                  ))}
-                </div>
-              </>
-            ) : null}
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Underperformers</h3>
+            {(perf?.bottom_posts || []).length ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                {(perf?.bottom_posts || []).slice(0, 5).map((p) => (
+                  <PostMediaCard key={p.ig_media_id} post={p} tone="under" />
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">Not enough posts to rank underperformers yet.</p>
+            )}
           </section>
         </>
       )}

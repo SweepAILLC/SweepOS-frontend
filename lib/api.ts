@@ -374,6 +374,13 @@ export interface InstagramPerformance {
     followers_count?: number | null;
     follower_growth?: number | null;
     prev_period_posts?: number;
+    prev_reach?: number | null;
+    prev_views?: number | null;
+    prev_saved?: number | null;
+    prev_engagement_rate_pct?: number | null;
+    comparison_label?: string | null;
+    prev_range_start?: string | null;
+    prev_range_end?: string | null;
   } | null;
   trend: InstagramTrendPoint[];
   top_posts: InstagramPostCard[];
@@ -767,6 +774,13 @@ export interface PortalSharedPadSummary {
 
 export const MAX_PORTAL_SHARED_PADS = 10;
 
+export interface PortalSharedPadDefault {
+  title: string;
+  content: string;
+  updated_by_name: string | null;
+  updated_at: string | null;
+}
+
 class ApiClient {
   private client: AxiosInstance;
 
@@ -880,6 +894,14 @@ class ApiClient {
       const response = await this.client.get('/auth/me');
       return response.data;
     });
+  }
+
+  async pingActivityHeartbeat(): Promise<void> {
+    try {
+      await this.client.post('/users/me/activity-heartbeat');
+    } catch {
+      // Non-blocking — don't interrupt the session if tracking fails.
+    }
   }
 
   /** Refresh session (sliding window). Call when same tab is active to avoid re-login. */
@@ -2489,6 +2511,25 @@ class ApiClient {
     return data;
   }
 
+  async listOwnerNotices() {
+    const response = await this.client.get('/admin/notices');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async sendOwnerNotice(data: { title: string; body: string; org_ids?: string[] }) {
+    const response = await this.client.post('/admin/notices', data);
+    return response.data;
+  }
+
+  async listPortalNotices() {
+    const response = await this.client.get('/portal/notices');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async markPortalNoticeRead(noticeId: string) {
+    await this.client.post(`/portal/notices/${noticeId}/read`);
+  }
+
   async getOrganizationDashboard(
     orgId: string,
     params?: { range?: number; scope?: 'mtd' | 'all' }
@@ -2730,10 +2771,17 @@ class ApiClient {
     return response.data;
   }
 
-  async postInstagramSync(full = false): Promise<{ ok: boolean; result: Record<string, unknown>; message?: string }> {
+  async postInstagramSync(full = false): Promise<{
+    ok: boolean;
+    queued?: boolean;
+    result: Record<string, unknown>;
+    message?: string;
+    cooldown_seconds?: number | null;
+    last_sync_at?: string | null;
+  }> {
     const response = await this.client.post('/instagram/sync', null, {
       params: { full },
-      timeout: 180000,
+      timeout: 30000,
     });
     return response.data;
   }
@@ -3319,6 +3367,21 @@ class ApiClient {
     });
   }
 
+  async getPortalSharedPadDefault(): Promise<PortalSharedPadDefault> {
+    const response = await this.client.get('/admin/portal-shared-pad-default', { timeout: 8000 });
+    return response.data as PortalSharedPadDefault;
+  }
+
+  async putPortalSharedPadDefault(data: {
+    title: string;
+    content: string;
+  }): Promise<PortalSharedPadDefault> {
+    const response = await this.client.put('/admin/portal-shared-pad-default', data, {
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPadDefault;
+  }
+
   /** @deprecated Prefer getPortalSharedPadById */
   async getPortalSharedPad(sinceRevision?: number): Promise<PortalSharedPad> {
     const response = await this.client.get('/portal/shared-pad', {
@@ -3481,6 +3544,68 @@ class ApiClient {
   ): Promise<import('@/types/kpi').KpiDailyEntry> {
     const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data);
     return response.data;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Funnel Simulator (consulting portal)
+  // ---------------------------------------------------------------------------
+
+  async getFunnelSimulatorBaselines(params?: {
+    days?: number;
+    mtd?: boolean;
+    funnel_id?: string | null;
+  }): Promise<import('@/types/funnelSimulator').FunnelSimulatorBaselines> {
+    const response = await this.client.get('/portal/funnel-simulator/baselines', {
+      params: {
+        days: params?.mtd ? undefined : params?.days ?? 90,
+        mtd: params?.mtd ? true : undefined,
+        funnel_id: params?.funnel_id || undefined,
+      },
+      timeout: 20000,
+    });
+    return response.data;
+  }
+
+  async listFunnelSimulatorScenarios(): Promise<
+    import('@/types/funnelSimulator').FunnelSimulatorScenario[]
+  > {
+    const response = await this.client.get('/portal/funnel-simulator/scenarios', { timeout: 8000 });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async listAdminOrgFunnelSimulatorScenarios(
+    orgId: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
+    const response = await this.client.get(
+      `/admin/organizations/${orgId}/funnel-simulator/scenarios`,
+      { timeout: 8000 }
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async createFunnelSimulatorScenario(
+    data: import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
+    const response = await this.client.post('/portal/funnel-simulator/scenarios', {
+      ...data,
+      lookback_days: String(data.lookback_days),
+    });
+    return response.data;
+  }
+
+  async updateFunnelSimulatorScenario(
+    id: string,
+    data: Partial<import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite>
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
+    const response = await this.client.patch(`/portal/funnel-simulator/scenarios/${id}`, {
+      ...data,
+      lookback_days: data.lookback_days != null ? String(data.lookback_days) : undefined,
+    });
+    return response.data;
+  }
+
+  async deleteFunnelSimulatorScenario(id: string): Promise<void> {
+    await this.client.delete(`/portal/funnel-simulator/scenarios/${id}`);
   }
 
   async getCloseSurveyEntryLink(regenerate = false): Promise<import('@/types/closeSurvey').CloseSurveyEntryLinkResponse> {

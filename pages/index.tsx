@@ -354,8 +354,8 @@ export default function Dashboard() {
         } else if (tabValue === 'kpi_command_center' && viewParam) {
           // Leave ?tab=&view= for KpiCommandCenterPanel — do not replace (avoids re-trigger loops).
         } else if (tabValue === 'content_studio') {
-          // Keep ?tab=content_studio&sub=… for Marketing Intel (Performance | Ideas | Signals).
-          // Stripping the query here snapped every sub-tab click back to Performance.
+          // Keep ?tab=content_studio&sub=… for Marketing Intel (Overview | Signals).
+          // Stripping the query here snapped every sub-tab click back to Overview.
         } else {
           lastConsumedDeepLinkRef.current = null;
           router.replace('/', undefined, { shallow: true });

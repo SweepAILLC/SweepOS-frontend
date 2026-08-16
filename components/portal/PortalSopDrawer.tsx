@@ -19,6 +19,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { apiClient } from '@/lib/api';
+import { MAIN_ORG_ID } from '@/lib/orgScope';
 import {
   RESOURCE_MD_STYLES,
   SOP_CATEGORY_COLORS,
@@ -48,6 +49,8 @@ type PortalSopDrawerProps = {
   isActive?: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When true, system owners in Sweep Internal can create/edit/reorder SOPs. Client portals must leave this off. */
+  allowManage?: boolean;
 };
 
 type SopGroupKey = SopCategory | 'uncategorized';
@@ -295,6 +298,7 @@ export default function PortalSopDrawer({
   isActive = true,
   open,
   onOpenChange,
+  allowManage = false,
 }: PortalSopDrawerProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -304,7 +308,7 @@ export default function PortalSopDrawer({
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [contentLoading, setContentLoading] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [isSystemOwner, setIsSystemOwner] = useState(false);
+  const [canManage, setCanManage] = useState(false);
   const [manageOpen, setManageOpen] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
   const [editResource, setEditResource] = useState<Resource | null>(null);
@@ -333,21 +337,26 @@ export default function PortalSopDrawer({
   }, [isActive, loadDocs]);
 
   useEffect(() => {
+    if (!allowManage) {
+      setCanManage(false);
+      return;
+    }
     let cancelled = false;
     apiClient
       .getCurrentUser()
       .then((user) => {
-        if (!cancelled) {
-          setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
-        }
+        if (cancelled) return;
+        const isOwner = Boolean((user as { is_system_owner?: boolean }).is_system_owner);
+        const orgId = String((user as { org_id?: string }).org_id || '');
+        setCanManage(isOwner && orgId === MAIN_ORG_ID);
       })
       .catch(() => {
-        if (!cancelled) setIsSystemOwner(false);
+        if (!cancelled) setCanManage(false);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [allowManage]);
 
   const sops = useMemo(() => {
     const all = mergeDocsWithAiSkills(docs).filter(isSopResource);
@@ -373,7 +382,7 @@ export default function PortalSopDrawer({
     return byCat;
   }, [sops]);
 
-  const canReorder = isSystemOwner && !search.trim() && !reordering;
+  const canReorder = canManage && !search.trim() && !reordering;
 
   const persistFullOrder = useCallback(
     async (nextGrouped: Map<SopGroupKey, Resource[]>) => {
@@ -544,7 +553,7 @@ export default function PortalSopDrawer({
                 </h3>
                 {!activeSop ? (
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
-                    {isSystemOwner
+                    {canManage
                       ? 'Drag handles to reorder · notes stay open'
                       : 'Foundations → Operations · notes stay open'}
                   </p>
@@ -619,7 +628,7 @@ export default function PortalSopDrawer({
                   )}
                 </div>
 
-                {isSystemOwner ? (
+                {canManage ? (
                   <div className="flex-shrink-0 border-t border-gray-200 dark:border-white/10">
                     <button
                       type="button"
@@ -639,7 +648,7 @@ export default function PortalSopDrawer({
                     {manageOpen ? (
                       <div className="px-3 pb-3 space-y-2">
                         <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                          Create, edit, and drag-reorder platform SOPs shown to every org in this drawer.
+                          Edits here are the global SOP library. Every org sees this Sweep Internal version.
                         </p>
                         <button
                           type="button"
@@ -683,7 +692,7 @@ export default function PortalSopDrawer({
                   >
                     {copied ? 'Copied' : 'Copy'}
                   </button>
-                  {isSystemOwner ? (
+                  {canManage ? (
                     <button
                       type="button"
                       onClick={() => setEditResource(activeSop)}
@@ -730,14 +739,14 @@ export default function PortalSopDrawer({
         )}
       </aside>
 
-      {showCreate && isSystemOwner ? (
+      {showCreate && canManage ? (
         <CreateSopModal onClose={() => setShowCreate(false)} onCreated={(id) => void handleCreated(id)} />
       ) : null}
 
       {editResource ? (
         <ResourceModal
           resource={editResource}
-          canEditDocs={isSystemOwner}
+          canEditDocs={canManage}
           onClose={() => setEditResource(null)}
           onSaved={async () => {
             await loadDocs();

@@ -71,10 +71,10 @@ interface AIProfile {
   business_description?: string;
   target_audience?: string;
   unique_selling_proposition?: string;
+  personal_story?: string;
+  mission_statement?: string;
   sales_framework?: string;
   sales_tactics?: string;
-  marketing_strategy?: string;
-  marketing_channels?: string;
   pipeline_priorities?: string[];
   asset_links?: AssetLink[];
   offer_ladder?: OfferLadder;
@@ -87,7 +87,7 @@ type SectionId =
   | 'business'
   | 'offers'
   | 'sales'
-  | 'marketing'
+  | 'brand'
   ;
 
 const MAX_WRITING_SAMPLES = 12;
@@ -102,7 +102,7 @@ const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
   { id: 'business', title: 'Your Business', subtitle: 'Help the AI understand what you do' },
   { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, upsells and add-ons, and referral offer' },
   { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
-  { id: 'marketing', title: 'Marketing', subtitle: 'How you attract and nurture prospects' },
+  { id: 'brand', title: 'Your Brand', subtitle: 'USP, story, and mission that shape your voice' },
 ];
 
 const WRITING_STYLE_OPTIONS = [
@@ -410,7 +410,7 @@ export default function IntelligencePanel({
                   case 'samples': return (profile.writing_samples || []).some(
                     (s) => (s.body || '').trim().length > 0 || (s.html_template || '').trim().length > 0
                   );
-                  case 'business': return !!(profile.business_description || profile.target_audience || profile.unique_selling_proposition);
+                  case 'business': return !!(profile.business_description || profile.target_audience);
                   case 'offers': {
                     const l = profile.offer_ladder;
                     return !!(
@@ -422,7 +422,11 @@ export default function IntelligencePanel({
                     );
                   }
                   case 'sales': return !!(profile.sales_framework || profile.sales_tactics);
-                  case 'marketing': return !!(profile.marketing_strategy || profile.marketing_channels);
+                  case 'brand': return !!(
+                    profile.unique_selling_proposition ||
+                    profile.personal_story ||
+                    profile.mission_statement
+                  );
                   default: return false;
                 }
               })();
@@ -841,17 +845,6 @@ export default function IntelligencePanel({
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">What makes you different? (USP)</label>
-                  <textarea
-                    value={profile.unique_selling_proposition || ''}
-                    onChange={(e) => update('unique_selling_proposition', e.target.value)}
-                    rows={2}
-                    placeholder="e.g. Medically-informed programming, direct access to me via Voxer, and a money-back guarantee if you don't see results in 8 weeks."
-                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
               </>
             )}
 
@@ -1126,32 +1119,45 @@ export default function IntelligencePanel({
               </>
             )}
 
-            {/* ── Marketing ── */}
-            {activeSection === 'marketing' && (
+            {/* ── Your Brand ── */}
+            {activeSection === 'brand' && (
               <>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Marketing</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Helps the AI craft nurture sequences and suggest outreach that fits your brand and channels.</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Brand</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Anchors copy, content, and outreach in what makes you distinct — your edge, your story, and your mission.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Marketing strategy overview</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">USP</label>
                   <textarea
-                    value={profile.marketing_strategy || ''}
-                    onChange={(e) => update('marketing_strategy', e.target.value)}
+                    value={profile.unique_selling_proposition || ''}
+                    onChange={(e) => update('unique_selling_proposition', e.target.value)}
                     rows={3}
-                    placeholder="e.g. Content marketing via Instagram Reels + email nurture. I post 5x/week and run a weekly newsletter. My funnel is: IG → freebie opt-in → email sequence → sales call."
+                    placeholder="e.g. Medically-informed programming, direct access to me via Voxer, and a money-back guarantee if you don't see results in 8 weeks."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Primary channels</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Personal story</label>
                   <textarea
-                    value={profile.marketing_channels || ''}
-                    onChange={(e) => update('marketing_channels', e.target.value)}
-                    rows={2}
-                    placeholder="e.g. Instagram, email (Brevo), TikTok, podcast guest appearances, Facebook group"
+                    value={profile.personal_story || ''}
+                    onChange={(e) => update('personal_story', e.target.value)}
+                    rows={5}
+                    placeholder="e.g. I burned out as a corporate trainer, rebuilt my health after my second child, and now help other moms do the same without all-or-nothing plans."
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mission statement</label>
+                  <textarea
+                    value={profile.mission_statement || ''}
+                    onChange={(e) => update('mission_statement', e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Help busy parents reclaim strength and confidence with coaching that fits real life — not another unsustainable grind."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

@@ -18,11 +18,14 @@ import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import { CashAndLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
+import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
+import OrgFunnelSimulatorSnapshots from '@/components/owner/OrgFunnelSimulatorSnapshots';
 import {
   type DashboardTimeRange,
   dashboardPeriodLabel,
 } from '@/lib/dashboardTimeRange';
 import ShinyButton from '@/components/ui/ShinyButton';
+import ToggleSwitch from '@/components/ui/ToggleSwitch';
 
 const LIVE_POLL_MS = 30000;
 
@@ -353,6 +356,8 @@ export default function OrgOwnerDashboardModal({
       </header>
 
       <div className="space-y-5">
+          <OrgNoticeComposer orgId={orgId} />
+
           {/* Shared space — top for quick access */}
           <SharedTypingPad
             orgId={orgId}
@@ -379,29 +384,39 @@ export default function OrgOwnerDashboardModal({
                   {savingSeats ? 'Saving…' : 'Save seats'}
                 </ShinyButton>
               </div>
-              <select
-                value={consultingTierInput}
-                onChange={(e) =>
-                  setConsultingTierInput(
-                    e.target.value as '' | 'pro_consulting' | 'core_consulting'
-                  )
-                }
-                className="w-full px-3 py-2 glass-input rounded-md text-sm"
-              >
-                <option value="">No consulting tier</option>
-                <option value="core_consulting">Core Consulting</option>
-                <option value="pro_consulting">Pro Consulting</option>
-              </select>
-              <input
-                type="url"
-                value={bookingUrlInput}
-                onChange={(e) => setBookingUrlInput(e.target.value)}
-                placeholder="https://cal.com/your-user/30min"
-                className="w-full px-3 py-2 glass-input rounded-md text-sm"
-              />
-              <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                Cal.com event link — embedded in the org portal so teams can book in-place.
-              </p>
+              <div className="flex items-center justify-between gap-3 py-1">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Consulting</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    Turns on the org portal and booking embed.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={Boolean(consultingTierInput)}
+                  onChange={(on) =>
+                    setConsultingTierInput(on ? consultingTierInput || 'core_consulting' : '')
+                  }
+                  onLabel="On"
+                  offLabel="Off"
+                />
+              </div>
+              {consultingTierInput ? (
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
+                    Consultant booking link
+                  </label>
+                  <input
+                    type="url"
+                    value={bookingUrlInput}
+                    onChange={(e) => setBookingUrlInput(e.target.value)}
+                    placeholder="https://cal.com/your-user/30min"
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm"
+                  />
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                    General Cal.com (or similar) event link — embedded in the org portal so teams can book in-place.
+                  </p>
+                </div>
+              ) : null}
               <ShinyButton
                 onClick={onSaveConsulting}
                 disabled={savingConsulting}
@@ -442,6 +457,8 @@ export default function OrgOwnerDashboardModal({
               )}
             </section>
           </div>
+
+          <OrgFunnelSimulatorSnapshots orgId={orgId} />
 
           {/* KPI Snapshot for this org */}
           <PortalKpiSnapshot isActive orgId={orgId} />
