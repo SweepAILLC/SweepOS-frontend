@@ -24,8 +24,8 @@ import type {
   SimulatorMode,
 } from '@/types/funnelSimulator';
 
-function lastScenarioKey(): string {
-  return `sweepos:funnel-simulator:last-scenario:${orgIdFromAccessToken()}`;
+function lastScenarioKey(orgId?: string): string {
+  return `sweepos:funnel-simulator:last-scenario:${orgId || orgIdFromAccessToken()}`;
 }
 
 function applyHistoric(
@@ -54,7 +54,15 @@ function applyHistoric(
   return { paid, organic };
 }
 
-type Props = { onClose: () => void };
+type Props = {
+  onClose: () => void;
+  /** When set, load/save scenarios for this org via admin APIs (owner dashboard). */
+  orgId?: string;
+  /** Open with this saved scenario selected. */
+  initialScenarioId?: string;
+  /** Skip restoring the last localStorage scenario (owner “New snapshot”). */
+  startFresh?: boolean;
+};
 
 function NumField({
   label,
@@ -173,7 +181,12 @@ function fieldHint(field: BaselineField | undefined): string | undefined {
   return undefined;
 }
 
-export default function FunnelSimulatorModal({ onClose }: Props) {
+export default function FunnelSimulatorModal({
+  onClose,
+  orgId,
+  initialScenarioId,
+  startFresh,
+}: Props) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<SimulatorMode>('paid_vsl');
@@ -208,17 +221,24 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
 
   const loadScenarios = useCallback(async () => {
     try {
-      const rows = await apiClient.listFunnelSimulatorScenarios();
+      const rows = await apiClient.listFunnelSimulatorScenarios(orgId);
       setScenarios(rows);
-      const last = typeof window !== 'undefined' ? window.localStorage.getItem(lastScenarioKey()) : null;
-      if (last && rows.some((r) => r.id === last)) {
-        const row = rows.find((r) => r.id === last)!;
-        applyScenario(row);
-      }
+      const preferred =
+        (initialScenarioId && rows.find((r) => r.id === initialScenarioId)) ||
+        (!startFresh
+          ? (() => {
+              const last =
+                typeof window !== 'undefined'
+                  ? window.localStorage.getItem(lastScenarioKey(orgId))
+                  : null;
+              return last ? rows.find((r) => r.id === last) : undefined;
+            })()
+          : undefined);
+      if (preferred) applyScenario(preferred);
     } catch {
       setScenarios([]);
     }
-  }, []);
+  }, [orgId, initialScenarioId, startFresh]);
 
   const loadBaselines = useCallback(async () => {
     setLoadingBaselines(true);
@@ -228,6 +248,7 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
         days: lookback === 'mtd' ? 30 : lookback,
         mtd: lookback === 'mtd',
         funnel_id: funnelId || null,
+        orgId,
       });
       setBaselines(data);
       if (!appliedOnce.current) {
@@ -243,7 +264,7 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
     } finally {
       setLoadingBaselines(false);
     }
-  }, [funnelId, lookback]);
+  }, [funnelId, lookback, orgId]);
 
   useEffect(() => {
     void loadScenarios();
@@ -278,7 +299,7 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
     if (row.inputs?.organic) next.organic = { ...next.organic, ...row.inputs.organic };
     setInputs(next);
     try {
-      window.localStorage.setItem(lastScenarioKey(), row.id);
+      window.localStorage.setItem(lastScenarioKey(orgId), row.id);
     } catch {
       /* ignore */
     }
@@ -297,16 +318,16 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
     };
     try {
       if (scenarioId) {
-        const row = await apiClient.updateFunnelSimulatorScenario(scenarioId, payload);
+        const row = await apiClient.updateFunnelSimulatorScenario(scenarioId, payload, orgId);
         setScenarios((prev) => prev.map((s) => (s.id === row.id ? row : s)));
         setScenarioName(row.name);
       } else {
-        const row = await apiClient.createFunnelSimulatorScenario(payload);
+        const row = await apiClient.createFunnelSimulatorScenario(payload, orgId);
         setScenarios((prev) => [row, ...prev]);
         setScenarioId(row.id);
         setScenarioName(row.name);
         try {
-          window.localStorage.setItem(lastScenarioKey(), row.id);
+          window.localStorage.setItem(lastScenarioKey(orgId), row.id);
         } catch {
           /* ignore */
         }
@@ -334,12 +355,12 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
         funnel_id: funnelId || null,
         lookback_days: lookback,
         inputs,
-      });
+      }, orgId);
       setScenarios((prev) => [row, ...prev]);
       setScenarioId(row.id);
       setScenarioName(row.name);
       try {
-        window.localStorage.setItem(lastScenarioKey(), row.id);
+        window.localStorage.setItem(lastScenarioKey(orgId), row.id);
       } catch {
         /* ignore */
       }
@@ -359,12 +380,12 @@ export default function FunnelSimulatorModal({ onClose }: Props) {
     if (!window.confirm('Delete this scenario?')) return;
     setSaving(true);
     try {
-      await apiClient.deleteFunnelSimulatorScenario(scenarioId);
+      await apiClient.deleteFunnelSimulatorScenario(scenarioId, orgId);
       setScenarios((prev) => prev.filter((s) => s.id !== scenarioId));
       setScenarioId('');
       setScenarioName('Untitled');
       try {
-        window.localStorage.removeItem(lastScenarioKey());
+        window.localStorage.removeItem(lastScenarioKey(orgId));
       } catch {
         /* ignore */
       }

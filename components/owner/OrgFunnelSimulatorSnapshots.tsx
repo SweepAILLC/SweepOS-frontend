@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import {
   calculateOrganicDm,
@@ -9,6 +9,8 @@ import {
   formatUsd,
 } from '@/lib/funnelSimulator';
 import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
+import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
+import ShinyButton from '@/components/ui/ShinyButton';
 
 type Props = {
   orgId: string;
@@ -44,48 +46,71 @@ function Metric({ label, value, positive }: { label: string; value: string; posi
 export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
   const [rows, setRows] = useState<FunnelSimulatorScenario[]>([]);
   const [loading, setLoading] = useState(true);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [editScenarioId, setEditScenarioId] = useState<string | undefined>(undefined);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await apiClient.listFunnelSimulatorScenarios(orgId);
+      setRows(Array.isArray(list) ? list : []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgId]);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void (async () => {
-      try {
-        const list = await apiClient.listAdminOrgFunnelSimulatorScenarios(orgId);
-        if (!cancelled) setRows(Array.isArray(list) ? list : []);
-      } catch {
-        if (!cancelled) setRows([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [orgId]);
+    void load();
+  }, [load]);
+
+  const openNew = () => {
+    setEditScenarioId(undefined);
+    setSimulatorOpen(true);
+  };
+
+  const openExisting = (id: string) => {
+    setEditScenarioId(id);
+    setSimulatorOpen(true);
+  };
+
+  const closeSimulator = () => {
+    setSimulatorOpen(false);
+    setEditScenarioId(undefined);
+    void load();
+  };
 
   return (
     <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
-          Funnel simulator snapshots
-        </h3>
-        <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-          Saved scenarios from this org’s consulting portal.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
+            Funnel simulator snapshots
+          </h3>
+          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+            Saved scenarios for this org. Create or edit from here — clients also see them in their portal.
+          </p>
+        </div>
+        <ShinyButton onClick={openNew} className="px-3 py-1.5 text-sm">
+          New snapshot
+        </ShinyButton>
       </div>
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-500">No snapshots yet.</p>
+        <p className="text-sm text-gray-500">No snapshots yet. Create one to model this org’s funnel.</p>
       ) : (
         <div className="space-y-3">
           {rows.map((row) => {
             const out = scenarioOutputs(row);
             const paid = row.mode !== 'organic_dm';
             return (
-              <div
+              <button
                 key={row.id}
-                className="rounded-lg border border-gray-200/60 dark:border-white/10 px-3 py-3 space-y-2"
+                type="button"
+                onClick={() => openExisting(row.id)}
+                className="w-full text-left rounded-lg border border-gray-200/60 dark:border-white/10 px-3 py-3 space-y-2 hover:border-violet-400/50 dark:hover:border-violet-400/40"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.name}</p>
@@ -109,11 +134,19 @@ export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
                     <Metric label="Daily bookings" value={formatNum(out.organic.dailyBookings)} />
                   </div>
                 )}
-              </div>
+              </button>
             );
           })}
         </div>
       )}
+      {simulatorOpen ? (
+        <FunnelSimulatorModal
+          orgId={orgId}
+          initialScenarioId={editScenarioId}
+          startFresh={!editScenarioId}
+          onClose={closeSimulator}
+        />
+      ) : null}
     </section>
   );
 }

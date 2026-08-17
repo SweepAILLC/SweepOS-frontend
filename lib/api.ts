@@ -3554,8 +3554,13 @@ class ApiClient {
     days?: number;
     mtd?: boolean;
     funnel_id?: string | null;
+    orgId?: string;
   }): Promise<import('@/types/funnelSimulator').FunnelSimulatorBaselines> {
-    const response = await this.client.get('/portal/funnel-simulator/baselines', {
+    const orgId = params?.orgId;
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/baselines`
+      : '/portal/funnel-simulator/baselines';
+    const response = await this.client.get(path, {
       params: {
         days: params?.mtd ? undefined : params?.days ?? 90,
         mtd: params?.mtd ? true : undefined,
@@ -3566,10 +3571,13 @@ class ApiClient {
     return response.data;
   }
 
-  async listFunnelSimulatorScenarios(): Promise<
-    import('@/types/funnelSimulator').FunnelSimulatorScenario[]
-  > {
-    const response = await this.client.get('/portal/funnel-simulator/scenarios', { timeout: 8000 });
+  async listFunnelSimulatorScenarios(
+    orgId?: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.get(path, { timeout: 8000 });
     return Array.isArray(response.data) ? response.data : [];
   }
 
@@ -3584,9 +3592,13 @@ class ApiClient {
   }
 
   async createFunnelSimulatorScenario(
-    data: import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite
+    data: import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite,
+    orgId?: string
   ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
-    const response = await this.client.post('/portal/funnel-simulator/scenarios', {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.post(path, {
       ...data,
       lookback_days: String(data.lookback_days),
     });
@@ -3595,17 +3607,24 @@ class ApiClient {
 
   async updateFunnelSimulatorScenario(
     id: string,
-    data: Partial<import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite>
+    data: Partial<import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite>,
+    orgId?: string
   ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
-    const response = await this.client.patch(`/portal/funnel-simulator/scenarios/${id}`, {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
+      : `/portal/funnel-simulator/scenarios/${id}`;
+    const response = await this.client.patch(path, {
       ...data,
       lookback_days: data.lookback_days != null ? String(data.lookback_days) : undefined,
     });
     return response.data;
   }
 
-  async deleteFunnelSimulatorScenario(id: string): Promise<void> {
-    await this.client.delete(`/portal/funnel-simulator/scenarios/${id}`);
+  async deleteFunnelSimulatorScenario(id: string, orgId?: string): Promise<void> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
+      : `/portal/funnel-simulator/scenarios/${id}`;
+    await this.client.delete(path);
   }
 
   async getCloseSurveyEntryLink(regenerate = false): Promise<import('@/types/closeSurvey').CloseSurveyEntryLinkResponse> {
