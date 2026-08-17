@@ -70,7 +70,26 @@ function glanceAiSummary(report: Record<string, unknown> | null | undefined): st
 
 function glanceFathomSummary(report: Record<string, unknown> | null | undefined): string {
   if (!report || typeof report !== 'object') return '';
-  return String(report.fathom_summary || '').trim();
+  return cleanFathomSummaryText(String(report.fathom_summary || ''));
+}
+
+/** Unwrap Fathom timestamp markdown links into readable plain text. */
+function cleanFathomSummaryText(text: string): string {
+  if (!text) return '';
+  let out = text;
+  // [label](https://fathom.video/...) → label
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(/\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g, '$1');
+    if (next === out) break;
+    out = next;
+  }
+  out = out.replace(/https?:\/\/(?:www\.)?fathom\.video\/\S+/gi, '');
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
+  out = out.replace(/\*([^*\n]+)\*/g, '$1');
+  out = out.replace(/[ \t]+\n/g, '\n');
+  out = out.replace(/\n{3,}/g, '\n\n');
+  out = out.replace(/[ \t]{2,}/g, ' ');
+  return out.trim();
 }
 
 const BILLING_SUFFIX: Record<string, string> = {
