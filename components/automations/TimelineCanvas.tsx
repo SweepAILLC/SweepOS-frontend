@@ -792,7 +792,14 @@ function CanvasHeader({
         setTestError(out.error || out.blockers?.[0] || 'Test did not send cleanly.');
       }
     } catch (e) {
-      setTestError(formatApiError(e, 'Test failed'));
+      const status = (e as { response?: { status?: number } } | null)?.response?.status;
+      if (status === 404) {
+        setTestError(
+          'Test endpoint not found on backend. Deploy latest backend (route: /automations/flows/{flow}/test).',
+        );
+      } else {
+        setTestError(formatApiError(e, 'Test failed'));
+      }
     } finally {
       setTesting(false);
     }
