@@ -5,11 +5,13 @@ import {
   apiClient,
   type AutomationEmailJob,
   type AutomationFlow,
+  type AutomationFlowTestResponse,
   type AutomationNodeKind,
   type AutomationPlaybook,
   type AutomationRule,
   type AutomationScheduleMode,
 } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import type { Client } from '@/types/client';
 import PlaybookModal from './PlaybookModal';
 import WaitDelayModal, { type WaitDelayMode } from './WaitDelayModal';
@@ -487,6 +489,7 @@ export default function TimelineCanvas({
     <div className="space-y-4">
       <div className="overflow-hidden rounded-2xl border border-gray-200/80 dark:border-white/10 shadow-lg shadow-violet-500/5">
         <CanvasHeader
+          flow={flow}
           title={meta.title}
           previewClient={previewClient}
           previewClientId={previewClientId}
@@ -741,6 +744,7 @@ function inferTrigger(playbook: string): 'booking' | 'payment' | 'win' | 'offboa
 // ---------------------------------------------------------------------------
 
 function CanvasHeader({
+  flow,
   title = 'Automation timeline',
   previewClient,
   previewClientId,
@@ -748,6 +752,7 @@ function CanvasHeader({
   onPreviewClientChange,
   jobsLoading,
 }: {
+  flow: AutomationFlow;
   title?: string;
   previewClient: Client | null;
   previewClientId: string | null;
@@ -755,50 +760,176 @@ function CanvasHeader({
   onPreviewClientChange: (id: string | null) => void;
   jobsLoading: boolean;
 }) {
+  const [testEmail, setTestEmail] = useState(
+    () => previewClient?.email || '',
+  );
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<AutomationFlowTestResponse | null>(null);
+  const [testError, setTestError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (previewClient?.email) {
+      setTestEmail(previewClient.email);
+    }
+  }, [previewClient?.email]);
+
+  const runTest = async () => {
+    const email = testEmail.trim();
+    if (!email || !email.includes('@')) {
+      setTestError('Enter a valid email to send the test.');
+      return;
+    }
+    setTesting(true);
+    setTestError(null);
+    setTestResult(null);
+    try {
+      const out = await apiClient.testAutomationFlow(flow, {
+        email,
+        client_id: previewClientId,
+      });
+      setTestResult(out);
+      if (!out.ok) {
+        setTestError(out.error || out.blockers?.[0] || 'Test did not send cleanly.');
+      }
+    } catch (e) {
+      setTestError(formatApiError(e, 'Test failed'));
+    } finally {
+      setTesting(false);
+    }
+  };
+
   return (
-    <div className="flex flex-col gap-4 border-b border-gray-200/80 dark:border-white/10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm p-4 sm:p-5 sm:flex-row sm:items-end sm:justify-between">
-      <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600 dark:text-violet-400">
-          Flow canvas
-        </p>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
-        <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 max-w-md leading-relaxed">
-          Click <span className="font-semibold text-violet-600 dark:text-violet-300">+</span> on a connector to
-          insert a wait or email. Hover any step to remove it.
-        </p>
-      </div>
-      <div className="w-full sm:w-auto sm:min-w-[14rem] space-y-1.5">
-        <label htmlFor="automation-preview-client" className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
-          Preview path
-        </label>
-        <select
-          id="automation-preview-client"
-          value={previewClientId ?? ''}
-          onChange={(e) => onPreviewClientChange(e.target.value || null)}
-          className="w-full rounded-lg border border-gray-300/80 dark:border-white/15 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
-        >
-          <option value="">No client — static view</option>
-          {previewClientOptions.map((c) => {
-            const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email || c.id;
-            return (
-              <option key={c.id} value={c.id}>
-                {name}
-              </option>
-            );
-          })}
-        </select>
-        {previewClient ? (
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1.5">
-            {jobsLoading ? (
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            ) : (
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]" />
-            )}
-            {jobsLoading ? 'Loading journey…' : 'Path energized for this client'}
+    <div className="flex flex-col gap-4 border-b border-gray-200/80 dark:border-white/10 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm p-4 sm:p-5">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-600 dark:text-violet-400">
+            Flow canvas
           </p>
-        ) : (
-          <p className="text-[11px] text-gray-500">Select a client to highlight their progress</p>
-        )}
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h3>
+          <p className="mt-1 text-xs text-gray-600 dark:text-gray-400 max-w-md leading-relaxed">
+            Click <span className="font-semibold text-violet-600 dark:text-violet-300">+</span> on a connector to
+            insert a wait or email. Hover any step to remove it.
+          </p>
+        </div>
+        <div className="w-full sm:w-auto sm:min-w-[14rem] space-y-1.5">
+          <label htmlFor="automation-preview-client" className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
+            Preview path
+          </label>
+          <select
+            id="automation-preview-client"
+            value={previewClientId ?? ''}
+            onChange={(e) => onPreviewClientChange(e.target.value || null)}
+            className="w-full rounded-lg border border-gray-300/80 dark:border-white/15 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+          >
+            <option value="">No client — static view</option>
+            {previewClientOptions.map((c) => {
+              const name = `${c.first_name ?? ''} ${c.last_name ?? ''}`.trim() || c.email || c.id;
+              return (
+                <option key={c.id} value={c.id}>
+                  {name}
+                </option>
+              );
+            })}
+          </select>
+          {previewClient ? (
+            <p className="text-[11px] text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1.5">
+              {jobsLoading ? (
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              ) : (
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]" />
+              )}
+              {jobsLoading ? 'Loading journey…' : 'Path energized for this client'}
+            </p>
+          ) : (
+            <p className="text-[11px] text-gray-500">Select a client to highlight their progress</p>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-dashed border-violet-500/25 bg-violet-500/[0.04] dark:bg-violet-500/[0.07] p-3 sm:p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <label htmlFor="automation-test-email" className="text-[10px] font-bold uppercase tracking-[0.12em] text-violet-700 dark:text-violet-300">
+              Test this workflow
+            </label>
+            <input
+              id="automation-test-email"
+              type="email"
+              value={testEmail}
+              onChange={(e) => setTestEmail(e.target.value)}
+              placeholder="you@company.com"
+              className="w-full rounded-lg border border-gray-300/80 dark:border-white/15 bg-white dark:bg-gray-950 px-3 py-2 text-sm text-gray-900 dark:text-gray-100 shadow-sm focus:border-violet-500/50 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+            />
+            <p className="text-[11px] text-gray-500 dark:text-gray-400">
+              Sends a quick [TEST] email per enabled action (skips waits). Confirms Brevo without waiting on live triggers.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void runTest()}
+            disabled={testing}
+            className="shrink-0 inline-flex items-center justify-center rounded-lg bg-violet-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-violet-500 disabled:opacity-60"
+          >
+            {testing ? 'Sending…' : 'Send test'}
+          </button>
+        </div>
+
+        {testError ? (
+          <p className="mt-3 text-xs text-red-600 dark:text-red-300">{testError}</p>
+        ) : null}
+
+        {testResult ? (
+          <div className="mt-3 space-y-2">
+            {testResult.blockers?.length ? (
+              <ul className="space-y-1 text-xs text-amber-800 dark:text-amber-200">
+                {testResult.blockers.map((b) => (
+                  <li key={b} className="leading-snug">
+                    ⚠ {b}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                Live-send readiness looks good (worker + Brevo + enabled steps
+                {flow === 'post_booking' ? ' + booking trigger' : ''}).
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2 text-[10px] font-medium uppercase tracking-wide">
+              <span className={`rounded-full px-2 py-0.5 ${testResult.dispatcher_healthy ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200' : 'bg-red-500/15 text-red-800 dark:text-red-200'}`}>
+                Worker {testResult.dispatcher_healthy ? 'ok' : 'down'}
+              </span>
+              <span className={`rounded-full px-2 py-0.5 ${testResult.brevo_connected ? 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-200' : 'bg-red-500/15 text-red-800 dark:text-red-200'}`}>
+                Brevo {testResult.brevo_connected ? 'connected' : 'missing'}
+              </span>
+              <span className="rounded-full px-2 py-0.5 bg-gray-500/10 text-gray-700 dark:text-gray-300">
+                {testResult.sent_count} sent · {testResult.enabled_action_count} enabled
+              </span>
+            </div>
+            {testResult.results?.length ? (
+              <ul className="max-h-36 overflow-auto rounded-lg bg-white/70 dark:bg-black/20 p-2 text-[11px] text-gray-700 dark:text-gray-300 space-y-1">
+                {testResult.results.map((r) => (
+                  <li key={`${r.playbook}-${r.step_index}`} className="flex gap-2">
+                    <span
+                      className={`shrink-0 font-semibold ${
+                        r.status === 'sent'
+                          ? 'text-emerald-600'
+                          : r.status === 'failed'
+                            ? 'text-red-600'
+                            : 'text-gray-400'
+                      }`}
+                    >
+                      {r.status}
+                    </span>
+                    <span className="truncate">
+                      {r.playbook}
+                      {r.detail ? ` — ${r.detail}` : ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

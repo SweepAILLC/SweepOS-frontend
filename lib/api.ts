@@ -589,6 +589,7 @@ export interface AutomationTriggerConfig {
   provider?: 'calcom' | 'calendly' | 'any' | null;
   event_type_ids?: string[] | null;
   match_all_events?: boolean | null;
+  sales_calls_only?: boolean | null;
 }
 
 export type AutomationNodeKind = 'action' | 'wait';
@@ -649,6 +650,40 @@ export interface AutomationFlowStepCreate {
   delay_seconds?: number;
   subject_template?: string | null;
   insert_before_playbook?: string | null;
+}
+
+export interface AutomationFlowTestStepResult {
+  playbook: string;
+  node_kind: string;
+  trigger_kind?: string | null;
+  step_index?: number | null;
+  enabled: boolean;
+  status: string;
+  detail?: string | null;
+  brevo_message_id?: string | null;
+  job_id?: string | null;
+}
+
+export interface AutomationFlowTestResponse {
+  ok: boolean;
+  flow: string;
+  to_email: string;
+  client_id?: string | null;
+  client_label?: string | null;
+  sent_count: number;
+  results: AutomationFlowTestStepResult[];
+  error?: string | null;
+  dispatcher_healthy: boolean;
+  brevo_connected: boolean;
+  brevo_note?: string | null;
+  enabled_action_count: number;
+  enabled_wait_count: number;
+  enabled_playbooks: string[];
+  approval_gated_playbooks: string[];
+  booking_trigger_ready: boolean;
+  booking_trigger_note?: string | null;
+  blockers: string[];
+  ready_for_live_sends: boolean;
 }
 
 export interface AutomationEmailJob {
@@ -2950,6 +2985,16 @@ class ApiClient {
   ): Promise<AutomationPreviewResponse> {
     const response = await this.client.post('/automations/preview', body, { timeout: 60000 });
     return response.data as AutomationPreviewResponse;
+  }
+
+  async testAutomationFlow(
+    flow: AutomationFlow,
+    body: { email: string; client_id?: string | null; trigger_kind?: string | null }
+  ): Promise<AutomationFlowTestResponse> {
+    const response = await this.client.post(`/automations/flows/${flow}/test`, body, {
+      timeout: 120000,
+    });
+    return response.data as AutomationFlowTestResponse;
   }
 
   // ----- Resources tab -------------------------------------------------------

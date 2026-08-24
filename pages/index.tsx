@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar, { type TabId } from '@/components/ui/Navbar';
@@ -88,8 +88,9 @@ export default function Dashboard() {
   const [consultingTier, setConsultingTier] = useState<ConsultingTier | null>(null);
   const [bookingUrl, setBookingUrl] = useState<string | null>(null);
 
-  // Read tab from localStorage only after mount so SSR HTML matches the first client paint.
-  useLayoutEffect(() => {
+  // Read tab from localStorage only after mount. Loading shell is shown until auth
+  // finishes, so useEffect is enough and avoids SSR useLayoutEffect hydration warnings.
+  useEffect(() => {
     const tab = getInitialTab();
     setActiveTab(tab);
     setPipelineMounted(tab === 'pipeline');
@@ -641,5 +642,9 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+export async function getServerSideProps() {
+  return { props: {} };
 }
 

@@ -2,7 +2,7 @@ import { Html, Head, Main, NextScript } from 'next/document';
 
 export default function Document() {
   return (
-    <Html>
+    <Html suppressHydrationWarning>
       <Head>
         {/* Favicon */}
         <link rel="icon" type="image/png" href="/SWEEP_favicon.png" />

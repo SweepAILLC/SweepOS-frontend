@@ -132,6 +132,7 @@ export default function Login() {
                 className="appearance-none rounded-none relative block w-full px-3 py-2 glass-input rounded-t-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
                 placeholder="Email address"
                 value={email}
+                suppressHydrationWarning
                 onChange={(e) => setEmail(e.target.value)}
               />
             </div>
@@ -148,6 +149,7 @@ export default function Login() {
                 className="appearance-none rounded-none relative block w-full px-3 py-2 glass-input rounded-b-md focus:outline-none focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm"
                 placeholder="Password"
                 value={password}
+                suppressHydrationWarning
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
@@ -202,5 +204,9 @@ export default function Login() {
       </div>
     </div>
   );
+}
+
+export async function getServerSideProps() {
+  return { props: {} };
 }
 

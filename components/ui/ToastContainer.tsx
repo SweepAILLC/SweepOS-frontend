@@ -1,13 +1,18 @@
+import { useEffect, useState } from 'react';
 import { useToast } from '@/contexts/ToastContext';
 
 export default function ToastContainer() {
   const { toasts, removeToast } = useToast();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
 
   return (
-    <div
-      className="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
-      style={{ maxWidth: '420px' }}
-    >
+    <div className="pointer-events-none fixed top-4 right-4 z-50 flex max-w-[420px] flex-col gap-2">
       {toasts.map((toast) => (
         <div
           key={toast.id}
