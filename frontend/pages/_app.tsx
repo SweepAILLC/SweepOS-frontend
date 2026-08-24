@@ -5,9 +5,12 @@ import '../styles/globals.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LoadingProvider } from '@/contexts/LoadingContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';
+import { ToastProvider } from '@/contexts/ToastContext';
 import GlobalLoadingOverlay from '@/components/ui/GlobalLoadingOverlay';
+import ToastContainer from '@/components/ui/ToastContainer';
 import Cookies from 'js-cookie';
 import { apiClient, isSweepSessionAuthFailure } from '@/lib/api';
+import { pingActivityHeartbeat } from '@/lib/consultingNotices';
 import { clearSessionCaches } from '@/lib/cache';
 
 export default function App({ Component, pageProps }: AppProps) {
@@ -62,43 +65,41 @@ export default function App({ Component, pageProps }: AppProps) {
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const keepSessionAlive = async () => {
-      // Only keep alive if:
-      // 1. We're not on the login page
-      // 2. We have an access token
-      // 3. The tab is visible
+    const isActiveTab = () => {
       const currentPath = window.location.pathname;
       const hasToken = Cookies.get('access_token');
-      const isVisible = !document.hidden;
+      return currentPath !== '/login' && Boolean(hasToken) && !document.hidden;
+    };
 
-      if (currentPath === '/login' || !hasToken || !isVisible) {
-        return;
-      }
-
+    const keepSessionAlive = async () => {
+      if (!isActiveTab()) return;
       try {
-        // Validate token and extend session (sliding window) so same tab rarely needs re-login
         await apiClient.getCurrentUser();
         await apiClient.refreshSession();
       } catch (error: any) {
-        // If we get a 401/403, the interceptor will handle logout
-        // Just silently fail here - the error handler will take care of it
         if (error?.response?.status !== 401 && error?.response?.status !== 403) {
           console.warn('Keep-alive request failed:', error);
         }
       }
     };
 
-    // Defer keep-alive so the initial dashboard auth check is not competing for /auth/me.
-    const bootTimer = setTimeout(keepSessionAlive, 3000);
+    const pingActivity = () => {
+      if (!isActiveTab()) return;
+      void pingActivityHeartbeat();
+    };
 
-    // Set up interval to keep session alive every 20 minutes
-    // Token expires in 24 hours; keep-alive validates token is still valid
-    keepAliveIntervalRef.current = setInterval(keepSessionAlive, 20 * 60 * 1000); // 20 minutes
+    const bootTimer = setTimeout(() => {
+      void keepSessionAlive();
+      pingActivity();
+    }, 3000);
 
-    // Also refresh when tab becomes visible (user switches back to tab)
+    keepAliveIntervalRef.current = setInterval(keepSessionAlive, 20 * 60 * 1000);
+    const activityInterval = setInterval(pingActivity, 60 * 1000);
+
     const handleVisibilityChange = () => {
       if (!document.hidden) {
-        keepSessionAlive();
+        void keepSessionAlive();
+        pingActivity();
       }
     };
 
@@ -109,6 +110,7 @@ export default function App({ Component, pageProps }: AppProps) {
       if (keepAliveIntervalRef.current) {
         clearInterval(keepAliveIntervalRef.current);
       }
+      clearInterval(activityInterval);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, []);
@@ -116,12 +118,15 @@ export default function App({ Component, pageProps }: AppProps) {
   return (
     <ErrorBoundary>
       <ThemeProvider>
-        <SidebarProvider>
-          <LoadingProvider>
-            <GlobalLoadingOverlay />
-            <Component {...pageProps} />
-          </LoadingProvider>
-        </SidebarProvider>
+        <ToastProvider>
+          <SidebarProvider>
+            <LoadingProvider>
+              <GlobalLoadingOverlay />
+              <ToastContainer />
+              <Component {...pageProps} />
+            </LoadingProvider>
+          </SidebarProvider>
+        </ToastProvider>
       </ThemeProvider>
     </ErrorBoundary>
   );
