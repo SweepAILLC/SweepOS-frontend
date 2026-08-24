@@ -833,7 +833,7 @@ export default function CallLibraryPanel() {
                                         <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
                                       ) : null}
                                       {dim.quote ? (
-                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-indigo-400/40 pl-2">"{String(dim.quote)}"</p>
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-indigo-400/40 pl-2">{`"${String(dim.quote)}"`}</p>
                                       ) : null}
                                     </div>
                                   );
@@ -905,7 +905,7 @@ export default function CallLibraryPanel() {
                                         <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{String(dim.summary)}</p>
                                       ) : null}
                                       {dim.quote ? (
-                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-blue-400/40 pl-2">"{String(dim.quote)}"</p>
+                                        <p className="text-[11px] italic text-gray-500 border-l-2 border-blue-400/40 pl-2">{`"${String(dim.quote)}"`}</p>
                                       ) : null}
                                     </div>
                                   );
@@ -1006,7 +1006,7 @@ export default function CallLibraryPanel() {
                                           </div>
                                         </div>
                                         {obj.surface_quote ? (
-                                          <p className="text-[11px] italic text-gray-500">"{String(obj.surface_quote)}"</p>
+                                          <p className="text-[11px] italic text-gray-500">{`"${String(obj.surface_quote)}"`}</p>
                                         ) : null}
                                         {Array.isArray(obj.steps_hit) && (obj.steps_hit as string[]).length > 0 && (
                                           <div className="flex flex-wrap gap-1">
