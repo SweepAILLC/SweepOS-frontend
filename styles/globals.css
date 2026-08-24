@@ -4,6 +4,23 @@
 
 :root {
   --app-sidebar-width: 14rem;
+  /* Desktop: no mobile top bar. Mobile overrides below. */
+  --app-mobile-topbar-height: 0px;
+}
+
+/* Overlay-nav shell: full-width main canvas; top chrome instead of left gutter. */
+@media (max-width: 1023.98px) {
+  :root {
+    --app-sidebar-width: 0px;
+    --app-mobile-topbar-height: 3.5rem;
+  }
+}
+
+/* Landscape phones: shorter top bar so charts/tables keep readable height. */
+@media (max-width: 1023.98px) and (orientation: landscape) {
+  :root {
+    --app-mobile-topbar-height: 2.75rem;
+  }
 }
 
 body {
@@ -337,5 +354,92 @@ body {
       animation: none;
     }
   }
+}
+
+/* Consulting portal shared space (TipTap — class is on the ProseMirror root) */
+.shared-pad-editor {
+  @apply text-sm text-gray-900 dark:text-gray-100 leading-relaxed;
+  outline: none;
+  min-height: inherit;
+}
+
+.shared-pad-editor p {
+  margin: 0.35rem 0;
+}
+
+.shared-pad-editor h1 {
+  @apply text-xl font-bold tracking-tight mt-3 mb-1.5;
+}
+
+.shared-pad-editor h2 {
+  @apply text-lg font-semibold tracking-tight mt-2.5 mb-1;
+}
+
+.shared-pad-editor h3 {
+  @apply text-base font-semibold mt-2 mb-1;
+}
+
+.shared-pad-editor ul:not([data-type='taskList']) {
+  list-style: disc;
+  padding-left: 1.35rem;
+  margin: 0.4rem 0;
+}
+
+.shared-pad-editor ol {
+  list-style: decimal;
+  padding-left: 1.35rem;
+  margin: 0.4rem 0;
+}
+
+.shared-pad-editor li {
+  margin: 0.15rem 0;
+}
+
+.shared-pad-editor ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0;
+  margin: 0.4rem 0;
+}
+
+.shared-pad-editor ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.shared-pad-editor ul[data-type='taskList'] li > label {
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+  display: flex;
+  align-items: center;
+}
+
+.shared-pad-editor ul[data-type='taskList'] li > label input[type='checkbox'] {
+  width: 0.95rem;
+  height: 0.95rem;
+  cursor: pointer;
+  accent-color: rgb(14 165 233);
+}
+
+.shared-pad-editor ul[data-type='taskList'] li > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.shared-pad-editor ul[data-type='taskList'] li[data-checked='true'] > div {
+  @apply text-gray-500 dark:text-gray-400 line-through;
+}
+
+.shared-pad-editor blockquote {
+  @apply border-l-2 border-gray-300 dark:border-white/20 pl-3 my-2 text-gray-600 dark:text-gray-300 italic;
+}
+
+.shared-pad-editor hr {
+  @apply my-3 border-gray-200 dark:border-white/15;
+}
+
+.shared-pad-editor p.is-editor-empty:first-child::before {
+  @apply text-gray-400 dark:text-gray-500 pointer-events-none float-left h-0;
+  content: attr(data-placeholder);
 }
 

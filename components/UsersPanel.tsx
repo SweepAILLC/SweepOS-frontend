@@ -31,6 +31,7 @@ export default function UsersPanel() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [editingUser, setEditingUser] = useState<string | null>(null);
   const [currentUserRole, setCurrentUserRole] = useState<string>('');
+  const [isSudoAdmin, setIsSudoAdmin] = useState(false);
   const [currentUserOrgId, setCurrentUserOrgId] = useState<string | null>(null);
   const [showInviteUserForm, setShowInviteUserForm] = useState(false);
   const [inviteUserEmail, setInviteUserEmail] = useState('');
@@ -57,10 +58,16 @@ export default function UsersPanel() {
     try {
       const user = await apiClient.getCurrentUser();
       setCurrentUserRole(user.role || '');
+      setIsSudoAdmin(Boolean((user as { is_sudo_admin?: boolean }).is_sudo_admin));
       setCurrentUserOrgId(user.org_id ?? null);
     } catch (err) {
       console.error('Failed to load current user:', err);
     }
+  };
+
+  const canModifyUser = (user: User) => {
+    if (user.role !== 'owner') return true;
+    return isSudoAdmin;
   };
 
   const loadPendingInvitations = async () => {
@@ -149,6 +156,12 @@ export default function UsersPanel() {
 
   const handleUpdateUser = async (userId: string) => {
     if (!formData.email.trim()) return;
+
+    const targetUser = users.find((u) => u.id === userId);
+    if (targetUser && !canModifyUser(targetUser)) {
+      setError('Only the system administrator can modify organization owners.');
+      return;
+    }
 
     try {
       const data: any = {
@@ -250,6 +263,12 @@ export default function UsersPanel() {
   };
 
   const handleDeleteUser = async (userId: string) => {
+    const targetUser = users.find((u) => u.id === userId);
+    if (targetUser && !canModifyUser(targetUser)) {
+      setError('Only the system administrator can remove organization owners.');
+      return;
+    }
+
     if (!confirm('Are you sure you want to delete this user?')) {
       return;
     }
@@ -572,26 +591,31 @@ export default function UsersPanel() {
                     {new Date(user.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <button
-                      onClick={() => {
-                        setEditingUser(user.id);
-                        setShowCreateForm(true);
-                        // If current user is not owner and editing user is owner, prevent editing role
-                        const userRole = (user.role as 'owner' | 'admin' | 'member') || 'member';
-                        // If user is owner and current user is not owner, default to member (can't change owner role)
-                        const editableRole = (currentUserRole !== 'owner' && userRole === 'owner') ? 'member' : userRole;
-                        setFormData({ email: user.email, password: '', role: editableRole });
-                      }}
-                      className="text-blue-500 hover:text-blue-300 mr-4"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteUser(user.id)}
-                      className="text-red-500 hover:text-red-300"
-                    >
-                      Delete
-                    </button>
+                    {canModifyUser(user) ? (
+                      <>
+                        <button
+                          onClick={() => {
+                            setEditingUser(user.id);
+                            setShowCreateForm(true);
+                            const userRole = (user.role as 'owner' | 'admin' | 'member') || 'member';
+                            setFormData({ email: user.email, password: '', role: userRole });
+                          }}
+                          className="text-blue-500 hover:text-blue-300 mr-4"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(user.id)}
+                          className="text-red-500 hover:text-red-300"
+                        >
+                          Delete
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-500 dark:text-gray-400">
+                        System admin only
+                      </span>
+                    )}
                   </td>
                 </tr>
               ))

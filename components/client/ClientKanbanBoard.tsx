@@ -57,9 +57,15 @@ function mergeClientRow(existing: Client, incoming: Client): Client {
   const incomingIsStale =
     incomingMs > 0 && existingMs > 0 && incomingMs < existingMs;
 
+  // Skip undefined so optimistic patches don't wipe fields they didn't set
+  // (e.g. program_end_date: undefined clearing a saved end date).
+  const incomingDefined = Object.fromEntries(
+    Object.entries(incoming).filter(([, value]) => value !== undefined),
+  ) as Partial<Client>;
+
   const merged: Client = {
     ...existing,
-    ...incoming,
+    ...incomingDefined,
     offer_enrollment:
       'offer_enrollment' in incoming ? incoming.offer_enrollment : existing.offer_enrollment,
     meta: 'meta' in incoming ? incoming.meta : existing.meta,
@@ -1620,7 +1626,7 @@ export default function ClientKanbanBoard({
                   key={column.id}
                   delayMs={columnIndex * COLUMN_STAGGER_MS}
                   animate={shouldAnimateColumns.current}
-                  className="flex w-[220px] min-w-[220px] shrink-0 flex-col self-stretch sm:w-[240px] sm:min-w-[240px]"
+                  className="flex w-[min(220px,78vw)] min-w-[min(220px,78vw)] shrink-0 flex-col self-stretch sm:w-[240px] sm:min-w-[240px]"
                 >
                   <KanbanColumn
                     id={column.id}

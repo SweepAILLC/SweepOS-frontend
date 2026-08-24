@@ -74,7 +74,13 @@ export default function ClientProfileRail({
     formData.program_start_date,
     formData.program_end_date,
   );
-  const displayClient: Client = { ...client, ...timelineFromForm };
+  const displayClient: Client = {
+    ...client,
+    program_start_date: timelineFromForm.program_start_date ?? undefined,
+    program_end_date: timelineFromForm.program_end_date ?? undefined,
+    program_duration_days: timelineFromForm.program_duration_days ?? undefined,
+    program_progress_percent: timelineFromForm.program_progress_percent ?? undefined,
+  };
 
   return (
     <div className="space-y-5 py-4 px-4 sm:px-5">

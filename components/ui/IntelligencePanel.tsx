@@ -4,6 +4,13 @@ import Link from 'next/link';
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, type OrgSalesContentTheme } from '@/lib/api';
 import { DEFAULT_EMAIL_HTML_TEMPLATE } from '@/lib/emailHtmlDefaultTemplate';
+import {
+  normalizeOfferLadder,
+  type ObjectionHandler,
+  type OfferEntry,
+  type OfferLadder,
+  type ReferralOffer,
+} from '@/lib/offerLadder';
 
 const CAMPAIGN_SAMPLE_KINDS = [
   'onboarding_email',
@@ -21,38 +28,6 @@ import { useLoading } from '@/contexts/LoadingContext';
 interface AssetLink {
   label: string;
   url: string;
-}
-
-interface OfferEntry {
-  name?: string;
-  promise?: string;
-  ideal_for?: string;
-  not_for?: string;
-  price_terms?: string;
-  when_to_use?: string;
-  triggers?: string[];
-  contraindications?: string;
-}
-
-interface ReferralOffer {
-  incentive?: string;
-  eligibility?: string;
-  ask_script_hints?: string;
-}
-
-interface ObjectionHandler {
-  objection: string;
-  response: string;
-}
-
-interface OfferLadder {
-  version?: number;
-  core_offer?: OfferEntry;
-  downsells?: OfferEntry[];
-  upsells?: OfferEntry[];
-  referral_offer?: ReferralOffer;
-  positioning_notes?: string[];
-  objection_handlers?: ObjectionHandler[];
 }
 
 type WritingSampleKind =
@@ -96,32 +71,28 @@ interface AIProfile {
   business_description?: string;
   target_audience?: string;
   unique_selling_proposition?: string;
+  personal_story?: string;
+  mission_statement?: string;
   sales_framework?: string;
   sales_tactics?: string;
-  marketing_strategy?: string;
-  marketing_channels?: string;
   pipeline_priorities?: string[];
   asset_links?: AssetLink[];
   offer_ladder?: OfferLadder;
   writing_samples?: WritingSample[];
-  email_html_template_enabled?: boolean;
-  email_html_template?: string;
 }
 
 type SectionId =
-  | 'priorities'
   | 'voice'
   | 'samples'
   | 'business'
   | 'offers'
   | 'sales'
-  | 'marketing'
+  | 'brand'
   ;
 
 const MAX_WRITING_SAMPLES = 12;
 
 const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
-  { id: 'priorities', title: 'Pipeline Priorities', subtitle: 'What matters most right now?' },
   { id: 'voice', title: 'Voice & Coaching', subtitle: 'How emails and copy should sound on your behalf' },
   {
     id: 'samples',
@@ -129,9 +100,9 @@ const SECTIONS: { id: SectionId; title: string; subtitle: string }[] = [
     subtitle: 'Voice examples plus optional branded HTML for referral, upsell, and re-sign campaigns',
   },
   { id: 'business', title: 'Your Business', subtitle: 'Help the AI understand what you do' },
-  { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, downsells, upsells, and referral offer' },
+  { id: 'offers', title: 'Offers & Ladder', subtitle: 'Core offer, upsells and add-ons, and referral offer' },
   { id: 'sales', title: 'Sales', subtitle: 'Frameworks and tactics — also used to lens call analysis' },
-  { id: 'marketing', title: 'Marketing', subtitle: 'How you attract and nurture prospects' },
+  { id: 'brand', title: 'Your Brand', subtitle: 'USP, story, and mission that shape your voice' },
 ];
 
 const WRITING_STYLE_OPTIONS = [
@@ -161,17 +132,6 @@ const COACHING_STYLE_OPTIONS = [
   'Systems & process-oriented',
 ];
 
-const PIPELINE_PRIORITY_OPTIONS = [
-  { id: 'testimonials', label: 'Testimonials & social proof', description: 'Surface asks for quotes, reviews, and case studies' },
-  { id: 'revenue', label: 'Revenue growth', description: 'Upsells, cross-sells, and pricing conversations' },
-  { id: 'retention', label: 'Retention & engagement', description: 'Keep active clients progressing and satisfied' },
-  { id: 'conversion', label: 'Lead conversion', description: 'Move cold/warm leads toward a booked call or sale' },
-  { id: 'referrals', label: 'Referrals', description: 'Generate word-of-mouth and warm introductions' },
-  { id: 'win_back', label: 'Win-back & re-engagement', description: 'Revive dead leads and lapsed clients' },
-  { id: 'onboarding', label: 'Smooth onboarding', description: 'Get new clients set up and feeling supported' },
-  { id: 'content', label: 'Content & thought leadership', description: 'Gather stories and angles for your marketing' },
-];
-
 const SALES_FRAMEWORK_OPTIONS = [
   'Consultative selling',
   'SPIN selling',
@@ -192,7 +152,7 @@ export default function IntelligencePanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<SectionId>('priorities');
+  const [activeSection, setActiveSection] = useState<SectionId>('voice');
   const [profile, setProfile] = useState<AIProfile>({});
   const [dirty, setDirty] = useState(false);
   const [orgThemes, setOrgThemes] = useState<OrgSalesContentTheme[]>([]);
@@ -206,7 +166,11 @@ export default function IntelligencePanel({
       const settings = await apiClient.getUserSettings();
       const saved = settings?.ai_profile;
       if (saved != null && typeof saved === 'object') {
-        setProfile(saved as AIProfile);
+        const next = saved as AIProfile;
+        setProfile({
+          ...next,
+          ...(next.offer_ladder ? { offer_ladder: normalizeOfferLadder(next.offer_ladder) } : {}),
+        });
         setDirty(false);
       } else {
         setProfile({});
@@ -286,13 +250,20 @@ export default function IntelligencePanel({
       setSaving(true);
       setError(null);
       setSaved(false);
-      await apiClient.updateUserSettings({ ai_profile: profile as Record<string, unknown> });
+      const profileToSave = profile.offer_ladder
+        ? { ...profile, offer_ladder: normalizeOfferLadder(profile.offer_ladder) }
+        : profile;
+      await apiClient.updateUserSettings({ ai_profile: profileToSave as Record<string, unknown> });
       // Confirm round-trip: reload from server so the UI reflects exactly what was persisted
       try {
         const settings = await apiClient.getUserSettings();
         const persisted = settings?.ai_profile;
         if (persisted != null && typeof persisted === 'object') {
-          setProfile(persisted as AIProfile);
+          const next = persisted as AIProfile;
+          setProfile({
+            ...next,
+            ...(next.offer_ladder ? { offer_ladder: normalizeOfferLadder(next.offer_ladder) } : {}),
+          });
         }
       } catch {
         // Reload failed — keep local state, which is already correct
@@ -306,25 +277,6 @@ export default function IntelligencePanel({
     } finally {
       setSaving(false);
     }
-  };
-
-  const togglePriority = (id: string) => {
-    const current = profile.pipeline_priorities || [];
-    if (current.includes(id)) {
-      update('pipeline_priorities', current.filter((p) => p !== id));
-    } else {
-      update('pipeline_priorities', [...current, id]);
-    }
-  };
-
-  const movePriority = (id: string, dir: -1 | 1) => {
-    const current = [...(profile.pipeline_priorities || [])];
-    const idx = current.indexOf(id);
-    if (idx < 0) return;
-    const target = idx + dir;
-    if (target < 0 || target >= current.length) return;
-    [current[idx], current[target]] = [current[target], current[idx]];
-    update('pipeline_priorities', current);
   };
 
   const addAssetLink = () => {
@@ -357,9 +309,6 @@ export default function IntelligencePanel({
     update('writing_samples', list);
   };
 
-  const brandedWrapperStarter = () =>
-    (profile.email_html_template || '').trim() || DEFAULT_EMAIL_HTML_TEMPLATE;
-
   const updateWritingSample = (idx: number, patch: Partial<WritingSample>) => {
     const list = [...(profile.writing_samples || [])];
     const cur = list[idx];
@@ -389,14 +338,14 @@ export default function IntelligencePanel({
     updateLadder({ ...ladder, core_offer: core });
   };
 
-  const addLadderItem = (kind: 'downsells' | 'upsells') => {
+  const addLadderItem = (kind: 'upsells') => {
     const ladder = profile.offer_ladder || {};
     const items = [...(ladder[kind] || []), { name: '', promise: '' } as OfferEntry];
     updateLadder({ ...ladder, [kind]: items });
   };
 
   const updateLadderItem = (
-    kind: 'downsells' | 'upsells',
+    kind: 'upsells',
     idx: number,
     field: keyof OfferEntry,
     value: string | string[],
@@ -407,7 +356,7 @@ export default function IntelligencePanel({
     updateLadder({ ...ladder, [kind]: items });
   };
 
-  const removeLadderItem = (kind: 'downsells' | 'upsells', idx: number) => {
+  const removeLadderItem = (kind: 'upsells', idx: number) => {
     const ladder = profile.offer_ladder || {};
     const items = (ladder[kind] || []).filter((_, i) => i !== idx);
     updateLadder({ ...ladder, [kind]: items });
@@ -452,7 +401,6 @@ export default function IntelligencePanel({
             {SECTIONS.map((s) => {
               const filled = (() => {
                 switch (s.id) {
-                  case 'priorities': return (profile.pipeline_priorities || []).length > 0;
                   case 'voice': return !!(
                     profile.writing_style ||
                     profile.writing_tone ||
@@ -462,20 +410,23 @@ export default function IntelligencePanel({
                   case 'samples': return (profile.writing_samples || []).some(
                     (s) => (s.body || '').trim().length > 0 || (s.html_template || '').trim().length > 0
                   );
-                  case 'business': return !!(profile.business_description || profile.target_audience || profile.unique_selling_proposition);
+                  case 'business': return !!(profile.business_description || profile.target_audience);
                   case 'offers': {
                     const l = profile.offer_ladder;
                     return !!(
                       l && (
                         (l.core_offer && (l.core_offer.name || l.core_offer.promise)) ||
                         (l.upsells || []).length > 0 ||
-                        (l.downsells || []).length > 0 ||
                         (l.referral_offer && (l.referral_offer.incentive || l.referral_offer.ask_script_hints))
                       )
                     );
                   }
                   case 'sales': return !!(profile.sales_framework || profile.sales_tactics);
-                  case 'marketing': return !!(profile.marketing_strategy || profile.marketing_channels);
+                  case 'brand': return !!(
+                    profile.unique_selling_proposition ||
+                    profile.personal_story ||
+                    profile.mission_statement
+                  );
                   default: return false;
                 }
               })();
@@ -547,100 +498,6 @@ export default function IntelligencePanel({
         <div className="flex-1 min-w-0">
           <div className="glass-card p-6 space-y-6">
 
-            {/* ── Pipeline Priorities ── */}
-            {activeSection === 'priorities' && (
-              <>
-                <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Pipeline Priorities</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Select what matters most to your business right now. The AI will weight recommendations,
-                    next steps, and email suggestions toward your top priorities — in the order you rank them.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  {/* Selected priorities — ordered, reorderable */}
-                  {(profile.pipeline_priorities || []).length > 0 && (
-                    <div className="space-y-1.5 mb-4">
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">Your priorities (drag to reorder)</p>
-                      {(profile.pipeline_priorities || []).map((id, idx) => {
-                        const opt = PIPELINE_PRIORITY_OPTIONS.find((o) => o.id === id);
-                        if (!opt) return null;
-                        return (
-                          <div
-                            key={id}
-                            className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-violet-500/30 bg-violet-500/10"
-                          >
-                            <span className="flex-shrink-0 w-5 h-5 rounded-full bg-violet-500/20 text-violet-700 dark:text-violet-300 flex items-center justify-center text-xs font-bold">
-                              {idx + 1}
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <span className="text-sm font-medium text-gray-900 dark:text-gray-100">{opt.label}</span>
-                              <span className="block text-[11px] text-gray-500 dark:text-gray-400">{opt.description}</span>
-                            </div>
-                            <div className="flex flex-col gap-0.5">
-                              <button
-                                type="button"
-                                onClick={() => movePriority(id, -1)}
-                                disabled={idx === 0}
-                                className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-30 disabled:cursor-default"
-                                title="Move up"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => movePriority(id, 1)}
-                                disabled={idx === (profile.pipeline_priorities || []).length - 1}
-                                className="p-0.5 text-gray-400 hover:text-violet-600 disabled:opacity-30 disabled:cursor-default"
-                                title="Move down"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                              </button>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => togglePriority(id)}
-                              className="p-1 text-gray-400 hover:text-red-500 transition-colors"
-                              title="Remove"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Unselected options */}
-                  {PIPELINE_PRIORITY_OPTIONS.filter((o) => !(profile.pipeline_priorities || []).includes(o.id)).length > 0 && (
-                    <div>
-                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1.5">Available</p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                        {PIPELINE_PRIORITY_OPTIONS.filter((o) => !(profile.pipeline_priorities || []).includes(o.id)).map((opt) => (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            onClick={() => togglePriority(opt.id)}
-                            className="text-left px-3 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600 hover:border-violet-400 dark:hover:border-violet-500 transition-colors"
-                          >
-                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{opt.label}</span>
-                            <span className="block text-[11px] text-gray-500 dark:text-gray-400">{opt.description}</span>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {(profile.pipeline_priorities || []).length === 0 && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                      Click any option above to add it. The order you select them determines priority rank.
-                    </p>
-                  )}
-                </div>
-              </>
-            )}
-
             {/* ── Voice & Coaching ── */}
             {activeSection === 'voice' && (
               <>
@@ -648,7 +505,7 @@ export default function IntelligencePanel({
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Voice & Coaching</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                     The single source of truth for how the AI sounds when it writes on your behalf — emails,
-                    follow-ups, nurture sequences, and Performance prescriptions. Your coaching style here also
+                    follow-ups, nurture sequences, and coaching copy. Your coaching style here also
                     shapes how the AI frames advice and how it relates to your clients.
                   </p>
                 </div>
@@ -893,7 +750,7 @@ export default function IntelligencePanel({
                             <button
                               type="button"
                               onClick={() =>
-                                updateWritingSample(idx, { html_template: brandedWrapperStarter() })
+                                updateWritingSample(idx, { html_template: DEFAULT_EMAIL_HTML_TEMPLATE })
                               }
                               className="text-xs font-medium text-violet-600 dark:text-violet-400 hover:underline"
                             >
@@ -956,43 +813,6 @@ export default function IntelligencePanel({
                     </p>
                   )}
                 </div>
-
-                <div className="border-t border-gray-200 dark:border-white/10 pt-5 mt-2 space-y-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-                      Global branded wrapper{' '}
-                      <span className="text-xs font-normal text-gray-500 dark:text-gray-400">
-                        — optional, off by default
-                      </span>
-                    </h4>
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                      If you turn this on, the EmailComposer modal will wrap any plain-text draft you
-                      send (and the live preview) in this HTML so all manual outbound looks branded.
-                      Per-sample HTML templates above are independent — leaving this off does not
-                      disable them.
-                    </p>
-                  </div>
-
-                  <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input
-                      type="checkbox"
-                      checked={!!profile.email_html_template_enabled}
-                      onChange={(e) => update('email_html_template_enabled', e.target.checked)}
-                      className="rounded border-gray-300 text-teal-600 focus:ring-teal-500"
-                    />
-                    <span className="font-medium">Enable global branded HTML wrapper</span>
-                  </label>
-
-                  {!!profile.email_html_template_enabled && (
-                    <textarea
-                      value={(profile.email_html_template || DEFAULT_EMAIL_HTML_TEMPLATE) as string}
-                      onChange={(e) => update('email_html_template', e.target.value)}
-                      rows={10}
-                      className="w-full px-3 py-2 glass-input rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-teal-500"
-                      placeholder={DEFAULT_EMAIL_HTML_TEMPLATE}
-                    />
-                  )}
-                </div>
               </>
             )}
 
@@ -1025,17 +845,6 @@ export default function IntelligencePanel({
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">What makes you different? (USP)</label>
-                  <textarea
-                    value={profile.unique_selling_proposition || ''}
-                    onChange={(e) => update('unique_selling_proposition', e.target.value)}
-                    rows={2}
-                    placeholder="e.g. Medically-informed programming, direct access to me via Voxer, and a money-back guarantee if you don't see results in 8 weeks."
-                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
               </>
             )}
 
@@ -1045,7 +854,7 @@ export default function IntelligencePanel({
                 <div>
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Offers & Ladder</h3>
                   <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    Define your core offer plus any downsells, upsells, and referral offer. Performance ROI rows
+                    Define your core offer plus any upsells, add-ons, and referral offer. Performance ROI rows
                     will prescribe the best fit when a client&apos;s buying signals match — and the AI will tailor
                     pitch language using each client&apos;s prospect voice profile.
                   </p>
@@ -1101,14 +910,14 @@ export default function IntelligencePanel({
                   </div>
                 </div>
 
-                {/* Upsells */}
+                {/* Upsells and add-ons */}
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upsells</h4>
+                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Upsells and add-ons</h4>
                       <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        Expansion offers prescribed when the system detects an upsell tag. Add the behavioral
-                        triggers that make each upsell the right fit.
+                        Expansion and complementary offers matched to each client&apos;s goals and signals. Add the
+                        triggers and guardrails that make each option the right fit.
                       </p>
                     </div>
                     <button
@@ -1116,12 +925,12 @@ export default function IntelligencePanel({
                       onClick={() => addLadderItem('upsells')}
                       className="text-xs text-emerald-700 dark:text-emerald-300 hover:underline whitespace-nowrap"
                     >
-                      + Add upsell
+                      + Add upsell or add-on
                     </button>
                   </div>
                   {(profile.offer_ladder?.upsells || []).length === 0 && (
                     <p className="text-xs text-gray-400 dark:text-gray-500">
-                      None yet. Add the next-step offers your best clients move into.
+                      None yet. Add relevant next-step offers or complementary services.
                     </p>
                   )}
                   {(profile.offer_ladder?.upsells || []).map((u, idx) => (
@@ -1156,7 +965,7 @@ export default function IntelligencePanel({
                         value={u.promise || ''}
                         onChange={(e) => updateLadderItem('upsells', idx, 'promise', e.target.value)}
                         rows={2}
-                        placeholder="Promise / outcome of this upsell"
+                        placeholder="Promise / outcome of this offer"
                         className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
                       <input
@@ -1192,74 +1001,6 @@ export default function IntelligencePanel({
                           className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                         />
                       </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Downsells */}
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Downsells</h4>
-                      <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                        Lighter alternatives prescribed for cold/warm leads who hesitate at the core offer.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => addLadderItem('downsells')}
-                      className="text-xs text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap"
-                    >
-                      + Add downsell
-                    </button>
-                  </div>
-                  {(profile.offer_ladder?.downsells || []).length === 0 && (
-                    <p className="text-xs text-gray-400 dark:text-gray-500">
-                      None yet. A trial, mini-program, or low-ticket on-ramp works well here.
-                    </p>
-                  )}
-                  {(profile.offer_ladder?.downsells || []).map((d, idx) => (
-                    <div key={idx} className="rounded-md border border-gray-200 dark:border-white/10 p-3 space-y-2">
-                      <div className="flex items-start gap-2">
-                        <input
-                          type="text"
-                          value={d.name || ''}
-                          onChange={(e) => updateLadderItem('downsells', idx, 'name', e.target.value)}
-                          placeholder="Name (e.g. 30-day starter)"
-                          className="flex-1 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <input
-                          type="text"
-                          value={d.price_terms || ''}
-                          onChange={(e) => updateLadderItem('downsells', idx, 'price_terms', e.target.value)}
-                          placeholder="Price / terms"
-                          className="w-40 px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeLadderItem('downsells', idx)}
-                          className="mt-1 p-1.5 text-gray-400 hover:text-red-500"
-                          title="Remove"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                      <textarea
-                        value={d.promise || ''}
-                        onChange={(e) => updateLadderItem('downsells', idx, 'promise', e.target.value)}
-                        rows={2}
-                        placeholder="Promise / outcome"
-                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
-                      <textarea
-                        value={d.when_to_use || ''}
-                        onChange={(e) => updateLadderItem('downsells', idx, 'when_to_use', e.target.value)}
-                        rows={2}
-                        placeholder="When to use (e.g. price objection, not ready for full commitment)"
-                        className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      />
                     </div>
                   ))}
                 </div>
@@ -1378,32 +1119,45 @@ export default function IntelligencePanel({
               </>
             )}
 
-            {/* ── Marketing ── */}
-            {activeSection === 'marketing' && (
+            {/* ── Your Brand ── */}
+            {activeSection === 'brand' && (
               <>
                 <div>
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Marketing</h3>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Helps the AI craft nurture sequences and suggest outreach that fits your brand and channels.</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Your Brand</h3>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Anchors copy, content, and outreach in what makes you distinct — your edge, your story, and your mission.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Marketing strategy overview</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">USP</label>
                   <textarea
-                    value={profile.marketing_strategy || ''}
-                    onChange={(e) => update('marketing_strategy', e.target.value)}
+                    value={profile.unique_selling_proposition || ''}
+                    onChange={(e) => update('unique_selling_proposition', e.target.value)}
                     rows={3}
-                    placeholder="e.g. Content marketing via Instagram Reels + email nurture. I post 5x/week and run a weekly newsletter. My funnel is: IG → freebie opt-in → email sequence → sales call."
+                    placeholder="e.g. Medically-informed programming, direct access to me via Voxer, and a money-back guarantee if you don't see results in 8 weeks."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Primary channels</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Personal story</label>
                   <textarea
-                    value={profile.marketing_channels || ''}
-                    onChange={(e) => update('marketing_channels', e.target.value)}
-                    rows={2}
-                    placeholder="e.g. Instagram, email (Brevo), TikTok, podcast guest appearances, Facebook group"
+                    value={profile.personal_story || ''}
+                    onChange={(e) => update('personal_story', e.target.value)}
+                    rows={5}
+                    placeholder="e.g. I burned out as a corporate trainer, rebuilt my health after my second child, and now help other moms do the same without all-or-nothing plans."
+                    className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Mission statement</label>
+                  <textarea
+                    value={profile.mission_statement || ''}
+                    onChange={(e) => update('mission_statement', e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Help busy parents reclaim strength and confidence with coaching that fits real life — not another unsustainable grind."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

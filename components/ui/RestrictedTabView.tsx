@@ -8,7 +8,7 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
   const displayName = TAB_DISPLAY_NAMES[tabName] || tabName;
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-[calc(100vh-1.5rem)] flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8 text-center">
         <div>
           <div className="mx-auto flex items-center justify-center h-20 w-20 rounded-full glass-panel">
@@ -17,6 +17,7 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
+              aria-hidden
             >
               <path
                 strokeLinecap="round"
@@ -27,26 +28,19 @@ export default function RestrictedTabView({ tabName }: RestrictedTabViewProps) {
             </svg>
           </div>
           <h2 className="mt-6 text-3xl font-extrabold text-gray-900 dark:text-gray-100">
-            {displayName} Access Restricted
+            {displayName} is locked
           </h2>
           <p className="mt-2 text-sm text-gray-600 dark:text-gray-400 digitized-text">
-            This feature requires additional permissions.
+            This feature isn&apos;t included in your current tier.
           </p>
         </div>
         <div className="glass-card neon-glow p-6">
-          <p className="text-gray-700 dark:text-gray-300 mb-4">
-            To access the <strong>{displayName}</strong> dashboard, please contact the Sweep OS team to request access.
+          <p className="text-gray-700 dark:text-gray-300 mb-2">
+            To unlock <strong>{displayName}</strong>, speak with your assigned consultant about
+            upgrading your consulting tier.
           </p>
-          <div className="mt-6">
-            <a
-              href="mailto:support@sweepos.com?subject=Feature Access Request"
-              className="w-full flex justify-center py-2 px-4 rounded-md text-sm font-medium glass-button neon-glow focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 dark:focus:ring-offset-gray-800"
-            >
-              Contact Sweep OS Team
-            </a>
-          </div>
-          <p className="mt-4 text-xs text-gray-500 dark:text-gray-400 digitized-text">
-            Or reach out to your organization administrator to request access.
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            They can enable this tab for your organization once you&apos;re on the right plan.
           </p>
         </div>
       </div>

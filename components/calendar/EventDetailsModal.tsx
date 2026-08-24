@@ -8,6 +8,10 @@ import {
   displayStatusFromCheckInFlags,
   type CalendarDisplayStatus,
 } from '@/lib/calendarBookingStatus';
+import {
+  CALENDAR_BOOKINGS_UPDATED_EVENT,
+  TERMINAL_CHART_REFRESH_EVENT,
+} from '@/lib/cache';
 
 interface EventDetailsModalProps {
   isOpen: boolean;
@@ -170,6 +174,15 @@ export default function EventDetailsModal({
     }
   };
 
+  const notifySalesUpdated = () => {
+    onSalesUpdated?.();
+    // Always poke Terminal graph — don't rely only on parent callbacks.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(CALENDAR_BOOKINGS_UPDATED_EVENT));
+      window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
+    }
+  };
+
   const updateSalesFlags = async (updates: { sale_closed?: boolean | null; is_sales_call?: boolean }) => {
     if (checkInId || provider === 'manual') {
       const cid = checkInId ? checkInId : String(eventId).replace(/^manual_/, '');
@@ -183,7 +196,7 @@ export default function EventDetailsModal({
           ...(updated as ManualCheckIn),
           provider: ((updated as { provider?: string }).provider || provider) as ManualCheckIn['provider'],
         });
-        onSalesUpdated?.();
+        notifySalesUpdated();
       } catch (err) {
         console.error('Failed to update check-in flags:', err);
       } finally {
@@ -230,7 +243,7 @@ export default function EventDetailsModal({
           setEvent({ ...event, is_sales_call: firstUpdated.is_sales_call, sale_closed: firstUpdated.sale_closed });
         }
       }
-      onSalesUpdated?.();
+      notifySalesUpdated();
     } catch (err) {
       console.error('Failed to update sales flags:', err);
     } finally {

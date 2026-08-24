@@ -74,7 +74,7 @@ export default function ClientHealthScoreDrawer({
       leaveTo="translate-y-full opacity-0"
     >
       <div
-        className="fixed left-0 right-0 bottom-0 z-[45] max-h-[50vh] flex flex-col rounded-t-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-b-0 shadow-2xl"
+        className="fixed inset-x-0 bottom-0 z-[70] max-h-[min(70dvh,32rem)] landscape:max-h-[min(85dvh,28rem)] flex flex-col rounded-t-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 border-b-0 shadow-2xl pb-[env(safe-area-inset-bottom,0px)]"
         role="dialog"
         aria-label="Client health score"
       >
@@ -88,9 +88,9 @@ export default function ClientHealthScoreDrawer({
           />
         </div>
 
-        <div className="px-4 pb-6 pt-2 overflow-y-auto flex-1 min-h-0">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+        <div className="px-4 pb-6 pt-2 overflow-y-auto overscroll-contain flex-1 min-h-0">
+          <div className="flex items-center justify-between mb-4 gap-2 min-w-0">
+            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 min-w-0 truncate">
               Health Score
               {client && (
                 <span className="ml-2 text-sm font-normal text-gray-500 dark:text-gray-400">
@@ -101,7 +101,7 @@ export default function ClientHealthScoreDrawer({
             <button
               type="button"
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors"
+              className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg transition-colors flex-shrink-0"
               aria-label="Close"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -124,14 +124,14 @@ export default function ClientHealthScoreDrawer({
 
           {!loading && !error && data && (
             <>
-              <div className="flex items-center gap-6 mb-6">
+              <div className="flex flex-wrap items-center gap-4 sm:gap-6 mb-6">
                 <div className="flex items-baseline gap-2">
-                  <span className={`text-4xl font-bold tabular-nums ${scoreColor(data.score)}`}>
+                  <span className={`text-3xl sm:text-4xl font-bold tabular-nums ${scoreColor(data.score)}`}>
                     {Math.round(data.score)}
                   </span>
-                  <span className="text-lg text-gray-500 dark:text-gray-400">/ 100</span>
+                  <span className="text-base sm:text-lg text-gray-500 dark:text-gray-400">/ 100</span>
                 </div>
-                <span className={`text-2xl font-semibold ${gradeColor(data.grade)}`}>
+                <span className={`text-xl sm:text-2xl font-semibold ${gradeColor(data.grade)}`}>
                   Grade {data.grade}
                 </span>
               </div>
@@ -143,14 +143,14 @@ export default function ClientHealthScoreDrawer({
                 {data.factors.map((factor) => (
                   <div
                     key={factor.key}
-                    className="flex items-start justify-between gap-4 py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50"
+                    className="flex items-start justify-between gap-3 sm:gap-4 py-2 px-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/50"
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
                         {factor.label}
                       </p>
                       {factor.description && (
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">
                           {factor.description}
                         </p>
                       )}
