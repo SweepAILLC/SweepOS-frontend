@@ -295,7 +295,7 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
                     <div className="mt-3 space-y-3 pl-0">
                       <p className="text-xs text-gray-500 dark:text-gray-400">
                         Fathom and other API keys are configured per organization in the{' '}
-                        <Link href="/?tab=integrations" className="text-violet-600 dark:text-violet-400 underline" onClick={onClose}>
+                        <Link href="/?tab=settings&section=integrations" className="text-violet-600 dark:text-violet-400 underline" onClick={onClose}>
                           Integrations
                         </Link>{' '}
                         tab (admins/owners).

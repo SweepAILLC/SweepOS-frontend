@@ -43,6 +43,55 @@ function formatCtx(ctx: Record<string, unknown> | undefined): string {
   return parts.join(' ');
 }
 
+function isGlanceCallLibraryItem(item: CallLibraryItem | null | undefined): boolean {
+  if (!item) return false;
+  const kind = (item.analysis_kind || (item.report?.analysis_kind as string | undefined) || '')
+    .toString()
+    .toLowerCase();
+  if (kind === 'glance') return true;
+  if (kind === 'sales') return false;
+  const report = item.report;
+  if (!report || typeof report !== 'object') return false;
+  // Non-sales payload: Fathom summary / AI paragraph, or legacy glance block.
+  if (report.fathom_summary || report.ai_summary || report.glance) return true;
+  return false;
+}
+
+function glanceAiSummary(report: Record<string, unknown> | null | undefined): string {
+  if (!report || typeof report !== 'object') return '';
+  const direct = String(report.ai_summary || '').trim();
+  if (direct) return direct;
+  const glance = report.glance;
+  if (glance && typeof glance === 'object') {
+    return String((glance as { analysis?: unknown }).analysis || '').trim();
+  }
+  return '';
+}
+
+function glanceFathomSummary(report: Record<string, unknown> | null | undefined): string {
+  if (!report || typeof report !== 'object') return '';
+  return cleanFathomSummaryText(String(report.fathom_summary || ''));
+}
+
+/** Unwrap Fathom timestamp markdown links into readable plain text. */
+function cleanFathomSummaryText(text: string): string {
+  if (!text) return '';
+  let out = text;
+  // [label](https://fathom.video/...) → label
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(/\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g, '$1');
+    if (next === out) break;
+    out = next;
+  }
+  out = out.replace(/https?:\/\/(?:www\.)?fathom\.video\/\S+/gi, '');
+  out = out.replace(/\*\*([^*]+)\*\*/g, '$1');
+  out = out.replace(/\*([^*\n]+)\*/g, '$1');
+  out = out.replace(/[ \t]+\n/g, '\n');
+  out = out.replace(/\n{3,}/g, '\n\n');
+  out = out.replace(/[ \t]{2,}/g, ' ');
+  return out.trim();
+}
+
 const BILLING_SUFFIX: Record<string, string> = {
   recurring_monthly: '/mo',
   recurring_annual: '/yr',
@@ -113,6 +162,12 @@ function callLibraryStatusMessage(
   if (failureReason === 'llm_failed') {
     return 'Analysis failed. Use Refresh to retry.';
   }
+  if (failureReason === 'llm_empty') {
+    return 'Analysis returned empty results. Use Refresh to retry.';
+  }
+  if (failureReason === 'analysis_failed') {
+    return 'Analysis failed after 3 attempts. No further automatic retries.';
+  }
   if (failureReason === 'budget_deferred') {
     return 'Analysis is queued — waiting for the LLM rate limit window.';
   }
@@ -134,6 +189,7 @@ export default function CallLibraryPanel() {
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [renameSaving, setRenameSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
 
   const itemsSorted = (data?.items ?? []).slice().sort((a, b) => {
@@ -186,23 +242,16 @@ export default function CallLibraryPanel() {
     setRefreshNote(null);
     setRefreshError(null);
     try {
-      // Refresh should *sync* from Fathom first, then reload the library.
-      // The backend only ingests meetings associated to client emails for this org.
+      // Refresh syncs new Fathom metadata, then re-queues a bounded batch of
+      // failed / genuinely-stuck reports so recovery visibly progresses.
       const beforeIds = new Set(itemIdSet);
       const syncRes = await apiClient.syncFathomMeetings();
-      let llmRetried = 0;
-      let stuckRetried = 0;
-      try {
-        const r = await apiClient.retryCallLibraryLlmFailed();
-        llmRetried = Number(r?.requeued ?? 0);
-      } catch (e) {
-        console.warn('[CallLibrary] retry LLM failed reports:', e);
-      }
+      let requeued = 0;
       try {
         const r = await apiClient.retryCallLibraryStuckPending();
-        stuckRetried = Number(r?.requeued ?? 0);
+        requeued = Number(r?.requeued ?? 0);
       } catch (e) {
-        console.warn('[CallLibrary] retry stuck pending reports:', e);
+        console.warn('[CallLibrary] retry stuck/failed:', e);
       }
       await load();
 
@@ -210,19 +259,15 @@ export default function CallLibraryPanel() {
       const skipped = Boolean((syncRes as { skipped?: boolean }).skipped);
       if (skipped) {
         const reason = String((syncRes as { reason?: string }).reason || 'Sync skipped');
-        setRefreshNote(`Sync skipped: ${reason}`);
-        setPostSyncPollUntilMs(null);
+        const note = requeued > 0 ? ` Re-queued ${requeued} for analysis.` : '';
+        setRefreshNote(`Sync skipped: ${reason}.${note}`);
+        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
         return;
       }
 
       const ingested = Number((syncRes as { ingested?: number }).ingested ?? 0);
       const seen = Number((syncRes as { meetings_seen?: number }).meetings_seen ?? 0);
       const skippedNoClient = Number((syncRes as { skipped_no_client_match?: number }).skipped_no_client_match ?? 0);
-
-      const llmNote =
-        llmRetried > 0 || stuckRetried > 0
-          ? ` Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
-          : '';
 
       if (!ingested) {
         const parts: string[] = [];
@@ -233,29 +278,24 @@ export default function CallLibraryPanel() {
         } else {
           parts.push('No new calls available.');
         }
-        if (llmRetried > 0 || stuckRetried > 0) {
-          parts.push(
-            `Re-queued ${llmRetried + stuckRetried} analysis job${llmRetried + stuckRetried === 1 ? '' : 's'}.`
-          );
-        }
+        if (requeued > 0) parts.push(`Re-queued ${requeued} for analysis.`);
         setRefreshNote(parts.join(' '));
-        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : null);
+        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
         return;
       }
 
-      // New Fathom rows ingested — background report generation; optionally LLM retries too.
+      // New Fathom rows ingested — background report generation runs on the worker.
       const afterIds = new Set((data?.items ?? []).map((i) => i.id));
       const newAppeared = Array.from(afterIds).some((id) => !beforeIds.has(id));
-      let note = '';
       if (newAppeared) {
-        note = `Found ${ingested} new call${ingested === 1 ? '' : 's'}.`;
-        setPostSyncPollUntilMs(llmRetried + stuckRetried > 0 ? Date.now() + 90_000 : Date.now() + 45_000);
+        setRefreshNote(`Found ${ingested} new call${ingested === 1 ? '' : 's'}.`);
+        setPostSyncPollUntilMs(Date.now() + 45_000);
       } else {
-        note = `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`;
-        setPostSyncPollUntilMs(Date.now() + (llmRetried + stuckRetried > 0 ? 90_000 : 45_000));
+        setRefreshNote(
+          `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`
+        );
+        setPostSyncPollUntilMs(Date.now() + 45_000);
       }
-      note += llmNote;
-      setRefreshNote(note.trim());
     } catch (e: unknown) {
       setRefreshError(
         formatApiError(e, 'Could not refresh Call Library. Check your connection, confirm Fathom is connected, and try again.')
@@ -318,6 +358,26 @@ export default function CallLibraryPanel() {
       setRenameError(formatApiError(e, 'Could not save this name.'));
     } finally {
       setRenameSaving(false);
+    }
+  };
+
+  const deleteReport = async () => {
+    if (!selectedItem) return;
+    if (
+      typeof window !== 'undefined' &&
+      !window.confirm(`Delete "${selectedItem.call_title}"? This removes the analysis. The Fathom recording is kept.`)
+    ) {
+      return;
+    }
+    setDeleting(true);
+    try {
+      await apiClient.deleteCallLibraryReport(selectedItem.id);
+      setSelectedId(null);
+      await load();
+    } catch (e: unknown) {
+      setRefreshError(formatApiError(e, 'Could not delete this call report.'));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -465,12 +525,17 @@ export default function CallLibraryPanel() {
                             ) : null}
                           </div>
                           <div className="shrink-0 flex flex-col items-end gap-1">
-                            {item.call_score != null && item.status === 'complete' ? (
+                            {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                              <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                                Non-sales
+                              </span>
+                            ) : null}
+                            {item.call_score != null && item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <span className="text-xs font-bold tabular-nums text-violet-600 dark:text-violet-400">
                                 {Math.round(item.call_score)}
                               </span>
                             ) : null}
-                            {item.status === 'complete' ? (
+                            {item.status === 'complete' && !isGlanceCallLibraryItem(item) ? (
                               <ClosedDealBadge item={item} size="xs" />
                             ) : null}
                             {isPending ? (
@@ -533,7 +598,11 @@ export default function CallLibraryPanel() {
                       >
                         <div className="flex items-start justify-between gap-2">
                           <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate">{item.call_title}</p>
-                          {item.status === 'complete' ? (
+                          {isGlanceCallLibraryItem(item) && item.status === 'complete' ? (
+                            <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full shrink-0">
+                              Non-sales
+                            </span>
+                          ) : item.status === 'complete' ? (
                             <ClosedDealBadge item={item} size="xs" />
                           ) : null}
                         </div>
@@ -663,10 +732,17 @@ export default function CallLibraryPanel() {
                           Open recording
                         </a>
                       ) : null}
-                      {selectedItem.status === 'complete' ? (
+                      {selectedItem.status === 'complete' && !isGlanceCallLibraryItem(selectedItem) ? (
                         <ClosedDealBadge item={selectedItem} size="sm" />
                       ) : null}
-                      {selectedItem.call_score != null && selectedItem.status === 'complete' ? (
+                      {isGlanceCallLibraryItem(selectedItem) && selectedItem.status === 'complete' ? (
+                        <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 bg-gray-500/10 px-2 py-0.5 rounded-full">
+                          Non-sales
+                        </span>
+                      ) : null}
+                      {selectedItem.call_score != null &&
+                      selectedItem.status === 'complete' &&
+                      !isGlanceCallLibraryItem(selectedItem) ? (
                         <span
                           title="Sales call quality score (0-100)"
                           className="text-sm font-bold tabular-nums text-violet-600 dark:text-violet-400"
@@ -674,12 +750,96 @@ export default function CallLibraryPanel() {
                           {Math.round(selectedItem.call_score)}
                         </span>
                       ) : null}
+                      <button
+                        type="button"
+                        onClick={() => void deleteReport()}
+                        disabled={deleting}
+                        className="shrink-0 p-1.5 rounded-md text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-500/10 disabled:opacity-50"
+                        title="Delete this call report"
+                        aria-label="Delete this call report"
+                      >
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden>
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                          />
+                        </svg>
+                      </button>
                     </div>
                   </div>
 
                   {selectedItem.status !== 'complete' ? (
                     <div className="px-4 py-4 text-sm text-amber-800 dark:text-amber-200 bg-amber-500/10">
                       {callLibraryStatusMessage(selectedItem.status, selectedItem.failure_reason)}
+                    </div>
+                  ) : selectedItem.report && isGlanceCallLibraryItem(selectedItem) ? (
+                    <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
+                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
+                        <section>
+                          <div className="flex items-center justify-between gap-3">
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
+                            <div className="flex items-center gap-2">
+                              {selectedItem.share_url ? (
+                                <a
+                                  href={selectedItem.share_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open share link
+                                </a>
+                              ) : null}
+                              {selectedItem.video_url ? (
+                                <a
+                                  href={selectedItem.video_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open video
+                                </a>
+                              ) : selectedItem.recording_url ? (
+                                <a
+                                  href={selectedItem.recording_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
+                                >
+                                  Open recording
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                        </section>
+                      ) : null}
+
+                      {(() => {
+                        const ai = glanceAiSummary(selectedItem.report);
+                        if (!ai) return null;
+                        return (
+                          <section>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                              Summary
+                            </h4>
+                            <p className="leading-relaxed">{ai}</p>
+                          </section>
+                        );
+                      })()}
+
+                      {(() => {
+                        const fathom = glanceFathomSummary(selectedItem.report);
+                        if (!fathom) return null;
+                        return (
+                          <section>
+                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+                              Fathom summary
+                            </h4>
+                            <p className="leading-relaxed whitespace-pre-wrap">{fathom}</p>
+                          </section>
+                        );
+                      })()}
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
@@ -768,8 +928,7 @@ export default function CallLibraryPanel() {
                       ) : null}
 
                       {/* Discovery Audit */}
-                      {typeof selectedItem.report.discovery_audit === 'object' &&
-                      selectedItem.report.discovery_audit !== null
+                      {typeof selectedItem.report.discovery_audit === 'object' && selectedItem.report.discovery_audit !== null
                         ? (() => {
                           const da = selectedItem.report.discovery_audit as Record<string, unknown>;
                           const ds = typeof da.discovery_score === 'number' ? da.discovery_score : null;
@@ -852,8 +1011,7 @@ export default function CallLibraryPanel() {
                         : null}
 
                       {/* Pitching Audit */}
-                      {typeof selectedItem.report.pitching_audit === 'object' &&
-                      selectedItem.report.pitching_audit !== null
+                      {typeof selectedItem.report.pitching_audit === 'object' && selectedItem.report.pitching_audit !== null
                         ? (() => {
                           const pa = selectedItem.report.pitching_audit as Record<string, unknown>;
                           const ps = typeof pa.pitch_score === 'number' ? pa.pitch_score : null;
@@ -924,8 +1082,7 @@ export default function CallLibraryPanel() {
                         : null}
 
                       {/* Objection Handling Audit */}
-                      {typeof selectedItem.report.objection_handling_audit === 'object' &&
-                      selectedItem.report.objection_handling_audit !== null
+                      {typeof selectedItem.report.objection_handling_audit === 'object' && selectedItem.report.objection_handling_audit !== null
                         ? (() => {
                           const oa = selectedItem.report.objection_handling_audit as Record<string, unknown>;
                           const os = typeof oa.objection_score === 'number' ? oa.objection_score : null;

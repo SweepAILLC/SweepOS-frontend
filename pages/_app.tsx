@@ -1,4 +1,5 @@
 import type { AppProps } from 'next/app';
+import Head from 'next/head';
 import { useEffect, useRef } from 'react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import '../styles/globals.css';
@@ -117,6 +118,9 @@ export default function App({ Component, pageProps }: AppProps) {
 
   return (
     <ErrorBoundary>
+      <Head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+      </Head>
       <ThemeProvider>
         <ToastProvider>
           <SidebarProvider>

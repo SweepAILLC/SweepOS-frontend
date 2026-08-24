@@ -68,15 +68,11 @@ export default function Dashboard() {
     return 'terminal';
   };
 
-  const [activeTab, setActiveTab] = useState<DashboardTabId>(() => getInitialTab());
+  const [activeTab, setActiveTab] = useState<DashboardTabId>('terminal');
   /** Pipeline board mounts on first visit and stays mounted for instant return. */
-  const [pipelineMounted, setPipelineMounted] = useState(
-    () => getInitialTab() === 'pipeline',
-  );
+  const [pipelineMounted, setPipelineMounted] = useState(false);
   /** KPI Command Center stays mounted after first visit to avoid cold-load flicker. */
-  const [kpiMounted, setKpiMounted] = useState(
-    () => getInitialTab() === 'kpi_command_center',
-  );
+  const [kpiMounted, setKpiMounted] = useState(false);
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   /** Platform operators (sudo / Sweep Internal admin|owner) — see AdminPanel on org portal. */
@@ -91,6 +87,15 @@ export default function Dashboard() {
   const [automationsAwaitingApproval, setAutomationsAwaitingApproval] = useState(0);
   const [consultingTier, setConsultingTier] = useState<ConsultingTier | null>(null);
   const [bookingUrl, setBookingUrl] = useState<string | null>(null);
+
+  // Read tab from localStorage only after mount. Loading shell is shown until auth
+  // finishes, so useEffect is enough and avoids SSR useLayoutEffect hydration warnings.
+  useEffect(() => {
+    const tab = getInitialTab();
+    setActiveTab(tab);
+    setPipelineMounted(tab === 'pipeline');
+    setKpiMounted(tab === 'kpi_command_center');
+  }, []);
 
   // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
   useEffect(() => {
@@ -222,9 +227,13 @@ export default function Dashboard() {
 
     // Run auth check immediately
     checkAuth();
-    
+    const loadingSafety = window.setTimeout(() => {
+      if (isMounted) setLoadingState(false);
+    }, 8000);
+
     return () => {
       isMounted = false;
+      window.clearTimeout(loadingSafety);
     };
   }, []); // Only run once on mount
 
@@ -633,5 +642,9 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+export async function getServerSideProps() {
+  return { props: {} };
 }
 

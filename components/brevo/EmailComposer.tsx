@@ -1,7 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
-import { DEFAULT_EMAIL_HTML_TEMPLATE } from '@/lib/emailHtmlDefaultTemplate';
 
 interface EmailComposerProps {
   recipients?: Array<{ email: string; name?: string }>;
@@ -31,24 +30,6 @@ function plainTextToSimpleHtml(text: string): string {
     .join('');
 }
 
-function applyHtmlTemplate(
-  template: string,
-  vars: { BODY_HTML: string; SUBJECT: string; SENDER_NAME: string; SENDER_EMAIL: string }
-): string {
-  let out = template || '';
-  out = out.replaceAll('{{BODY_HTML}}', vars.BODY_HTML);
-  out = out.replaceAll('{{SUBJECT}}', escapeHtml(vars.SUBJECT));
-  out = out.replaceAll('{{SENDER_NAME}}', escapeHtml(vars.SENDER_NAME));
-  out = out.replaceAll('{{SENDER_EMAIL}}', escapeHtml(vars.SENDER_EMAIL));
-  return out;
-}
-
-/** True when the user likely pasted or edited a full email document (not just a body fragment). */
-function looksLikeFullHtmlDoc(s: string): boolean {
-  const t = (s || '').trim();
-  return /^<!doctype/i.test(t) || /^<html[\s>]/i.test(t);
-}
-
 export default function EmailComposer({
   recipients: initialRecipients,
   onClose,
@@ -71,14 +52,6 @@ export default function EmailComposer({
   const [senders, setSenders] = useState<Array<{ id: number; name: string; email: string; active: boolean }>>([]);
   const [loadingSenders, setLoadingSenders] = useState(false);
   const [selectedSenderId, setSelectedSenderId] = useState<number | null>(null);
-  const [brandingEnabled, setBrandingEnabled] = useState(false);
-  const [brandingTemplate, setBrandingTemplate] = useState<string>('');
-  const [useBranding, setUseBranding] = useState(false);
-  const [brandingLoaded, setBrandingLoaded] = useState(false);
-  /** auto: HTML field follows plain text + template; manual: user edits HTML freely */
-  const [htmlEditMode, setHtmlEditMode] = useState<'auto' | 'manual'>(() =>
-    initialHtmlContent && looksLikeFullHtmlDoc(initialHtmlContent) ? 'manual' : 'auto'
-  );
 
   useEffect(() => {
     if (initialRecipients) {
@@ -86,7 +59,6 @@ export default function EmailComposer({
       setSelectedRecipientIndices(new Set(initialRecipients.map((_, i) => i)));
     }
     void loadSenders();
-    void loadBrandingSettings();
   }, [initialRecipients]);
 
   useEffect(() => {
@@ -117,55 +89,6 @@ export default function EmailComposer({
       setLoadingSenders(false);
     }
   };
-
-  const loadBrandingSettings = async () => {
-    try {
-      const settings = await apiClient.getUserSettings();
-      const ap = settings?.ai_profile as Record<string, unknown> | undefined;
-      if (!ap || typeof ap !== 'object') {
-        setBrandingLoaded(true);
-        return;
-      }
-      const enabled = Boolean(ap.email_html_template_enabled);
-      const tpl = typeof ap.email_html_template === 'string' ? ap.email_html_template : '';
-      setBrandingEnabled(enabled);
-      setBrandingTemplate(tpl);
-      setUseBranding(enabled);
-    } catch {
-      // best-effort only
-    } finally {
-      setBrandingLoaded(true);
-    }
-  };
-
-  /** Saved template or built-in default so preview/send never get an empty shell when branding is on. */
-  const effectiveBrandingTemplate =
-    (brandingTemplate || '').trim() || DEFAULT_EMAIL_HTML_TEMPLATE;
-
-  const buildBrandedFullHtml = useCallback(() => {
-    return applyHtmlTemplate(effectiveBrandingTemplate, {
-      BODY_HTML: plainTextToSimpleHtml(textContent || ''),
-      SUBJECT: subject,
-      SENDER_NAME: senderName || senderEmail,
-      SENDER_EMAIL: senderEmail,
-    });
-  }, [effectiveBrandingTemplate, textContent, subject, senderName, senderEmail]);
-
-  /** Keep the HTML textarea filled with the full branded document while in auto mode. */
-  useEffect(() => {
-    if (!brandingLoaded || useTemplate || !useBranding || !brandingEnabled) return;
-    if (htmlEditMode !== 'auto') return;
-    const next = buildBrandedFullHtml();
-    setHtmlContent((prev) => (prev === next ? prev : next));
-  }, [
-    brandingLoaded,
-    useTemplate,
-    useBranding,
-    brandingEnabled,
-    htmlEditMode,
-    buildBrandedFullHtml,
-  ]);
-
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -200,13 +123,8 @@ export default function EmailComposer({
 
       let bodyHtmlFinal = '';
       if (!useTemplate) {
-        if (useBranding && brandingEnabled) {
-          // HTML textarea holds the full sendable document (auto-filled or edited live).
-          bodyHtmlFinal = (htmlContent || '').trim() || buildBrandedFullHtml();
-        } else {
-          bodyHtmlFinal =
-            (htmlContent || '').trim() || plainTextToSimpleHtml(textContent || '');
-        }
+        bodyHtmlFinal =
+          (htmlContent || '').trim() || plainTextToSimpleHtml(textContent || '');
       }
 
       const payload: Parameters<typeof apiClient.sendBrevoTransactionalEmail>[0] = {
@@ -239,15 +157,6 @@ export default function EmailComposer({
   const sendButtonCount =
     selectedRecipientIndices.size > 0 ? selectedRecipientIndices.size : recipients.length;
 
-  const showBrandedPreview = !useTemplate && brandingEnabled && useBranding && brandingLoaded;
-
-  const previewHtml = useMemo(() => {
-    if (!showBrandedPreview) return '';
-    const raw = (htmlContent || '').trim();
-    if (raw) return raw;
-    return buildBrandedFullHtml();
-  }, [showBrandedPreview, htmlContent, buildBrandedFullHtml]);
-
   const modalContent = (
     <div
       className="fixed inset-0 bg-black bg-opacity-70 dark:bg-opacity-80 flex items-start justify-center z-[99999] p-4 overflow-y-auto"
@@ -255,9 +164,7 @@ export default function EmailComposer({
       style={{ paddingTop: '2rem' }}
     >
       <div
-        className={`bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-6 w-full my-4 ${
-          showBrandedPreview ? 'max-w-6xl' : 'max-w-3xl'
-        }`}
+        className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-6 w-full my-4 max-w-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex justify-between items-center mb-4">
@@ -273,11 +180,7 @@ export default function EmailComposer({
           </div>
         )}
 
-        <div
-          className={
-            showBrandedPreview ? 'grid grid-cols-1 md:grid-cols-2 gap-4 items-start' : ''
-          }
-        >
+        <div>
           <form onSubmit={handleSend} className="space-y-4 min-w-0">
             <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md border border-gray-200/80 dark:border-gray-600/50">
               {recipients.length > 0 ? (
@@ -449,22 +352,6 @@ export default function EmailComposer({
                 />
                 <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Use Template</span>
               </label>
-
-              {!useTemplate && brandingEnabled && brandingLoaded && (
-                <label className="flex items-center space-x-2">
-                  <input
-                    type="checkbox"
-                    checked={useBranding}
-                    onChange={(e) => {
-                      const on = e.target.checked;
-                      setUseBranding(on);
-                      if (on) setHtmlEditMode('auto');
-                    }}
-                    className="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
-                  />
-                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Use branded HTML layout</span>
-                </label>
-              )}
             </div>
 
             {useTemplate ? (
@@ -498,55 +385,17 @@ export default function EmailComposer({
                 </div>
 
                 <div>
-                  <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                      HTML{' '}
-                      <span className="text-gray-500 dark:text-gray-400 font-normal">
-                        {showBrandedPreview
-                          ? '(full branded email — edit live; preview updates)'
-                          : '(optional fallback)'}
-                      </span>
-                    </label>
-                    {showBrandedPreview && (
-                      <div className="flex items-center gap-2">
-                        <span className="text-[11px] text-gray-500 dark:text-gray-400">
-                          {htmlEditMode === 'auto'
-                            ? 'Synced from plain text'
-                            : 'Custom HTML (plain text changes won’t overwrite)'}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHtmlEditMode('auto');
-                            setHtmlContent(buildBrandedFullHtml());
-                          }}
-                          className="text-xs font-medium text-primary-600 dark:text-primary-400 hover:underline"
-                        >
-                          Reset from plain text
-                        </button>
-                      </div>
-                    )}
-                  </div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    HTML{' '}
+                    <span className="text-gray-500 dark:text-gray-400 font-normal">(optional fallback)</span>
+                  </label>
                   <textarea
                     value={htmlContent}
-                    onChange={(e) => {
-                      setHtmlContent(e.target.value);
-                      setHtmlEditMode('manual');
-                    }}
-                    rows={showBrandedPreview ? 14 : 8}
+                    onChange={(e) => setHtmlContent(e.target.value)}
+                    rows={8}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 dark:focus:ring-primary-400"
-                    placeholder={
-                      showBrandedPreview
-                        ? 'Full HTML email fills automatically from your branded template…'
-                        : '<html><body><p>Optional HTML version…</p></body></html>'
-                    }
+                    placeholder="<html><body><p>Optional HTML version…</p></body></html>"
                   />
-                  {showBrandedPreview ? (
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Edit this field to tweak branding, spacing, or wording for HTML clients. Use &quot;Reset from plain
-                      text&quot; to regenerate from the plain body and template.
-                    </p>
-                  ) : null}
                 </div>
               </>
             )}
@@ -568,23 +417,6 @@ export default function EmailComposer({
               </button>
             </div>
           </form>
-
-          {showBrandedPreview && (
-            <div className="min-w-0">
-              <div className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-2">Preview</div>
-              <div className="rounded-md border border-gray-200 dark:border-gray-700 bg-white overflow-hidden">
-                <iframe
-                  title="email-html-preview"
-                  className="w-full min-h-[420px] h-[min(70vh,820px)] bg-white"
-                  srcDoc={previewHtml}
-                />
-              </div>
-              <p className="mt-2 text-[11px] text-gray-500 dark:text-gray-400">
-                Matches the HTML field on the left (your branded template plus edits). Actual inbox rendering can vary
-                slightly.
-              </p>
-            </div>
-          )}
         </div>
       </div>
     </div>

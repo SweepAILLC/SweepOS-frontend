@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
 import { Client, ClientPaymentsResponse } from '@/types/client';
 import { apiClient } from '@/lib/api';
@@ -15,7 +15,12 @@ import {
   normalizeLifecycleColumn,
   withNormalizedLifecycle,
 } from '@/lib/pipelineColumns';
-import { isProgramProgressVisible, buildOptimisticClientFromTimerFields } from '@/lib/clientProgram';
+import {
+  isProgramProgressVisible,
+  buildOptimisticClientFromTimerFields,
+  dateInputToProgramIso,
+  programIsoToDateInput,
+} from '@/lib/clientProgram';
 import { BrevoStatus } from '@/types/integration';
 import EmailComposer from '../brevo/EmailComposer';
 import ClientCheckInCalendar from './ClientCheckInCalendar';
@@ -93,58 +98,46 @@ export default function ClientDetailDrawer({
     void saveClientFields();
   };
 
-  const pushTimerOptimistic = useCallback(
-    (snapshot: typeof formData) => {
-      if (!client || !onClientSaved) return;
-      onClientSaved(
-        withNormalizedLifecycle(buildOptimisticClientFromTimerFields(client, snapshot)),
-      );
-    },
-    [client, onClientSaved],
-  );
+  const clientId = client?.id ?? null;
 
-  const TIMER_FORM_KEYS = ['program_start_date', 'program_end_date', 'follow_up_due_date'] as const;
-
+  // Sync form when opening the drawer or switching clients — not on every board
+  // optimistic update (that was wiping in-progress timeline edits).
   useEffect(() => {
     if (isOpen) setShowCheckInCalendar(false);
-    
-    if (client) {
-      setFormData({
-        first_name: client.first_name || '',
-        last_name: client.last_name || '',
-        email: client.email || '',
-        emails: Array.isArray(client.emails) ? [...client.emails] : [],
-        phone: client.phone || '',
-        instagram: client.instagram || '',
-        notes: client.notes || '',
-        program_start_date: client.program_start_date 
-          ? new Date(client.program_start_date).toISOString().split('T')[0] 
-          : '',
-        program_end_date: client.program_end_date 
-          ? new Date(client.program_end_date).toISOString().split('T')[0] 
-          : '',
-        follow_up_due_date: followUpIsoToDateInput(
-          typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
-        ),
+
+    if (!client || !isOpen) return;
+
+    setFormData({
+      first_name: client.first_name || '',
+      last_name: client.last_name || '',
+      email: client.email || '',
+      emails: Array.isArray(client.emails) ? [...client.emails] : [],
+      phone: client.phone || '',
+      instagram: client.instagram || '',
+      notes: client.notes || '',
+      program_start_date: programIsoToDateInput(client.program_start_date),
+      program_end_date: programIsoToDateInput(client.program_end_date),
+      follow_up_due_date: followUpIsoToDateInput(
+        typeof client.meta?.follow_up_due_at === 'string' ? client.meta.follow_up_due_at : null,
+      ),
+    });
+    loadPayments();
+    loadBrevoStatus();
+    loadNextCheckIn();
+
+    if (client.program_start_date && client.program_end_date) {
+      apiClient.getClient(client.id).then((updatedClient) => {
+        const normalized = withNormalizedLifecycle(updatedClient);
+        if (normalized.lifecycle_state !== client.lifecycle_state) {
+          onClientSaved?.(normalized);
+        }
+      }).catch((error) => {
+        console.error('[ClientDetailDrawer] Error fetching updated client:', error);
       });
-      loadPayments();
-      loadBrevoStatus();
-      loadNextCheckIn();
-      
-      // Automatically trigger automation when drawer opens
-      // The get_client endpoint will update the state based on progress
-      if (isOpen && client.program_start_date && client.program_end_date) {
-        apiClient.getClient(client.id).then((updatedClient) => {
-          const normalized = withNormalizedLifecycle(updatedClient);
-          if (normalized.lifecycle_state !== client.lifecycle_state) {
-            onClientSaved?.(normalized);
-          }
-        }).catch((error) => {
-          console.error('[ClientDetailDrawer] Error fetching updated client:', error);
-        });
-      }
     }
-  }, [client, isOpen]);
+    // intentionally clientId + isOpen only
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, isOpen]);
 
   // When the board triggers a refresh (Stripe/Whop/calendar sync), reload the drawer's
   // transactions + calendar summary even if the selected client didn't change.
@@ -270,27 +263,22 @@ export default function ClientDetailDrawer({
       setIfChanged('instagram', snapshot.instagram, client.instagram ?? '');
       setIfChanged('notes', snapshot.notes, client.notes ?? '');
 
-      const currentStartDate = client.program_start_date
-        ? new Date(client.program_start_date).toISOString().split('T')[0]
-        : '';
-      const currentEndDate = client.program_end_date
-        ? new Date(client.program_end_date).toISOString().split('T')[0]
-        : '';
+      const currentStartDate = programIsoToDateInput(client.program_start_date);
+      const currentEndDate = programIsoToDateInput(client.program_end_date);
 
       if (snapshot.program_start_date !== currentStartDate) {
-        if (snapshot.program_start_date && snapshot.program_start_date.trim() !== '') {
-          updateData.program_start_date = new Date(snapshot.program_start_date + 'T00:00:00').toISOString();
-        } else {
-          updateData.program_start_date = null;
-        }
+        updateData.program_start_date = dateInputToProgramIso(snapshot.program_start_date);
       }
 
       if (snapshot.program_end_date !== currentEndDate) {
-        if (snapshot.program_end_date && snapshot.program_end_date.trim() !== '') {
-          updateData.program_end_date = new Date(snapshot.program_end_date + 'T00:00:00').toISOString();
-        } else {
-          updateData.program_end_date = null;
-        }
+        updateData.program_end_date = dateInputToProgramIso(snapshot.program_end_date);
+      }
+
+      // When either date changes, send both so the backend can recompute duration.
+      if ('program_start_date' in updateData || 'program_end_date' in updateData) {
+        updateData.program_start_date =
+          dateInputToProgramIso(snapshot.program_start_date) ?? null;
+        updateData.program_end_date = dateInputToProgramIso(snapshot.program_end_date) ?? null;
       }
 
       const isLeadClient =
@@ -547,7 +535,7 @@ export default function ClientDetailDrawer({
     <Transition show={isOpen} as={Fragment}>
       <Dialog 
         as="div" 
-        className="relative z-50" 
+        className="relative z-[70]" 
         onClose={onClose}
       >
         <Transition.Child
@@ -559,12 +547,12 @@ export default function ClientDetailDrawer({
           leaveFrom="opacity-100"
           leaveTo="opacity-0"
         >
-          <div className="fixed inset-0 bg-black bg-opacity-25" />
+          <div className="fixed inset-0 bg-black/40" />
         </Transition.Child>
 
         <div className="fixed inset-0 overflow-hidden">
           <div className="absolute inset-0 overflow-hidden">
-            <div className="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-10">
+            <div className="pointer-events-none fixed inset-y-0 right-0 flex max-w-full pl-0 sm:pl-10">
               <Transition.Child
                 as={Fragment}
                 enter="transform transition ease-in-out duration-500 sm:duration-700"
@@ -574,15 +562,25 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-[min(90vw,1400px)] max-w-none flex h-full flex-col bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:glass-card dark:bg-gray-950/95 rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-                    <div className="flex-shrink-0 px-4 py-4 sm:px-6 border-b border-gray-200 dark:border-white/10">
-                        <div className="flex items-center justify-between gap-3">
-                        <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">
+                    <div className="flex-shrink-0 px-3 py-3 sm:px-6 sm:py-4 border-b border-gray-200 dark:border-white/10">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+                        <Dialog.Title className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0 pr-8 sm:pr-0 relative">
                           Client Profile
+                          <button
+                            type="button"
+                            onClick={onClose}
+                            className="absolute right-0 top-1/2 -translate-y-1/2 p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors sm:hidden"
+                            aria-label="Close"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
                         </Dialog.Title>
-                            <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
                               {savingFields ? (
                                 <span className="text-xs text-gray-400 dark:text-gray-500" aria-live="polite">
                                   Saving…
@@ -594,33 +592,33 @@ export default function ClientDetailDrawer({
                                     type="button"
                                     onClick={handleEmailClient}
                                     disabled={checkingBrevoContact}
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
                                     title="Send email to this client via Brevo"
                                   >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                                     </svg>
-                                    {checkingBrevoContact ? 'Checking...' : 'Email'}
+                                    <span>{checkingBrevoContact ? 'Checking...' : 'Email'}</span>
                                   </button>
                                 ) : (
                                   <button
                                     type="button"
                                     onClick={handleAddToBrevo}
                                     disabled={addingToBrevo || getAllClientEmails(client).length === 0}
-                                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
+                                    className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-gray-300 dark:border-white/20 bg-white dark:bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-white/10 transition-colors disabled:opacity-50"
                                     title="Add this client as a contact in Brevo"
                                   >
                                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
                                     </svg>
-                                    {addingToBrevo ? 'Adding...' : 'Add to Brevo'}
+                                    <span className="truncate max-w-[6.5rem] sm:max-w-none">{addingToBrevo ? 'Adding...' : 'Add to Brevo'}</span>
                                   </button>
                                 )
                               )}
                               <button
                                 type="button"
                                 onClick={() => setShowCheckInCalendar(true)}
-                                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg border border-green-300 dark:border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
+                                className="inline-flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-green-300 dark:border-green-500/50 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-200 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors"
                                 title="View and sync check-in calendar"
                               >
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -633,13 +631,13 @@ export default function ClientDetailDrawer({
                                   type="button"
                                   onClick={() => void handleAdvanceStage()}
                                   disabled={advancingStage || savingFields}
-                                  className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50"
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-500/50 bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors disabled:opacity-50 min-w-0"
                                   title={`Move from ${currentStageTitle} to ${nextStage.title}`}
                                 >
                                   <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                                   </svg>
-                                  <span className="truncate max-w-[10rem] sm:max-w-none">
+                                  <span className="truncate max-w-[7rem] sm:max-w-[10rem] md:max-w-none">
                                     {advancingStage ? 'Moving…' : `→ ${nextStage.title}`}
                                   </span>
                                 </button>
@@ -647,7 +645,7 @@ export default function ClientDetailDrawer({
                               <button
                                 type="button"
                                 onClick={onClose}
-                                className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
+                                className="hidden sm:inline-flex p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors"
                                 aria-label="Close"
                               >
                                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -736,11 +734,10 @@ export default function ClientDetailDrawer({
                                         follow_up_due_date: prev.follow_up_due_date,
                                       })
                                     : action;
-                                const next = { ...prev, ...patch };
-                                if (TIMER_FORM_KEYS.some((k) => k in patch)) {
-                                  pushTimerOptimistic(next);
-                                }
-                                return next;
+                                // Do not pushTimerOptimistic on every keystroke — that updated
+                                // `client` and used to reset this form mid-edit. Optimistic
+                                // board updates run on blur via saveClientFields instead.
+                                return { ...prev, ...patch };
                               });
                             }}
                             fieldBlurSave={fieldBlurSave}
@@ -803,7 +800,7 @@ export default function ClientDetailDrawer({
                     </div>
 
                     {showManualPaymentForm && (
-                      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60]">
+                      <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]">
                         <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full mx-4">
                           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
                             Add Manual Payment

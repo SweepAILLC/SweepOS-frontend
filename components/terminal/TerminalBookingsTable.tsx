@@ -98,7 +98,7 @@ export default function TerminalBookingsTable() {
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
           Connect Cal.com or Calendly to view synced bookings.
         </p>
-        <Link href="/?tab=integrations" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+        <Link href="/?tab=settings&section=integrations" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
           Go to Integrations
         </Link>
       </div>

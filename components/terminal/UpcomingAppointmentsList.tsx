@@ -73,7 +73,7 @@ export default function UpcomingAppointmentsList() {
     return (
       <div className="rounded-lg border border-dashed border-gray-300 dark:border-gray-600 p-4 text-center">
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">No calendar connected</p>
-        <Link href="/?tab=integrations" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
+        <Link href="/?tab=settings&section=integrations" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
           Connect in Integrations
         </Link>
       </div>

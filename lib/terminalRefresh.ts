@@ -19,7 +19,7 @@ import {
 
 const TERMINAL_SYNC_ON_LOAD_KEY = 'terminalSyncOnLoad';
 /** Avoid stacking full syncs when webhook polling fires repeatedly. */
-const MIN_AUTO_REFRESH_GAP_MS = 45_000;
+const MIN_AUTO_REFRESH_GAP_MS = 15_000;
 
 let refreshChain: Promise<TerminalRefreshResult> = Promise.resolve({ ok: true });
 let lastRefreshFinishedAt = 0;

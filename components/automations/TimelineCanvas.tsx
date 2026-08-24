@@ -11,6 +11,7 @@ import {
   type AutomationRule,
   type AutomationScheduleMode,
 } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import type { Client } from '@/types/client';
 import PlaybookModal from './PlaybookModal';
 import WaitDelayModal, { type WaitDelayMode } from './WaitDelayModal';
@@ -791,7 +792,7 @@ function CanvasHeader({
         setTestError(out.error || out.blockers?.[0] || 'Test did not send cleanly.');
       }
     } catch (e) {
-      setTestError(e instanceof Error ? e.message : 'Test failed');
+      setTestError(formatApiError(e, 'Test failed'));
     } finally {
       setTesting(false);
     }

@@ -2,9 +2,8 @@ import { Html, Head, Main, NextScript } from 'next/document';
 
 export default function Document() {
   return (
-    <Html>
+    <Html suppressHydrationWarning>
       <Head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
         {/* Favicon */}
         <link rel="icon" type="image/png" href="/SWEEP_favicon.png" />
         <link rel="shortcut icon" type="image/png" href="/SWEEP_favicon.png" />

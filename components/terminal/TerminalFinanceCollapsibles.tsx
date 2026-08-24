@@ -471,22 +471,22 @@ export default function TerminalFinanceCollapsibles({
 
   return (
     <div className="flex flex-col gap-3 min-w-0">
-      <details className="group glass-card overflow-hidden" open>
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0 shrink-0">
+      <details className="group glass-card overflow-hidden min-w-0" open>
+        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-3 sm:p-4 min-w-0 shrink-0">
           <span className={sectionToggleClass}>{sectionChevron}</span>
-          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0 truncate">
             Failed payments
             <span className="ml-1.5 font-normal text-xs text-gray-500 dark:text-gray-400">
               ({rangeLabel.toLowerCase()})
             </span>
           </span>
           {!failedLoading && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200 shrink-0">
               {failedPayments.length}
             </span>
           )}
         </summary>
-        <div className="px-4 pb-4 border-t border-white/10 pt-3">
+        <div className="px-3 sm:px-4 pb-4 border-t border-white/10 pt-3 min-w-0">
           {failedLoading && <p className="text-sm text-gray-500">Loading…</p>}
           {!failedLoading && failedPayments.length === 0 && (
             <p className="text-sm text-gray-500">No failed payments in queue</p>
@@ -554,17 +554,17 @@ export default function TerminalFinanceCollapsibles({
         </div>
       </details>
 
-      <details className="group glass-card overflow-hidden" open>
-        <summary className="cursor-pointer select-none list-none flex items-center gap-2 p-4 min-w-0 shrink-0">
+      <details className="group glass-card overflow-hidden min-w-0" open>
+        <summary className="cursor-pointer select-none list-none flex flex-wrap items-center gap-2 p-3 sm:p-4 min-w-0 shrink-0">
           <span className={sectionToggleClass}>{sectionChevron}</span>
-          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1">
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0 truncate">
             Recent transactions
             <span className="ml-1.5 font-normal text-xs text-gray-500 dark:text-gray-400">
               ({rangeLabel.toLowerCase()})
             </span>
           </span>
           {!paymentsLoading && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200 shrink-0">
               {payments.length}
             </span>
           )}
@@ -575,12 +575,12 @@ export default function TerminalFinanceCollapsibles({
               e.stopPropagation();
               openManualPaymentCreate();
             }}
-            className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md shrink-0"
+            className="text-xs px-2.5 sm:px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md shrink-0"
           >
             + Manual payment
           </button>
         </summary>
-        <div className="px-4 pb-4 border-t border-white/10 pt-3">
+        <div className="px-3 sm:px-4 pb-4 border-t border-white/10 pt-3 min-w-0">
           {showManualPaymentModal && (
             <div className={transactionsInlinePanelClass}>
               <div className="flex items-center justify-between mb-4">
