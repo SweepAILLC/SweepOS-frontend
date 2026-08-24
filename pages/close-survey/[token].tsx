@@ -4,7 +4,9 @@ import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import type {
   CloseSurveyClientOption,
+  CloseSurveyCloserOption,
   CloseSurveyDealOutcome,
+  CloseSurveyLeadSourceOption,
   CloseSurveyMetaResponse,
   CloseSurveyOfferOption,
   CloseSurveyPaymentSource,
@@ -73,6 +75,8 @@ function CloseSurveyClient() {
   const [clientId, setClientId] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dealOutcome, setDealOutcome] = useState<CloseSurveyDealOutcome | null>(null);
+  const [closerUserId, setCloserUserId] = useState('');
+  const [leadSourceKey, setLeadSourceKey] = useState('organic');
   const [paymentSource, setPaymentSource] = useState<CloseSurveyPaymentSource>('none');
   const [cashCollected, setCashCollected] = useState('');
   const [offerSlot, setOfferSlot] = useState('');
@@ -94,6 +98,10 @@ function CloseSurveyClient() {
       const row = await apiClient.getCloseSurveyMeta(tok);
       if (gen !== loadGen.current) return;
       setMeta(row);
+      const sources = row.lead_sources || [];
+      const organic = sources.find((s) => s.key === 'organic');
+      setLeadSourceKey(organic?.key || sources[0]?.key || 'organic');
+      setCloserUserId('');
     } catch (err) {
       if (gen !== loadGen.current) return;
       setMeta(null);
@@ -136,6 +144,11 @@ function CloseSurveyClient() {
   }, [meta, clientQuery]);
 
   const offers: CloseSurveyOfferOption[] = useMemo(() => meta?.offers || [], [meta?.offers]);
+  const closers: CloseSurveyCloserOption[] = useMemo(() => meta?.closers || [], [meta?.closers]);
+  const leadSources: CloseSurveyLeadSourceOption[] = useMemo(
+    () => meta?.lead_sources || [],
+    [meta?.lead_sources]
+  );
 
   useEffect(() => {
     if (offerSlot !== 'custom') return;
@@ -177,6 +190,8 @@ function CloseSurveyClient() {
         recording_url: recordingUrl.trim() || undefined,
         call_notes: callNotes.trim() || undefined,
         entry_date: entryDate,
+        closer_user_id: closerUserId || null,
+        lead_source_key: leadSourceKey || 'organic',
       };
       const res = await apiClient.submitCloseSurvey(token, payload);
       setSuccessMsg(res.message || 'Logged — pipeline / payments / KPI will refresh.');
@@ -323,6 +338,39 @@ function CloseSurveyClient() {
             ))}
           </div>
         </fieldset>
+
+        <label className="block text-sm">
+          <span className="text-gray-300">Closer</span>
+          <select
+            value={closerUserId}
+            onChange={(e) => setCloserUserId(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+          >
+            <option value="">— Select closer —</option>
+            {closers.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+                {c.email ? ` · ${c.email}` : ''}
+                {c.role ? ` (${c.role})` : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="block text-sm">
+          <span className="text-gray-300">Lead source</span>
+          <select
+            value={leadSourceKey}
+            onChange={(e) => setLeadSourceKey(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm"
+          >
+            {leadSources.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="block text-sm">
           <span className="text-gray-300">Payment source</span>

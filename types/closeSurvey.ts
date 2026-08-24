@@ -19,10 +19,25 @@ export interface CloseSurveyOfferOption {
   suggested_total_cents?: number | null;
 }
 
+export interface CloseSurveyCloserOption {
+  id: string;
+  name: string;
+  email?: string | null;
+  role: string;
+}
+
+export interface CloseSurveyLeadSourceOption {
+  key: string;
+  label: string;
+  funnel_id?: string | null;
+}
+
 export interface CloseSurveyMetaResponse {
   org_name: string;
   clients: CloseSurveyClientOption[];
   offers: CloseSurveyOfferOption[];
+  closers: CloseSurveyCloserOption[];
+  lead_sources: CloseSurveyLeadSourceOption[];
 }
 
 export interface CloseSurveySubmitPayload {
@@ -37,6 +52,8 @@ export interface CloseSurveySubmitPayload {
   recording_url?: string;
   call_notes?: string;
   entry_date?: string;
+  closer_user_id?: string | null;
+  lead_source_key?: string | null;
 }
 
 export interface CloseSurveySubmitResponse {
@@ -45,6 +62,8 @@ export interface CloseSurveySubmitResponse {
   closed: boolean;
   deal_outcome: CloseSurveyDealOutcome;
   payment_source: CloseSurveyPaymentSource;
+  closer_user_id?: string | null;
+  lead_source?: string | null;
   manual_payment_id?: string | null;
   lifecycle_state?: string | null;
   message: string;
