@@ -124,6 +124,17 @@ export interface FathomWebhookSetupResponse {
   error?: string;
 }
 
+export interface StripeConnectionStatus {
+  connected: boolean;
+  message?: string | null;
+  account_id?: string | null;
+  webhook_active?: boolean;
+  webhook_status?: 'active' | 'not_registered' | 'not_configured' | string | null;
+  webhook_endpoint_id?: string | null;
+  webhook_url?: string | null;
+  last_webhook_processed_at?: string | null;
+}
+
 /** Response from POST /integrations/fathom/sync */
 export interface FathomSyncResponse {
   skipped?: boolean;
@@ -274,6 +285,123 @@ export interface ContentStudioBootstrap {
   batch_id: string | null;
 }
 
+/** Instagram Performance Intel (Composio-backed) */
+export interface InstagramCapabilities {
+  insights: boolean;
+  reason?: string | null;
+  followers_count?: number | null;
+}
+
+export interface InstagramStatus {
+  connected: boolean;
+  configured: boolean;
+  composio_configured?: boolean;
+  auth_config_id?: string | null;
+  username?: string | null;
+  ig_user_id?: string | null;
+  followers_count?: number | null;
+  capabilities: InstagramCapabilities;
+  last_sync_at?: string | null;
+  message?: string | null;
+}
+
+export interface InstagramWhatWorks {
+  dimension: string;
+  dimension_label?: string;
+  value: string;
+  value_label?: string;
+  n: number;
+  median_engagement_rate: number;
+  org_median_engagement_rate: number;
+  lift_vs_median_pct: number;
+  verdict: 'double_down' | 'keep' | 'stop';
+  confidence?: 'high' | 'low';
+  summary?: string;
+  example_hooks?: string[];
+}
+
+export interface InstagramPostCard {
+  ig_media_id: string;
+  permalink?: string | null;
+  thumbnail_url?: string | null;
+  caption?: string | null;
+  hook_text?: string | null;
+  hook_pattern?: string | null;
+  format_bucket?: string | null;
+  funnel_stage?: string | null;
+  theme_keys?: string[];
+  posted_at?: string | null;
+  views?: number | null;
+  reach?: number | null;
+  saved?: number | null;
+  likes?: number | null;
+  comments?: number | null;
+  shares?: number | null;
+  total_interactions?: number | null;
+  engagement_rate_pct?: number | null;
+  save_rate_pct?: number | null;
+  insights_status?: string | null;
+  metrics_settled?: boolean;
+  linked_concept_id?: string | null;
+  avg_watch_time_sec?: number | null;
+}
+
+export interface InstagramTrendPoint {
+  week_start: string;
+  reach: number;
+  saved: number;
+  views: number;
+  posting_volume: number;
+  engagement_rate_pct?: number | null;
+}
+
+export interface InstagramPerformance {
+  connected: boolean;
+  org_id: string;
+  days: number;
+  range_start?: string;
+  range_end?: string;
+  summary: {
+    posts: number;
+    reach: number;
+    reach_delta_pct?: number | null;
+    views: number;
+    views_delta_pct?: number | null;
+    saved: number;
+    saved_delta_pct?: number | null;
+    engagement_rate_pct?: number | null;
+    engagement_rate_delta_pct?: number | null;
+    followers_count?: number | null;
+    follower_growth?: number | null;
+    prev_period_posts?: number;
+    prev_reach?: number | null;
+    prev_views?: number | null;
+    prev_saved?: number | null;
+    prev_engagement_rate_pct?: number | null;
+    comparison_label?: string | null;
+    prev_range_start?: string | null;
+    prev_range_end?: string | null;
+  } | null;
+  trend: InstagramTrendPoint[];
+  top_posts: InstagramPostCard[];
+  bottom_posts: InstagramPostCard[];
+  what_works: InstagramWhatWorks[];
+  verdicts: string[];
+  flags: Array<{
+    id: string;
+    severity: string;
+    title: string;
+    detail: string;
+    metric?: string;
+    drop_pct?: number;
+  }>;
+  capabilities: InstagramCapabilities;
+  unsettled_post_count: number;
+  last_synced_at?: string | null;
+  username?: string | null;
+  usage?: string;
+}
+
 /** GET /call-library — Fathom call coaching reports */
 export interface CallLibraryAttendee {
   email?: string;
@@ -288,6 +416,8 @@ export type CallLibraryDealBilling =
   | 'recurring_annual'
   | null;
 
+export type CallLibraryAnalysisKind = 'sales' | 'glance';
+
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -296,6 +426,8 @@ export interface CallLibraryItem {
   status: string;
   failure_reason?: string | null;
   client_name: string | null;
+  /** sales = full audit; glance = AI paragraph + Fathom summary only. */
+  analysis_kind?: CallLibraryAnalysisKind | string | null;
   call_score: number | null;
   /** True only when the LLM is confident the sale was closed on this call. */
   deal_closed?: boolean;
@@ -415,12 +547,15 @@ export function isSweepSessionAuthFailure(error: AxiosError): boolean {
 }
 
 // ----- Automation engine types ------------------------------------------------
-export type AutomationPlaybook =
-  | 'pre_sale_post_booking'
-  | 'first_payment_onboarding'
-  | 'first_payment_referral'
-  | 'win_combined_ask'
-  | 'offboarding_recap_ask';
+export type AutomationPlaybook = string;
+
+export type AutomationFlow = 'post_booking' | 'onboarding' | 'wins_ascension';
+export type AutomationTriggerKind = 'booking' | 'payment' | 'win' | 'offboarding';
+export type AutomationScheduleMode =
+  | 'after_trigger'
+  | 'after_booking'
+  | 'after_previous'
+  | 'before_meeting';
 
 export type AutomationContentMode = 'ai_generated' | 'html_template';
 
@@ -454,7 +589,10 @@ export interface AutomationTriggerConfig {
   provider?: 'calcom' | 'calendly' | 'any' | null;
   event_type_ids?: string[] | null;
   match_all_events?: boolean | null;
+  sales_calls_only?: boolean | null;
 }
+
+export type AutomationNodeKind = 'action' | 'wait';
 
 export interface AutomationRule {
   id: string;
@@ -473,6 +611,13 @@ export interface AutomationRule {
   combine_top_n: number;
   require_approval: boolean;
   approval_ttl_hours?: number | null;
+  flow?: AutomationFlow | null;
+  trigger_kind?: AutomationTriggerKind | null;
+  schedule_mode?: AutomationScheduleMode | null;
+  step_index?: number | null;
+  /** Canvas node type: action sends email; wait only advances the chain clock. */
+  node_kind?: AutomationNodeKind | null;
+  is_protected?: boolean;
   last_modified_by?: string | null;
   created_at: string;
   updated_at: string;
@@ -491,6 +636,54 @@ export interface AutomationRuleUpdate {
   combine_top_n: number;
   require_approval: boolean;
   approval_ttl_hours?: number | null;
+  flow?: AutomationFlow | null;
+  trigger_kind?: AutomationTriggerKind | null;
+  schedule_mode?: AutomationScheduleMode | null;
+  step_index?: number | null;
+  node_kind?: AutomationNodeKind | null;
+}
+
+export interface AutomationFlowStepCreate {
+  trigger_kind: AutomationTriggerKind;
+  node_kind?: AutomationNodeKind;
+  schedule_mode?: AutomationScheduleMode;
+  delay_seconds?: number;
+  subject_template?: string | null;
+  insert_before_playbook?: string | null;
+}
+
+export interface AutomationFlowTestStepResult {
+  playbook: string;
+  node_kind: string;
+  trigger_kind?: string | null;
+  step_index?: number | null;
+  enabled: boolean;
+  status: string;
+  detail?: string | null;
+  brevo_message_id?: string | null;
+  job_id?: string | null;
+}
+
+export interface AutomationFlowTestResponse {
+  ok: boolean;
+  flow: string;
+  to_email: string;
+  client_id?: string | null;
+  client_label?: string | null;
+  sent_count: number;
+  results: AutomationFlowTestStepResult[];
+  error?: string | null;
+  dispatcher_healthy: boolean;
+  brevo_connected: boolean;
+  brevo_note?: string | null;
+  enabled_action_count: number;
+  enabled_wait_count: number;
+  enabled_playbooks: string[];
+  approval_gated_playbooks: string[];
+  booking_trigger_ready: boolean;
+  booking_trigger_note?: string | null;
+  blockers: string[];
+  ready_for_live_sends: boolean;
 }
 
 export interface AutomationEmailJob {
@@ -574,6 +767,53 @@ export interface OutreachInboxResponse {
   items: OutreachInboxItem[];
   awaiting_approval_count: number;
   performance_task_count: number;
+}
+
+/** Org portal to-do item (GET/POST/PATCH /portal/todos). */
+export interface PortalTodo {
+  id: string;
+  org_id: string;
+  title: string;
+  description: string | null;
+  completed: boolean;
+  due_date: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Shared live notepad tab (GET/PUT /portal/shared-pads/{id}). */
+export interface PortalSharedPad {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  content: string;
+  revision: number;
+  updated_by: string | null;
+  updated_by_name: string | null;
+  created_at: string;
+  updated_at: string;
+  unchanged?: boolean;
+}
+
+export interface PortalSharedPadSummary {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  revision: number;
+  updated_by_name: string | null;
+  updated_at: string;
+}
+
+export const MAX_PORTAL_SHARED_PADS = 10;
+
+export interface PortalSharedPadDefault {
+  title: string;
+  content: string;
+  updated_by_name: string | null;
+  updated_at: string | null;
 }
 
 class ApiClient {
@@ -691,6 +931,14 @@ class ApiClient {
     });
   }
 
+  async pingActivityHeartbeat(): Promise<void> {
+    try {
+      await this.client.post('/users/me/activity-heartbeat');
+    } catch {
+      // Non-blocking — don't interrupt the session if tracking fails.
+    }
+  }
+
   /** Refresh session (sliding window). Call when same tab is active to avoid re-login. */
   async refreshSession(): Promise<{ access_token?: string } | null> {
     const data = await withRetry(async () => {
@@ -736,6 +984,24 @@ class ApiClient {
     ai_profile?: Record<string, unknown>;
   }) {
     const response = await this.client.put('/auth/me/settings', data);
+    return response.data;
+  }
+
+  /** Begin Google OAuth connect (authenticated). Returns authorization_url to navigate to. */
+  async startGoogleConnect(): Promise<{ authorization_url: string; mode: string }> {
+    const response = await this.client.get('/auth/google/start', {
+      params: { mode: 'connect' },
+    });
+    return response.data;
+  }
+
+  async disconnectGoogle(): Promise<{ ok: boolean; google_connected: boolean }> {
+    const response = await this.client.post('/auth/google/disconnect');
+    return response.data;
+  }
+
+  async getGoogleOAuthStatus(): Promise<{ configured: boolean }> {
+    const response = await this.client.get('/auth/google/status');
     return response.data;
   }
 
@@ -1454,10 +1720,17 @@ class ApiClient {
     }
 
     const req = this.client
-      .get('/clients/terminal/monthly-trends', { timeout: 60000 })
+      .get('/clients/terminal/monthly-trends', {
+        timeout: 60000,
+        // Bypass server in-process cache so sales-call toggles update the graph immediately.
+        params: forceRefresh ? { force_refresh: true } : undefined,
+      })
       .then((response) => {
         const data = response.data as TerminalMonthlyTrendsPayload;
-        cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+        // Avoid writing a superseded response over a newer force-refresh.
+        if (!forceRefresh || terminalMonthlyTrendsInflight === req) {
+          cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
+        }
         return data;
       })
       .finally(() => {
@@ -1608,15 +1881,31 @@ class ApiClient {
   }
 
   // Integrations (Stripe endpoints cached for fast dashboard tab switching)
-  async getStripeStatus(bypassCache?: boolean) {
+  async getStripeStatus(bypassCache?: boolean): Promise<StripeConnectionStatus> {
     if (!bypassCache) {
-      const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
+      const cached = cache.get<StripeConnectionStatus>(CACHE_KEYS.STRIPE_STATUS);
       if (cached != null) return cached;
     }
     const response = await this.client.get('/integrations/stripe/status');
-    const data = response.data;
+    const data = response.data as StripeConnectionStatus;
     if (!bypassCache) cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
     return data;
+  }
+
+  /** Create or repair the per-org Stripe webhook for instant payment updates. */
+  async setupStripeWebhook(options?: { force?: boolean }) {
+    const response = await this.client.post('/integrations/stripe/webhook/setup', null, {
+      params: { force: options?.force !== false },
+    });
+    cache.delete(CACHE_KEYS.STRIPE_STATUS);
+    return response.data as {
+      success: boolean;
+      webhook_active: boolean;
+      webhook_id?: string;
+      webhook_url?: string;
+      skipped?: boolean;
+      message?: string;
+    };
   }
 
   /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
@@ -2049,6 +2338,45 @@ class ApiClient {
     return response.data;
   }
 
+  async getOrgNotificationSettings(orgId: string): Promise<{
+    funnel_leads: {
+      enabled: boolean;
+      window_minutes: number;
+      recipient_mode: 'admins' | 'custom';
+      recipients: string[];
+      include_returning_leads: boolean;
+    };
+  }> {
+    const response = await this.client.get(`/organizations/${orgId}/notification-settings`);
+    return response.data;
+  }
+
+  async updateOrgNotificationSettings(
+    orgId: string,
+    data: {
+      funnel_leads?: {
+        enabled?: boolean;
+        window_minutes?: number;
+        recipient_mode?: 'admins' | 'custom';
+        recipients?: string[];
+        include_returning_leads?: boolean;
+      };
+    }
+  ) {
+    const response = await this.client.patch(`/organizations/${orgId}/notification-settings`, data);
+    return response.data;
+  }
+
+  async sendTestLeadDigest(orgId: string): Promise<{
+    success: boolean;
+    message: string;
+    recipients: string[];
+    failed?: string[];
+  }> {
+    const response = await this.client.post(`/organizations/${orgId}/notification-settings/test`);
+    return response.data;
+  }
+
   async leaveOrganization(orgId: string) {
     const response = await this.client.delete(`/auth/organizations/${orgId}`);
     return response.data;
@@ -2078,6 +2406,18 @@ class ApiClient {
   // Funnel Analytics
   async getFunnelHealth(funnelId: string) {
     const response = await this.client.get(`/funnels/${funnelId}/health`);
+    return response.data;
+  }
+
+  async getFunnelLeads(funnelId: string, limit = 200) {
+    const response = await this.client.get(`/funnels/${funnelId}/leads`, {
+      params: { limit },
+    });
+    return response.data;
+  }
+
+  async deleteFunnelLead(funnelId: string, leadId: string) {
+    const response = await this.client.delete(`/funnels/${funnelId}/leads/${leadId}`);
     return response.data;
   }
 
@@ -2134,7 +2474,15 @@ class ApiClient {
     return response.data;
   }
 
-  async updateOrganization(orgId: string, data: { name?: string; max_user_seats?: number | null }) {
+  async updateOrganization(
+    orgId: string,
+    data: {
+      name?: string;
+      max_user_seats?: number | null;
+      consulting_tier?: 'pro_consulting' | 'core_consulting' | null | '';
+      booking_url?: string | null;
+    }
+  ) {
     const response = await this.client.patch(`/admin/organizations/${orgId}`, data);
     return response.data;
   }
@@ -2174,6 +2522,21 @@ class ApiClient {
     return data;
   }
 
+  async getLlmUsageTimeseries(params?: {
+    days?: number;
+    scope?: 'mtd' | 'all';
+    org_id?: string;
+  }) {
+    const response = await this.client.get('/admin/llm-usage/timeseries', {
+      params: {
+        ...(params?.days != null ? { days: params.days } : {}),
+        ...(params?.scope ? { scope: params.scope } : {}),
+        ...(params?.org_id ? { org_id: params.org_id } : {}),
+      },
+    });
+    return response.data;
+  }
+
   async getGlobalSettings() {
     const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_SETTINGS);
     if (cached != null) return cached;
@@ -2183,8 +2546,35 @@ class ApiClient {
     return data;
   }
 
-  async getOrganizationDashboard(orgId: string) {
-    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`);
+  async listOwnerNotices() {
+    const response = await this.client.get('/admin/notices');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async sendOwnerNotice(data: { title: string; body: string; org_ids?: string[] }) {
+    const response = await this.client.post('/admin/notices', data);
+    return response.data;
+  }
+
+  async listPortalNotices() {
+    const response = await this.client.get('/portal/notices');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async markPortalNoticeRead(noticeId: string) {
+    await this.client.post(`/portal/notices/${noticeId}/read`);
+  }
+
+  async getOrganizationDashboard(
+    orgId: string,
+    params?: { range?: number; scope?: 'mtd' | 'all' }
+  ) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`, {
+      params: {
+        ...(params?.range != null ? { range: params.range } : {}),
+        ...(params?.scope ? { scope: params.scope } : {}),
+      },
+    });
     return response.data;
   }
 
@@ -2389,6 +2779,72 @@ class ApiClient {
     return response.data as { completed_idea_ids: string[]; batch_id?: string; updated_at?: string };
   }
 
+  async getInstagramStatus(): Promise<InstagramStatus> {
+    const response = await this.client.get('/instagram/status', { timeout: 30000 });
+    return response.data;
+  }
+
+  async putInstagramComposioCredentials(body: {
+    api_key: string;
+    auth_config_id: string;
+  }): Promise<{ ok: boolean; composio_configured: boolean; auth_config_id?: string }> {
+    const response = await this.client.put('/instagram/composio-credentials', body, { timeout: 30000 });
+    return response.data;
+  }
+
+  async deleteInstagramComposioCredentials(): Promise<{
+    ok: boolean;
+    composio_configured: boolean;
+    deleted?: boolean;
+  }> {
+    const response = await this.client.delete('/instagram/composio-credentials', { timeout: 30000 });
+    return response.data;
+  }
+
+  async postInstagramConnect(): Promise<{ redirect_url: string; connection_request_id?: string | null }> {
+    const response = await this.client.post('/instagram/connect', null, { timeout: 60000 });
+    return response.data;
+  }
+
+  async postInstagramSync(full = false): Promise<{
+    ok: boolean;
+    queued?: boolean;
+    result: Record<string, unknown>;
+    message?: string;
+    cooldown_seconds?: number | null;
+    last_sync_at?: string | null;
+  }> {
+    const response = await this.client.post('/instagram/sync', null, {
+      params: { full },
+      timeout: 30000,
+    });
+    return response.data;
+  }
+
+  async getInstagramPerformance(days = 90): Promise<InstagramPerformance> {
+    const response = await this.client.get('/instagram/performance', {
+      params: { days },
+      timeout: 60000,
+    });
+    return response.data;
+  }
+
+  async deleteInstagramDisconnect(
+    purge = true,
+    clearComposio = false
+  ): Promise<{
+    ok: boolean;
+    connected: boolean;
+    composio_configured?: boolean;
+    composio_cleared?: boolean;
+  }> {
+    const response = await this.client.delete('/instagram/disconnect', {
+      params: { purge, clear_composio: clearComposio },
+      timeout: 60000,
+    });
+    return response.data;
+  }
+
   async postContentStudioTranscriptAnalyze(body: {
     transcript: string;
     purpose: 'TOF' | 'MOF' | 'BOF' | 'mixed';
@@ -2417,6 +2873,12 @@ class ApiClient {
 
   async patchCallLibraryReport(reportId: string, callTitle: string): Promise<{ ok: boolean; id: string }> {
     const response = await this.client.patch(`/call-library/${reportId}`, { call_title: callTitle });
+    return response.data as { ok: boolean; id: string };
+  }
+
+  /** Permanently delete a single call report. */
+  async deleteCallLibraryReport(reportId: string): Promise<{ ok: boolean; id: string }> {
+    const response = await this.client.delete(`/call-library/${reportId}`);
     return response.data as { ok: boolean; id: string };
   }
 
@@ -2482,6 +2944,18 @@ class ApiClient {
     return response.data as AutomationRule;
   }
 
+  async addAutomationFlowStep(
+    flow: AutomationFlow,
+    body: AutomationFlowStepCreate
+  ): Promise<AutomationRule> {
+    const response = await this.client.post(`/automations/flows/${flow}/steps`, body);
+    return response.data as AutomationRule;
+  }
+
+  async deleteAutomationRule(playbook: AutomationPlaybook): Promise<void> {
+    await this.client.delete(`/automations/rules/${playbook}`);
+  }
+
   async listAutomationJobs(params?: {
     state?: AutomationJobState;
     playbook?: AutomationPlaybook;
@@ -2513,53 +2987,77 @@ class ApiClient {
     return response.data as AutomationPreviewResponse;
   }
 
+  async testAutomationFlow(
+    flow: AutomationFlow,
+    body: { email: string; client_id?: string | null; trigger_kind?: string | null }
+  ): Promise<AutomationFlowTestResponse> {
+    const response = await this.client.post(`/automations/flows/${flow}/test`, body, {
+      timeout: 120000,
+    });
+    return response.data as AutomationFlowTestResponse;
+  }
+
   // ----- Resources tab -------------------------------------------------------
 
   async listDocs(): Promise<Array<{
     resource_id: string;
     category: string;
+    sop_category: string | null;
     title: string;
     description: string;
     powered_by: string | null;
+    video_url: string | null;
+    video_urls?: string[];
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
+    sort_order: number | null;
   }>> {
     const response = await this.client.get('/resources/docs');
     return response.data as Array<{
       resource_id: string;
       category: string;
+      sop_category: string | null;
       title: string;
       description: string;
       powered_by: string | null;
+      video_url: string | null;
       is_custom: boolean;
       is_builtin: boolean;
       updated_at: string | null;
+      sort_order: number | null;
     }>;
   }
 
   async getDoc(resourceId: string): Promise<{
     resource_id: string;
     category: string;
+    sop_category: string | null;
     title: string;
     description: string;
     content: string;
     powered_by: string | null;
+    video_url: string | null;
+    video_urls?: string[];
     is_custom: boolean;
     is_builtin: boolean;
     updated_at: string | null;
+    sort_order: number | null;
   }> {
     const response = await this.client.get(`/resources/docs/${resourceId}`);
     return response.data as {
       resource_id: string;
       category: string;
+      sop_category: string | null;
       title: string;
       description: string;
       content: string;
       powered_by: string | null;
+      video_url: string | null;
       is_custom: boolean;
       is_builtin: boolean;
       updated_at: string | null;
+      sort_order: number | null;
     };
   }
 
@@ -2567,10 +3065,13 @@ class ApiClient {
     resourceId: string,
     body: {
       category: string;
+      sop_category?: string | null;
       title: string;
       description: string;
       content: string;
       powered_by?: string | null;
+      video_url?: string | null;
+      video_urls?: string[];
     }
   ): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.put(`/resources/docs/${resourceId}`, body);
@@ -2579,13 +3080,48 @@ class ApiClient {
 
   async createDoc(body: {
     category: string;
+    sop_category?: string | null;
     title: string;
     description: string;
     content: string;
     powered_by?: string | null;
+    video_url?: string | null;
+    video_urls?: string[];
   }): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.post('/resources/docs', body);
     return response.data as { resource_id: string; title: string; content: string };
+  }
+
+  async reorderDocs(resourceIds: string[]): Promise<Array<{
+    resource_id: string;
+    category: string;
+    sop_category: string | null;
+    title: string;
+    description: string;
+    powered_by: string | null;
+    video_url: string | null;
+    video_urls?: string[];
+    is_custom: boolean;
+    is_builtin: boolean;
+    updated_at: string | null;
+    sort_order: number | null;
+  }>> {
+    const response = await this.client.post('/resources/docs/reorder', {
+      resource_ids: resourceIds,
+    });
+    return response.data as Array<{
+      resource_id: string;
+      category: string;
+      sop_category: string | null;
+      title: string;
+      description: string;
+      powered_by: string | null;
+      video_url: string | null;
+      is_custom: boolean;
+      is_builtin: boolean;
+      updated_at: string | null;
+      sort_order: number | null;
+    }>;
   }
 
   async deleteDoc(resourceId: string): Promise<{ resource_id: string; deleted: boolean }> {
@@ -2687,6 +3223,473 @@ class ApiClient {
     );
     cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
+  }
+
+  // ----- Org Portal (consulting program) ------------------------------------
+
+  async getPortalTodos(): Promise<PortalTodo[]> {
+    const response = await this.client.get('/portal/todos');
+    return (response.data || []) as PortalTodo[];
+  }
+
+  async createPortalTodo(data: {
+    title: string;
+    description?: string;
+    due_date?: string;
+  }): Promise<PortalTodo> {
+    const response = await this.client.post('/portal/todos', data);
+    return response.data as PortalTodo;
+  }
+
+  async updatePortalTodo(
+    id: string,
+    data: {
+      title?: string;
+      description?: string;
+      completed?: boolean;
+      due_date?: string | null;
+    }
+  ): Promise<PortalTodo> {
+    const response = await this.client.patch(`/portal/todos/${id}`, data);
+    return response.data as PortalTodo;
+  }
+
+  async deletePortalTodo(id: string): Promise<void> {
+    await this.client.delete(`/portal/todos/${id}`);
+  }
+
+  // ----- Admin: org portal to-dos (cross-org) --------------------------------
+
+  async getAdminOrgPortalTodos(orgId: string): Promise<PortalTodo[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-todos`);
+    return (response.data || []) as PortalTodo[];
+  }
+
+  async createAdminOrgPortalTodo(
+    orgId: string,
+    data: { title: string; description?: string; due_date?: string }
+  ): Promise<PortalTodo> {
+    const response = await this.client.post(`/admin/organizations/${orgId}/portal-todos`, data);
+    return response.data as PortalTodo;
+  }
+
+  async updateAdminOrgPortalTodo(
+    orgId: string,
+    todoId: string,
+    data: {
+      title?: string;
+      description?: string;
+      completed?: boolean;
+      due_date?: string | null;
+    }
+  ): Promise<PortalTodo> {
+    const response = await this.client.patch(
+      `/admin/organizations/${orgId}/portal-todos/${todoId}`,
+      data
+    );
+    return response.data as PortalTodo;
+  }
+
+  async deleteAdminOrgPortalTodo(orgId: string, todoId: string): Promise<void> {
+    await this.client.delete(`/admin/organizations/${orgId}/portal-todos/${todoId}`);
+  }
+
+  // ----- Org Portal shared pads (multi-tab live notepad) ---------------------
+
+  async getPortalOrgInfo(): Promise<{ max_user_seats: number | null; total_users: number; funnel_count: number }> {
+    const response = await this.client.get('/portal/org-info', { timeout: 8000 });
+    return response.data;
+  }
+
+  async listPortalSharedPads(): Promise<PortalSharedPadSummary[]> {
+    const response = await this.client.get('/portal/shared-pads', { timeout: 8000 });
+    return (response.data || []) as PortalSharedPadSummary[];
+  }
+
+  async createPortalSharedPad(title?: string): Promise<PortalSharedPad> {
+    const response = await this.client.post(
+      '/portal/shared-pads',
+      title ? { title } : {},
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async getPortalSharedPadById(
+    padId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(`/portal/shared-pads/${padId}`, {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async putPortalSharedPadById(
+    padId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(`/portal/shared-pads/${padId}`, data, {
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async renamePortalSharedPad(padId: string, title: string): Promise<PortalSharedPad> {
+    const response = await this.client.patch(
+      `/portal/shared-pads/${padId}`,
+      { title },
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async deletePortalSharedPad(padId: string): Promise<void> {
+    await this.client.delete(`/portal/shared-pads/${padId}`, { timeout: 8000 });
+  }
+
+  async listAdminOrgPortalSharedPads(orgId: string): Promise<PortalSharedPadSummary[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pads`, {
+      timeout: 8000,
+    });
+    return (response.data || []) as PortalSharedPadSummary[];
+  }
+
+  async createAdminOrgPortalSharedPad(orgId: string, title?: string): Promise<PortalSharedPad> {
+    const response = await this.client.post(
+      `/admin/organizations/${orgId}/portal-shared-pads`,
+      title ? { title } : {},
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async getAdminOrgPortalSharedPadById(
+    orgId: string,
+    padId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      {
+        params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+        timeout: 8000,
+      }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async putAdminOrgPortalSharedPadById(
+    orgId: string,
+    padId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      data,
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async renameAdminOrgPortalSharedPad(
+    orgId: string,
+    padId: string,
+    title: string
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.patch(
+      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
+      { title },
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  async deleteAdminOrgPortalSharedPad(orgId: string, padId: string): Promise<void> {
+    await this.client.delete(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, {
+      timeout: 8000,
+    });
+  }
+
+  async getPortalSharedPadDefault(): Promise<PortalSharedPadDefault> {
+    const response = await this.client.get('/admin/portal-shared-pad-default', { timeout: 8000 });
+    return response.data as PortalSharedPadDefault;
+  }
+
+  async putPortalSharedPadDefault(data: {
+    title: string;
+    content: string;
+  }): Promise<PortalSharedPadDefault> {
+    const response = await this.client.put('/admin/portal-shared-pad-default', data, {
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPadDefault;
+  }
+
+  /** @deprecated Prefer getPortalSharedPadById */
+  async getPortalSharedPad(sinceRevision?: number): Promise<PortalSharedPad> {
+    const response = await this.client.get('/portal/shared-pad', {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer putPortalSharedPadById */
+  async putPortalSharedPad(data: {
+    content: string;
+    base_revision?: number;
+  }): Promise<PortalSharedPad> {
+    const response = await this.client.put('/portal/shared-pad', data, { timeout: 8000 });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer getAdminOrgPortalSharedPadById */
+  async getAdminOrgPortalSharedPad(
+    orgId: string,
+    sinceRevision?: number
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pad`, {
+      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
+      timeout: 8000,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  /** @deprecated Prefer putAdminOrgPortalSharedPadById */
+  async putAdminOrgPortalSharedPad(
+    orgId: string,
+    data: { content: string; base_revision?: number }
+  ): Promise<PortalSharedPad> {
+    const response = await this.client.put(
+      `/admin/organizations/${orgId}/portal-shared-pad`,
+      data,
+      { timeout: 8000 }
+    );
+    return response.data as PortalSharedPad;
+  }
+
+  // ---------------------------------------------------------------------------
+  // KPI Command Center
+  // ---------------------------------------------------------------------------
+
+  async getKpiEntries(params?: {
+    start?: string;
+    end?: string;
+    /** When false, skip live calendar/payment sync for faster month navigation. */
+    sync?: boolean;
+  }): Promise<import('@/types/kpi').KpiDailyEntry[]> {
+    const response = await this.client.get('/kpi/entries', { params: params || {} });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async getAdminKpiEntries(orgId: string, params?: {
+    start?: string;
+    end?: string;
+  }): Promise<import('@/types/kpi').KpiDailyEntry[]> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/kpi-entries`, { params: params || {} });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async upsertKpiEntry(
+    entryDate: string,
+    data: import('@/types/kpi').KpiEntryUpdatePayload
+  ): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.put(`/kpi/entries/${entryDate}`, data);
+    return response.data;
+  }
+
+  async bulkImportKpiEntries(
+    entries: Array<{ entry_date: string } & import('@/types/kpi').KpiEntryUpdatePayload>
+  ): Promise<{ imported: number; entries: import('@/types/kpi').KpiDailyEntry[] }> {
+    const response = await this.client.post('/kpi/entries/bulk', { entries }, { timeout: 60000 });
+    return response.data;
+  }
+
+  async deleteKpiEntry(entryDate: string): Promise<void> {
+    await this.client.delete(`/kpi/entries/${entryDate}`);
+  }
+
+  async getKpiRollups(months = 12): Promise<import('@/types/kpi').KpiMonthlyRollup[]> {
+    const response = await this.client.get('/kpi/rollups', { params: { months } });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async getKpiBenchmarks(): Promise<import('@/types/kpi').KpiBenchmarks> {
+    const response = await this.client.get('/kpi/benchmarks');
+    return response.data;
+  }
+
+  async updateKpiBenchmarks(data: {
+    thresholds?: Record<string, import('@/types/kpi').MetricThreshold>;
+    content_type_tags?: string[];
+  }): Promise<import('@/types/kpi').KpiBenchmarks> {
+    const response = await this.client.put('/kpi/benchmarks', data);
+    return response.data;
+  }
+
+  async getKpiFlags(params?: {
+    month?: string;
+  }): Promise<import('@/types/kpi').KpiFlagsResponse> {
+    const response = await this.client.get('/kpi/flags', { params: params || {} });
+    return response.data;
+  }
+
+
+  async getKpiSnapshot(params?: {
+    days?: number;
+    start?: string;
+    end?: string;
+    include_flags?: boolean;
+    include_series?: boolean;
+    sync?: boolean;
+  }): Promise<import('@/types/kpi').KpiSnapshotResponse> {
+    const response = await this.client.get('/kpi/snapshot', { params: params || {} });
+    return response.data;
+  }
+
+  async getAdminKpiSnapshot(
+    orgId: string,
+    params?: {
+      days?: number;
+      start?: string;
+      end?: string;
+      include_flags?: boolean;
+      include_series?: boolean;
+    }
+  ): Promise<import('@/types/kpi').KpiSnapshotResponse> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/kpi-snapshot`, {
+      params: params || {},
+    });
+    return response.data;
+  }
+
+  async getKpiAutopopulateStatus(): Promise<import('@/types/kpi').KpiAutopopulateStatusResponse> {
+    const response = await this.client.get('/kpi/autopopulate-status');
+    return response.data;
+  }
+
+  async getKpiEntryLink(regenerate = false): Promise<import('@/types/kpi').KpiEntryLinkResponse> {
+    const response = await this.client.get('/kpi/entry-link', {
+      params: regenerate ? { regenerate: true } : undefined,
+    });
+    return response.data;
+  }
+
+  async getPublicKpiEntry(token: string, entryDate: string): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.get(`/kpi/public/${token}/entries/${entryDate}`);
+    return response.data;
+  }
+
+  async upsertPublicKpiEntry(
+    token: string,
+    entryDate: string,
+    data: import('@/types/kpi').KpiEntryUpdatePayload
+  ): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data);
+    return response.data;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Funnel Simulator (consulting portal)
+  // ---------------------------------------------------------------------------
+
+  async getFunnelSimulatorBaselines(params?: {
+    days?: number;
+    mtd?: boolean;
+    funnel_id?: string | null;
+    orgId?: string;
+  }): Promise<import('@/types/funnelSimulator').FunnelSimulatorBaselines> {
+    const orgId = params?.orgId;
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/baselines`
+      : '/portal/funnel-simulator/baselines';
+    const response = await this.client.get(path, {
+      params: {
+        days: params?.mtd ? undefined : params?.days ?? 90,
+        mtd: params?.mtd ? true : undefined,
+        funnel_id: params?.funnel_id || undefined,
+      },
+      timeout: 20000,
+    });
+    return response.data;
+  }
+
+  async listFunnelSimulatorScenarios(
+    orgId?: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.get(path, { timeout: 8000 });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async listAdminOrgFunnelSimulatorScenarios(
+    orgId: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
+    const response = await this.client.get(
+      `/admin/organizations/${orgId}/funnel-simulator/scenarios`,
+      { timeout: 8000 }
+    );
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async createFunnelSimulatorScenario(
+    data: import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite,
+    orgId?: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.post(path, {
+      ...data,
+      lookback_days: String(data.lookback_days),
+    });
+    return response.data;
+  }
+
+  async updateFunnelSimulatorScenario(
+    id: string,
+    data: Partial<import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite>,
+    orgId?: string
+  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
+      : `/portal/funnel-simulator/scenarios/${id}`;
+    const response = await this.client.patch(path, {
+      ...data,
+      lookback_days: data.lookback_days != null ? String(data.lookback_days) : undefined,
+    });
+    return response.data;
+  }
+
+  async deleteFunnelSimulatorScenario(id: string, orgId?: string): Promise<void> {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
+      : `/portal/funnel-simulator/scenarios/${id}`;
+    await this.client.delete(path);
+  }
+
+  async getCloseSurveyEntryLink(regenerate = false): Promise<import('@/types/closeSurvey').CloseSurveyEntryLinkResponse> {
+    const response = await this.client.get('/close-survey/entry-link', {
+      params: regenerate ? { regenerate: true } : undefined,
+    });
+    return response.data;
+  }
+
+  async getCloseSurveyMeta(token: string): Promise<import('@/types/closeSurvey').CloseSurveyMetaResponse> {
+    const response = await this.client.get(`/close-survey/public/${token}/meta`);
+    return response.data;
+  }
+
+  async submitCloseSurvey(
+    token: string,
+    data: import('@/types/closeSurvey').CloseSurveySubmitPayload
+  ): Promise<import('@/types/closeSurvey').CloseSurveySubmitResponse> {
+    const response = await this.client.post(`/close-survey/public/${token}/submit`, data);
+    return response.data;
   }
 }
 

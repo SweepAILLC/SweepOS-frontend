@@ -71,6 +71,29 @@ export interface FunnelAnalytics {
   top_referrers: ReferrerStats[];
 }
 
+export interface FunnelLeadListItem {
+  id: string;
+  client_id?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+  name?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  instagram?: string | null;
+  source?: string | null;
+  funnel_step_reached?: string | null;
+  lifecycle_state?: string | null;
+  is_new_client?: boolean | null;
+  captured_at?: string | null;
+  answers?: Record<string, unknown>;
+}
+
+export interface FunnelLeadListResponse {
+  funnel_id: string;
+  total: number;
+  leads: FunnelLeadListItem[];
+}
+
 export interface EventIn {
   funnel_id?: string;
   client_id?: string;
