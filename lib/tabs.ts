@@ -6,13 +6,15 @@ export type TabId =
   | 'funnels'
   | 'content_studio'
   | 'call_library'
+  | 'kpi_command_center'
   | 'resources'
   | 'integrations'
   | 'owner'
   | 'calcom'
   | 'intelligence'
   | 'automations'
-  | 'settings';
+  | 'settings'
+  | 'org_portal';
 
 export const VALID_TAB_IDS: TabId[] = [
   'terminal',
@@ -21,6 +23,7 @@ export const VALID_TAB_IDS: TabId[] = [
   'funnels',
   'content_studio',
   'call_library',
+  'kpi_command_center',
   'resources',
   'integrations',
   'owner',
@@ -28,6 +31,7 @@ export const VALID_TAB_IDS: TabId[] = [
   'intelligence',
   'automations',
   'settings',
+  'org_portal',
 ];
 
 export const TAB_DISPLAY_NAMES: Record<string, string> = {
@@ -37,6 +41,7 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
   funnels: 'Funnels',
   content_studio: 'Marketing Intel',
   call_library: 'Call Library',
+  kpi_command_center: 'KPI Command Center',
   resources: 'Resources',
   integrations: 'Integrations',
   owner: 'Owner',
@@ -44,6 +49,7 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
   intelligence: 'Intelligence',
   automations: 'Automations',
   settings: 'Settings',
+  org_portal: 'Org Portal',
   performance: 'Priorities',
   clients: 'Pipeline',
   stripe: 'Finances',
@@ -53,7 +59,7 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
 export function resolveLegacyTab(saved: string | null): TabId | null {
   if (!saved) return null;
   if (saved === 'stripe' || saved === 'finances' || saved === 'calcom') return 'terminal';
-  if (saved === 'brevo') return 'integrations';
+  if (saved === 'brevo' || saved === 'integrations') return 'settings';
   if (saved === 'performance' || saved === 'clients') return null;
   if (VALID_TAB_IDS.includes(saved as TabId)) return saved as TabId;
   return null;

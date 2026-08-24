@@ -1,6 +1,10 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import type { TabId } from '@/lib/tabs';
-import { canAccessBottomNavTab, canAccessTab } from '@/lib/tabAccess';
+import {
+  canAccessBottomNavTab,
+  canAccessTab,
+  shouldShowNavTab as shouldShowNavTabFn,
+} from '@/lib/tabAccess';
 import { useSidebar } from '@/contexts/SidebarContext';
 
 export type { TabId };
@@ -13,6 +17,8 @@ interface NavbarProps {
   userRole?: string;
   organizationName?: string | null;
   automationsAwaitingApproval?: number;
+  consultingTier?: string | null;
+  isSystemOwner?: boolean;
 }
 
 const navBtnBase =
@@ -57,6 +63,11 @@ const TAB_ICONS: Partial<Record<TabId, ReactNode>> = {
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
     </svg>
   ),
+  kpi_command_center: (
+    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+  ),
   resources: (
     <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
@@ -82,34 +93,106 @@ export default function Navbar({
   userRole = 'member',
   organizationName = null,
   automationsAwaitingApproval = 0,
+  consultingTier = null,
+  isSystemOwner = false,
 }: NavbarProps) {
   const [mounted, setMounted] = useState(false);
-  const { collapsed, toggleCollapsed } = useSidebar();
+  const {
+    collapsed,
+    toggleCollapsed,
+    mobileNavOpen,
+    openMobileNav,
+    closeMobileNav,
+    isMobileNav,
+  } = useSidebar();
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
-  const shouldShowTab = (tab: string): boolean =>
-    canAccessTab(tab, { isOwner, userRole, tabPermissions });
+  // Escape closes the mobile drawer.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeMobileNav();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mobileNavOpen, closeMobileNav]);
+
+  const accessCtx = {
+    isOwner,
+    userRole,
+    tabPermissions,
+    consultingTier,
+    isSystemOwner,
+  };
+
+  const shouldShowTab = (tab: string): boolean => {
+    if (typeof shouldShowNavTabFn === 'function') {
+      return shouldShowNavTabFn(tab, accessCtx);
+    }
+    // Fallback if HMR briefly leaves the named export undefined.
+    if (tab === 'owner') return Boolean(isOwner);
+    if (tab === 'settings') return true;
+    if (tab === 'org_portal') {
+      return Boolean(isSystemOwner) || consultingTier === 'pro_consulting' || consultingTier === 'core_consulting';
+    }
+    if (tab === 'intelligence') {
+      const role = String(userRole || 'member').toLowerCase();
+      return role === 'admin' || role === 'owner';
+    }
+    return true;
+  };
 
   const shouldShowBottomNavTab = (tab: TabId): boolean =>
-    canAccessBottomNavTab(tab, { userRole, tabPermissions });
+    canAccessBottomNavTab(tab, {
+      userRole,
+      tabPermissions,
+      consultingTier,
+      isSystemOwner,
+    });
 
-  const navWidth = collapsed ? 'w-[5rem]' : 'w-56';
-  const btnLayout = collapsed ? 'justify-center px-2' : '';
+  const isTabUnlocked = (tab: string): boolean => canAccessTab(tab, accessCtx);
+
+  const canOpenOrgPortal = shouldShowTab('org_portal');
+
+  // Overlay drawer always shows labels; desktop rail respects collapsed.
+  const iconOnly = !isMobileNav && collapsed;
+  const desktopWidth = collapsed ? 'lg:w-[5rem]' : 'lg:w-56';
+  const btnLayout = iconOnly ? 'justify-center px-2' : '';
+
+  const handleTabChange = (tab: TabId) => {
+    onTabChange(tab);
+    closeMobileNav();
+  };
+
+  const lockIcon = (
+    <svg className="w-3.5 h-3.5 flex-shrink-0 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={2}
+        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+      />
+    </svg>
+  );
 
   const tabBtn = (tab: TabId, label: string) => {
     const active = activeTab === tab;
+    const unlocked = isTabUnlocked(tab);
     const icon = TAB_ICONS[tab];
+    const title = unlocked ? label : `${label} (locked — upgrade via consultant)`;
     return (
       <button
         key={tab}
         type="button"
-        onClick={() => onTabChange(tab)}
-        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive}`}
-        title={label}
-        aria-label={label}
+        onClick={() => handleTabChange(tab)}
+        className={`relative ${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${
+          unlocked ? '' : 'opacity-80'
+        }`}
+        title={title}
+        aria-label={title}
         aria-current={active ? 'page' : undefined}
         style={
           active
@@ -118,7 +201,11 @@ export default function Navbar({
         }
       >
         {icon ? <NavIcon>{icon}</NavIcon> : null}
-        <span className={collapsed ? 'sr-only' : 'truncate'}>{label}</span>
+        <span className={iconOnly ? 'sr-only' : 'truncate flex-1'}>{label}</span>
+        {!unlocked && !iconOnly ? lockIcon : null}
+        {!unlocked && iconOnly ? (
+          <span className="absolute right-0.5 top-0.5">{lockIcon}</span>
+        ) : null}
       </button>
     );
   };
@@ -130,26 +217,32 @@ export default function Navbar({
     opts?: { ariaLabel?: string; title?: string; extraClass?: string; badge?: number }
   ) => {
     const active = activeTab === tab;
+    const unlocked = isTabUnlocked(tab);
+    const baseTitle = opts?.title ?? label;
+    const title = unlocked ? baseTitle : `${baseTitle} (locked — upgrade via consultant)`;
     return (
       <button
         key={tab}
         type="button"
-        onClick={() => onTabChange(tab)}
-        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''}`}
-        aria-label={opts?.ariaLabel ?? label}
-        title={opts?.title ?? label}
+        onClick={() => handleTabChange(tab)}
+        className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''} ${
+          unlocked ? '' : 'opacity-80'
+        }`}
+        aria-label={opts?.ariaLabel ?? title}
+        title={title}
         aria-current={active ? 'page' : undefined}
       >
         <span className="relative flex-shrink-0 w-5 h-5 flex items-center justify-center [&>svg]:w-5 [&>svg]:h-5">
           {icon}
-          {collapsed && (opts?.badge ?? 0) > 0 ? (
+          {iconOnly && (opts?.badge ?? 0) > 0 ? (
             <span className="absolute -top-1 -right-1 inline-flex items-center justify-center min-w-[0.875rem] h-3.5 rounded-full bg-amber-500 text-white text-[8px] font-bold px-0.5">
               {(opts?.badge ?? 0) > 9 ? '9+' : opts?.badge}
             </span>
           ) : null}
         </span>
-        <span className={collapsed ? 'sr-only' : 'truncate flex-1'}>{label}</span>
-        {!collapsed && (opts?.badge ?? 0) > 0 ? (
+        <span className={iconOnly ? 'sr-only' : 'truncate flex-1'}>{label}</span>
+        {!unlocked && !iconOnly ? lockIcon : null}
+        {!iconOnly && unlocked && (opts?.badge ?? 0) > 0 ? (
           <span className="ml-auto inline-flex items-center justify-center min-w-[1.25rem] h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold px-1">
             {(opts?.badge ?? 0) > 99 ? '99+' : opts?.badge}
           </span>
@@ -158,59 +251,83 @@ export default function Navbar({
     );
   };
 
-  return (
-    <nav
-      className={`glass-panel fixed left-0 top-0 bottom-0 z-[50] ${navWidth} flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-[width] duration-300 ease-out`}
-      aria-label="Main navigation"
+  const brandBlock = (
+    <button
+      type="button"
+      onClick={() => {
+        onTabChange(canOpenOrgPortal ? 'org_portal' : 'terminal');
+        closeMobileNav();
+      }}
+      className={`flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10 w-full text-left transition-colors cursor-pointer group ${
+        canOpenOrgPortal && activeTab === 'org_portal'
+          ? 'bg-white/10 dark:bg-white/10'
+          : 'hover:bg-white/5 dark:hover:bg-white/5'
+      }`}
+      title={canOpenOrgPortal ? 'Open org portal' : 'Go to Terminal'}
+      aria-label={canOpenOrgPortal ? 'Open organization portal' : 'Go to Terminal'}
+      aria-current={canOpenOrgPortal && activeTab === 'org_portal' ? 'page' : undefined}
     >
-      <div className="flex-shrink-0 p-3 border-b border-gray-200/50 dark:border-white/10">
-        <div className={`flex items-center gap-2 min-w-0 ${collapsed ? 'justify-center' : ''}`}>
-          {mounted && (
-            <div className="relative w-8 h-8 flex-shrink-0">
-              <img
-                src="/SWEEP_favicon.png"
-                alt=""
-                width={32}
-                height={32}
-                className="object-contain w-full h-full"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).style.display = 'none';
-                }}
-              />
-            </div>
-          )}
-          {!collapsed ? (
-            <h1 className="text-base font-bold text-gray-900 dark:text-gray-100 truncate leading-tight min-w-0">
-              Sweep OS
-            </h1>
-          ) : null}
-        </div>
-        {!collapsed && organizationName ? (
-          <p
-            className={`text-xs font-medium text-gray-500 dark:text-gray-400 truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''}`}
-            title={organizationName}
+      <div className={`flex items-center gap-2 min-w-0 ${iconOnly ? 'justify-center' : ''}`}>
+        {mounted && (
+          <div className="relative w-8 h-8 flex-shrink-0">
+            <img
+              src="/SWEEP_favicon.png"
+              alt=""
+              width={32}
+              height={32}
+              className="object-contain w-full h-full"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          </div>
+        )}
+        {!iconOnly ? (
+          <h1
+            className={`text-base font-bold truncate leading-tight min-w-0 transition-colors ${
+              canOpenOrgPortal && activeTab === 'org_portal'
+                ? 'text-violet-700 dark:text-violet-300'
+                : 'text-gray-900 dark:text-gray-100 group-hover:text-violet-700 dark:group-hover:text-violet-300'
+            }`}
           >
-            {organizationName}
-          </p>
+            Sweep OS
+          </h1>
         ) : null}
       </div>
+      {!iconOnly && organizationName ? (
+        <p
+          className={`text-xs font-medium truncate mt-1.5 leading-snug ${mounted ? 'pl-10' : ''} ${
+            canOpenOrgPortal && activeTab === 'org_portal'
+              ? 'text-violet-600/80 dark:text-violet-300/80'
+              : 'text-gray-500 dark:text-gray-400'
+          }`}
+          title={organizationName}
+        >
+          {organizationName}
+        </p>
+      ) : null}
+    </button>
+  );
 
+  const navLinks = (
+    <>
       <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain py-2 px-2 space-y-1">
         {shouldShowTab('terminal') && tabBtn('terminal', 'Terminal')}
         {shouldShowTab('pipeline') && tabBtn('pipeline', 'Pipeline')}
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
+        {shouldShowTab('kpi_command_center') && tabBtn('kpi_command_center', 'KPI')}
+        {shouldShowTab('automations') &&
+          iconBtn('automations', 'Automations', TAB_ICONS.automations!, {
+            title: 'Automated email playbooks & worker health',
+            badge: automationsAwaitingApproval,
+          })}
         {shouldShowTab('resources') && tabBtn('resources', 'Resources')}
         {shouldShowTab('owner') && tabBtn('owner', 'Owner')}
       </div>
 
       <div className="flex-shrink-0 p-2 border-t border-gray-200/50 dark:border-white/10 space-y-1">
-        {shouldShowBottomNavTab('automations') &&
-          iconBtn('automations', 'Automations', TAB_ICONS.automations, {
-            title: 'Automated email playbooks & worker health',
-            badge: automationsAwaitingApproval,
-          })}
         {shouldShowBottomNavTab('intelligence') &&
           iconBtn(
             'intelligence',
@@ -226,22 +343,6 @@ export default function Navbar({
             {
               ariaLabel: 'AI Intelligence',
               title: 'AI Intelligence profile',
-            }
-          )}
-        {shouldShowBottomNavTab('integrations') &&
-          iconBtn(
-            'integrations',
-            'Integrations',
-            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z"
-              />
-            </svg>,
-            {
-              title: 'Connect Stripe, Brevo, Whop, and more',
             }
           )}
         {shouldShowBottomNavTab('settings') &&
@@ -260,10 +361,11 @@ export default function Navbar({
             { ariaLabel: 'Open settings' }
           )}
 
+        {/* Collapse only applies to the desktop rail. */}
         <button
           type="button"
           onClick={toggleCollapsed}
-          className={`${navBtnBase} ${btnLayout} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2`}
+          className={`${navBtnBase} ${btnLayout} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2 hidden lg:flex`}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
@@ -276,9 +378,95 @@ export default function Navbar({
               )}
             </svg>
           </NavIcon>
-          <span className={collapsed ? 'sr-only' : 'truncate'}>{collapsed ? 'Expand' : 'Collapse'}</span>
+          <span className={iconOnly ? 'sr-only' : 'truncate'}>{collapsed ? 'Expand' : 'Collapse'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={closeMobileNav}
+          className={`${navBtnBase} ${navBtnInactive} mt-1 border-t border-gray-200/40 dark:border-white/10 pt-2 lg:hidden`}
+          aria-label="Close menu"
+        >
+          <NavIcon>
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden className={iconClass}>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </NavIcon>
+          <span className="truncate">Close</span>
         </button>
       </div>
-    </nav>
+    </>
+  );
+
+  return (
+    <>
+      {/* Compact top chrome — frees the full width for main content on phones (portrait & landscape). */}
+      <header
+        className="lg:hidden fixed top-0 left-0 right-0 z-[55] h-[var(--app-mobile-topbar-height,3.5rem)] flex items-center gap-3 px-3 glass-panel border-b border-gray-200/60 dark:border-white/10 shadow-sm pt-[env(safe-area-inset-top,0px)]"
+        style={{
+          height: 'calc(var(--app-mobile-topbar-height, 3.5rem) + env(safe-area-inset-top, 0px))',
+        }}
+      >
+        <button
+          type="button"
+          onClick={openMobileNav}
+          className="inline-flex items-center justify-center w-10 h-10 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-white/15 transition-colors"
+          aria-label="Open navigation menu"
+          aria-expanded={mobileNavOpen}
+          aria-controls="app-sidebar-nav"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          {mounted && (
+            <img
+              src="/SWEEP_favicon.png"
+              alt=""
+              width={28}
+              height={28}
+              className="object-contain w-7 h-7 flex-shrink-0"
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+              }}
+            />
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate leading-tight">
+              Sweep OS
+            </p>
+            {organizationName ? (
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate leading-tight">
+                {organizationName}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      </header>
+
+      {/* Scrim — keeps drawer from competing with main UI while open. */}
+      <button
+        type="button"
+        aria-label="Close navigation menu"
+        className={`lg:hidden fixed inset-0 z-[58] bg-black/50 backdrop-blur-[1px] transition-opacity duration-300 ${
+          mobileNavOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+        }`}
+        onClick={closeMobileNav}
+        tabIndex={mobileNavOpen ? 0 : -1}
+      />
+
+      <nav
+        id="app-sidebar-nav"
+        className={`glass-panel fixed left-0 top-0 bottom-0 z-[60] flex flex-col border-r border-gray-200/60 dark:border-white/10 shadow-lg transition-transform duration-300 ease-out lg:transition-[width,transform] w-[min(18rem,85vw)] ${desktopWidth} ${
+          mobileNavOpen ? 'translate-x-0' : '-translate-x-full'
+        } lg:translate-x-0`}
+        aria-label="Main navigation"
+        aria-hidden={isMobileNav && !mobileNavOpen ? true : undefined}
+      >
+        {brandBlock}
+        {navLinks}
+      </nav>
+    </>
   );
 }

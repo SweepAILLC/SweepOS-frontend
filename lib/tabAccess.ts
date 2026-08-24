@@ -8,31 +8,90 @@ export {
   legacyTabOpensPipeline,
 } from '@/lib/tabs';
 
-/** Sidebar footer tabs — settings is available to every user; others are org admin/owner only. */
-export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = [
-  'automations',
-  'intelligence',
-  'integrations',
-];
+/** Sidebar footer tabs (settings section) — settings for everyone; others admin/owner only. */
+export const MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS: TabId[] = ['intelligence'];
 
 export const BOTTOM_NAV_TAB_IDS: TabId[] = [
   ...MEMBER_RESTRICTED_BOTTOM_NAV_TAB_IDS,
   'settings',
 ];
 
+/** Product tabs shown in the main nav (always visible; access may be locked). */
+export const MAIN_NAV_TAB_IDS: TabId[] = [
+  'terminal',
+  'pipeline',
+  'funnels',
+  'content_studio',
+  'call_library',
+  'kpi_command_center',
+  'automations',
+  'resources',
+];
+
+/** Tabs the owner can toggle for an org (aligned with AVAILABLE_TABS on the backend). */
+export const ORG_TOGGLEABLE_TAB_IDS: TabId[] = [
+  'terminal',
+  'pipeline',
+  'funnels',
+  'content_studio',
+  'call_library',
+  'kpi_command_center',
+  'automations',
+  'resources',
+  'intelligence',
+];
+
+export const CONSULTING_TIERS = ['pro_consulting', 'core_consulting'] as const;
+
+export function hasConsultingTier(tier: string | null | undefined): boolean {
+  return tier === 'pro_consulting' || tier === 'core_consulting';
+}
+
 export function isOrgAdminRole(userRole: string): boolean {
   const roleLower = String(userRole || 'member').toLowerCase().trim();
   return roleLower === 'admin' || roleLower === 'owner';
 }
 
-/** Footer nav: settings for everyone; other footer tabs require admin/owner role. */
+/**
+ * Whether a tab should appear in the nav.
+ * Org tab-permission toggles do NOT hide tabs — they only lock content.
+ */
+export function shouldShowNavTab(
+  tab: string,
+  ctx: {
+    isOwner: boolean;
+    userRole: string;
+    consultingTier?: string | null;
+    isSystemOwner?: boolean;
+  }
+): boolean {
+  if (tab === 'owner') return ctx.isOwner;
+  if (tab === 'settings') return true;
+  if (tab === 'org_portal') {
+    return Boolean(ctx.isSystemOwner) || hasConsultingTier(ctx.consultingTier);
+  }
+  // Intelligence stays in the footer for admin/owner only (role), not members.
+  if (tab === 'intelligence') return isOrgAdminRole(ctx.userRole);
+  if ((MAIN_NAV_TAB_IDS as string[]).includes(tab)) return true;
+  return false;
+}
+
+/** Footer nav: settings for everyone; other footer tabs require admin/owner role to appear. */
 export function canAccessBottomNavTab(
   tab: TabId,
-  ctx: { userRole: string; tabPermissions: Record<string, boolean> }
+  ctx: {
+    userRole: string;
+    tabPermissions: Record<string, boolean>;
+    consultingTier?: string | null;
+    isSystemOwner?: boolean;
+  }
 ): boolean {
-  if (tab === 'settings') return true;
-  if (!isOrgAdminRole(ctx.userRole)) return false;
-  return canAccessTab(tab, { isOwner: false, userRole: ctx.userRole, tabPermissions: ctx.tabPermissions });
+  return shouldShowNavTab(tab, {
+    isOwner: false,
+    userRole: ctx.userRole,
+    consultingTier: ctx.consultingTier,
+    isSystemOwner: ctx.isSystemOwner,
+  });
 }
 
 /** Default tab permission map when the backend endpoint is unavailable. */
@@ -40,65 +99,61 @@ export function defaultTabPermissions(): Record<string, boolean> {
   return {
     terminal: true,
     pipeline: true,
-    stripe: true,
-    finances: true,
-    performance: true,
     funnels: true,
-    calcom: true,
-    integrations: true,
     content_studio: true,
     call_library: true,
+    kpi_command_center: true,
+    automations: true,
     resources: true,
     intelligence: true,
-    automations: true,
-    clients: true,
     settings: true,
+    org_portal: false,
   };
 }
 
-/** Resolve whether the user can access a product tab. */
+function permissionFlag(
+  tabPermissions: Record<string, boolean>,
+  ...keys: string[]
+): boolean {
+  for (const key of keys) {
+    if (tabPermissions[key] !== undefined) return tabPermissions[key] !== false;
+  }
+  return true;
+}
+
+/** Resolve whether the user can open a product tab (unlocked content). */
 export function canAccessTab(
   tab: string,
   ctx: {
     isOwner: boolean;
     userRole: string;
     tabPermissions: Record<string, boolean>;
+    /** Org consulting program tier — required for client portal (org_portal). */
+    consultingTier?: string | null;
+    /** System owners use org_portal for Owner Panel regardless of consulting tier. */
+    isSystemOwner?: boolean;
   }
 ): boolean {
   const roleLower = String(ctx.userRole || 'member').toLowerCase().trim();
   if (tab === 'owner') return ctx.isOwner;
-  if (
-    roleLower === 'member' &&
-    (tab === 'integrations' || tab === 'intelligence' || tab === 'automations')
-  ) {
+  if (tab === 'settings') return true;
+  if (tab === 'org_portal') {
+    return Boolean(ctx.isSystemOwner) || hasConsultingTier(ctx.consultingTier);
+  }
+  // Members cannot use admin-only footer tabs even when the org toggle is on.
+  if (roleLower === 'member' && tab === 'intelligence') {
     return false;
   }
-  if (tab === 'settings') {
-    return true;
+  if (tab === 'pipeline') {
+    return permissionFlag(ctx.tabPermissions, 'pipeline', 'clients');
   }
   if (tab === 'finances') {
-    const v =
-      ctx.tabPermissions.finances !== undefined ? ctx.tabPermissions.finances : ctx.tabPermissions.stripe;
-    return v !== false;
+    return permissionFlag(ctx.tabPermissions, 'finances', 'stripe');
   }
-  if (tab === 'pipeline') {
-    if (ctx.tabPermissions.pipeline !== undefined) return ctx.tabPermissions.pipeline !== false;
-    if (ctx.tabPermissions.clients !== undefined) return ctx.tabPermissions.clients !== false;
-    return ctx.tabPermissions.terminal !== false;
-  }
-  if (tab === 'terminal') {
-    const terminalOk = ctx.tabPermissions.terminal !== false;
-    const financesOk =
-      ctx.tabPermissions.finances !== undefined
-        ? ctx.tabPermissions.finances !== false
-        : ctx.tabPermissions.stripe !== false;
-    const calcomOk = ctx.tabPermissions.calcom !== false;
-    return terminalOk || financesOk || calcomOk;
-  }
-  return ctx.tabPermissions[tab] !== false;
+  return permissionFlag(ctx.tabPermissions, tab);
 }
 
-/** Priorities block inside Terminal uses legacy `performance` permission key. */
-export function canAccessTerminalPriorities(tabPermissions: Record<string, boolean>): boolean {
-  return tabPermissions.performance !== false;
+/** @deprecated Priorities panel removed. Kept for API compatibility. */
+export function canAccessTerminalPriorities(_tabPermissions: Record<string, boolean>): boolean {
+  return false;
 }

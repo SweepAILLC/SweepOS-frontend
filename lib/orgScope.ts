@@ -1,5 +1,8 @@
 import Cookies from 'js-cookie';
 
+/** Sweep Internal — the only org that may create/edit the global SOP catalog. */
+export const MAIN_ORG_ID = '00000000-0000-0000-0000-000000000001';
+
 /** JWT org_id for tenant scoping (cache, pipeline store, filters). */
 export function orgIdFromAccessToken(): string {
   if (typeof window === 'undefined') return 'anon';

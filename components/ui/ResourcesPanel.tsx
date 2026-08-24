@@ -1,135 +1,26 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface Resource {
-  id: string;
-  title: string;
-  description: string;
-  category: ResourceCategory;
-  fileName?: string;
-  mcpRequired?: string[];
-  prerequisites?: string[];
-  outputSummary?: string;
-  poweredBy?: string | null;
-  isCustom?: boolean;
-  isBuiltin?: boolean;
-  updatedAt?: string | null;
-}
-
-type ResourceCategory = 'AI Skill' | 'SOP' | 'Template' | 'Guide';
-
-const CATEGORY_STYLES: Record<ResourceCategory, { badge: string; bg: string }> = {
-  'AI Skill': {
-    badge: 'bg-violet-500/15 text-violet-400 border border-violet-500/25',
-    bg: 'from-violet-600/10 to-violet-900/5',
-  },
-  SOP: {
-    badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/25',
-    bg: 'from-blue-600/10 to-blue-900/5',
-  },
-  Template: {
-    badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25',
-    bg: 'from-emerald-600/10 to-emerald-900/5',
-  },
-  Guide: {
-    badge: 'bg-amber-500/15 text-amber-400 border border-amber-500/25',
-    bg: 'from-amber-600/10 to-amber-900/5',
-  },
-};
-
-// AI Skills stay as static downloadable docs
-const AI_SKILL_RESOURCES: Resource[] = [
-  {
-    id: 'instagram-content-audit',
-    title: 'Instagram Content Audit',
-    description:
-      'Analyze a client\'s Instagram Reels using TokScript MCP. Surfaces hook quality, re-hooks, content formats, TOF/MOF/BOF balance, credibility signals, lead gen quality, and algorithm traction — in 2 pages, zero fluff.',
-    category: 'AI Skill',
-    fileName: 'instagram-content-audit.md',
-    mcpRequired: ['TokScript (api.tokscript.com/mcp)'],
-    outputSummary: '2-page audit with hook analysis, funnel map, credibility score, and top 3 fixes.',
-  },
-  {
-    id: 'shorts-content-ideation',
-    title: 'Shorts Content Ideation',
-    description:
-      'Cross-reference best-performing Instagram content with Fathom sales call data to generate 10 conversion-engineered short-form ideas. Every hook, re-hook, and CTA is mapped to a real objection or buyer trigger.',
-    category: 'AI Skill',
-    fileName: 'shorts-content-ideation.md',
-    mcpRequired: ['TokScript (api.tokscript.com/mcp)', 'Fathom MCP'],
-    prerequisites: ['Run Instagram Content Audit first', 'Run Sales Call Analysis first'],
-    outputSummary: '10 ranked content ideas with hook, proof, re-hook, body, and CTA — prioritized by conversion impact.',
-  },
-  {
-    id: 'sales-call-analysis',
-    title: 'Sales Call Analysis',
-    description:
-      'Pull past sales and check-in call transcripts from Fathom MCP to diagnose objection patterns, discovery quality, pitch effectiveness, objection handling, and close mechanics — with real quotes and root-cause failure analysis.',
-    category: 'AI Skill',
-    fileName: 'sales-call-analysis.md',
-    mcpRequired: ['Fathom MCP (see setup guide inside)'],
-    outputSummary: '2-page holistic report: scores, top objections, discovery + pitch analysis, losses root-caused, wins highlighted.',
-  },
-];
-
-function docMetaToResource(row: {
-  resource_id: string;
-  category: string;
-  title: string;
-  description: string;
-  powered_by: string | null;
-  is_custom: boolean;
-  is_builtin: boolean;
-  updated_at: string | null;
-}): Resource {
-  return {
-    id: row.resource_id,
-    title: row.title,
-    description: row.description,
-    category: (row.category as ResourceCategory) || 'SOP',
-    poweredBy: row.powered_by,
-    isCustom: row.is_custom,
-    isBuiltin: row.is_builtin,
-    updatedAt: row.updated_at,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Lightweight markdown renderer
-// ---------------------------------------------------------------------------
-
-function renderMarkdown(md: string): string {
-  let html = md
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  html = html.replace(/```([^\n]*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
-    return `<pre class="md-code-block"><code>${code.trimEnd()}</code></pre>`;
-  });
-
-  html = html.replace(/`([^`\n]+)`/g, '<code class="md-inline-code">$1</code>');
-  html = html.replace(/^#### (.+)$/gm, '<h4 class="md-h4">$1</h4>');
-  html = html.replace(/^### (.+)$/gm, '<h3 class="md-h3">$1</h3>');
-  html = html.replace(/^## (.+)$/gm, '<h2 class="md-h2">$1</h2>');
-  html = html.replace(/^# (.+)$/gm, '<h1 class="md-h1">$1</h1>');
-  html = html.replace(/^---$/gm, '<hr class="md-hr" />');
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  html = html.replace(/^- (.+)$/gm, '<li class="md-li">$1</li>');
-  html = html.replace(/^\d+\.\s(.+)$/gm, '<li class="md-li md-ol">$1</li>');
-  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>');
-  html = html.replace(/\n\n/g, '</p><p class="md-p">');
-  html = html.replace(/(?<!<\/pre>)\n(?!<)/g, '<br/>');
-
-  return `<p class="md-p">${html}</p>`;
-}
+import {
+  CATEGORY_STYLES,
+  ORG_LIBRARY_TAGS,
+  RESOURCE_MD_STYLES,
+  SOP_CATEGORY_COLORS,
+  SOP_CATEGORY_LABELS,
+  copyToClipboard,
+  renderMarkdown,
+  toMediaEmbedUrl,
+  getMediaEmbedKind,
+  parseEmbedUrls,
+  resourceEmbedUrls,
+  type OrgLibraryKind,
+  type OrgLibraryTag,
+  type Resource,
+  type ResourceCategory,
+  type SopCategory,
+} from '@/lib/resources';
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -155,18 +46,20 @@ function CategoryBadge({ category }: { category: ResourceCategory }) {
 
 interface ResourceModalProps {
   resource: Resource;
-  isOwner: boolean;
+  canEditDocs: boolean;
   onClose: () => void;
   onSaved: () => void;
 }
 
-function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalProps) {
+export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: ResourceModalProps) {
   const isEditableDoc = resource.category === 'SOP' || resource.category === 'AI Skill' || resource.category === 'Guide' || resource.category === 'Template';
-  const canEdit = isOwner && isEditableDoc;
+  const canEdit = canEditDocs && isEditableDoc;
 
   const [content, setContent] = useState<string | null>(null);
+  const [videoUrls, setVideoUrls] = useState<string[]>(() => resourceEmbedUrls(resource));
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -174,7 +67,16 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
   const [draftDescription, setDraftDescription] = useState(resource.description);
   const [draftContent, setDraftContent] = useState('');
   const [draftPoweredBy, setDraftPoweredBy] = useState(resource.poweredBy || '');
+  const [draftVideoUrlsText, setDraftVideoUrlsText] = useState(
+    () => resourceEmbedUrls(resource).join('\n')
+  );
+  const [draftSopCategory, setDraftSopCategory] = useState<SopCategory | ''>(resource.sopCategory || '');
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const loadContent = useCallback(async () => {
     setLoading(true);
@@ -186,6 +88,13 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
         setDraftDescription(doc.description);
         setDraftContent(doc.content || '');
         setDraftPoweredBy(doc.powered_by || '');
+        const urls = parseEmbedUrls(
+          doc.video_url,
+          (doc as { video_urls?: string[] }).video_urls
+        );
+        setVideoUrls(urls);
+        setDraftVideoUrlsText(urls.join('\n'));
+        setDraftSopCategory((doc.sop_category as SopCategory | null) || '');
       } else if (resource.fileName) {
         const res = await fetch(`/resources/${resource.fileName}`);
         if (!res.ok) throw new Error('fetch failed');
@@ -233,11 +142,19 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
     setTimeout(() => setDownloading(false), 800);
   };
 
+  const handleCopy = async () => {
+    await copyToClipboard(content || '');
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
   const handleEdit = () => {
     setDraftTitle(resource.title);
     setDraftDescription(resource.description);
     setDraftContent(content || '');
     setDraftPoweredBy(resource.poweredBy || '');
+    setDraftVideoUrlsText(videoUrls.join('\n'));
+    setDraftSopCategory(resource.sopCategory || '');
     setEditing(true);
     setSaveError(null);
   };
@@ -252,17 +169,28 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
       setSaveError('Title is required.');
       return;
     }
+    const urls = parseEmbedUrls(draftVideoUrlsText);
+    for (const u of urls) {
+      if (!toMediaEmbedUrl(u)) {
+        setSaveError(`Invalid embed URL: ${u}`);
+        return;
+      }
+    }
     setSaving(true);
     setSaveError(null);
     try {
       await apiClient.upsertDoc(resource.id, {
         category: resource.category,
+        sop_category: resource.category === 'SOP' ? draftSopCategory || null : null,
         title: draftTitle.trim(),
         description: draftDescription.trim(),
         content: draftContent,
         powered_by: draftPoweredBy.trim() || null,
+        video_url: urls[0] || null,
+        video_urls: urls,
       });
       setContent(draftContent);
+      setVideoUrls(urls);
       setEditing(false);
       onSaved();
     } catch (err: unknown) {
@@ -306,16 +234,23 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
     }
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+      className="fixed inset-0 z-[100] flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-150 overflow-y-auto"
     >
-      <div className="relative w-full max-w-3xl max-h-[90vh] bg-white dark:bg-gray-900 border border-gray-200/30 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-3xl my-8 sm:my-0 max-h-[90vh] bg-white dark:bg-gray-900 border border-gray-200/30 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden">
         <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/40 dark:border-white/8">
           <div className="flex items-center gap-3 min-w-0">
             <CategoryBadge category={resource.category} />
+            {resource.category === 'SOP' && resource.sopCategory && (
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${SOP_CATEGORY_COLORS[resource.sopCategory].badge}`}>
+                {SOP_CATEGORY_LABELS[resource.sopCategory]}
+              </span>
+            )}
             {editing ? (
               <input
                 value={draftTitle}
@@ -334,6 +269,15 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600/60 text-gray-200 text-xs font-semibold transition-colors"
               >
                 Edit
+              </button>
+            )}
+            {!editing && (
+              <button
+                onClick={() => void handleCopy()}
+                disabled={loading || !content}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600/60 text-gray-200 text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                {copied ? 'Copied' : 'Copy doc'}
               </button>
             )}
             {!editing && (
@@ -360,6 +304,38 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {editing ? (
             <div className="space-y-4">
+              {resource.category === 'SOP' && (
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                    SOP category
+                  </label>
+                  <select
+                    value={draftSopCategory}
+                    onChange={(e) => setDraftSopCategory(e.target.value as SopCategory | '')}
+                    className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                  >
+                    <option value="">Uncategorized</option>
+                    {Object.entries(SOP_CATEGORY_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+                  Embed URLs (optional)
+                </label>
+                <textarea
+                  value={draftVideoUrlsText}
+                  onChange={(e) => setDraftVideoUrlsText(e.target.value)}
+                  rows={3}
+                  className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+                  placeholder={"https://www.loom.com/share/…\nhttps://fathom.video/share/…\nhttps://www.figma.com/board/…"}
+                />
+                <p className="mt-1 text-[11px] text-gray-500">
+                  One URL per line. YouTube, Vimeo, Loom, Fathom, or Figma / FigJam.
+                </p>
+              </div>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Description</label>
                 <textarea
@@ -431,6 +407,32 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
             </div>
           ) : (
             <>
+              {videoUrls.length > 0 && (
+                <div className="mb-5 space-y-3">
+                  {videoUrls.map((raw) => {
+                    const src = toMediaEmbedUrl(raw);
+                    if (!src) return null;
+                    const kind = getMediaEmbedKind(raw);
+                    return (
+                      <div
+                        key={raw}
+                        className={`overflow-hidden rounded-lg border border-gray-200/40 dark:border-white/10 bg-black ${
+                          kind === 'figma' ? 'aspect-[4/3] min-h-[280px]' : 'aspect-video'
+                        }`}
+                      >
+                        <iframe
+                          src={src}
+                          title={`${resource.title} ${kind || 'media'} embed`}
+                          className="h-full w-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                          allowFullScreen
+                          loading="lazy"
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {(resource.poweredBy || draftPoweredBy) && (
                 <div className="flex items-start gap-2 mb-4 bg-violet-500/8 border border-violet-500/20 rounded-lg px-3 py-2.5">
                   <svg className="w-4 h-4 text-violet-400 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -451,7 +453,7 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
                 </div>
               ) : (
                 <div
-                  className="resource-md-content text-sm text-gray-800 dark:text-gray-200 leading-relaxed"
+                  className="resource-md-content text-sm leading-relaxed"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(content || '') }}
                 />
               )}
@@ -459,7 +461,8 @@ function ResourceModal({ resource, isOwner, onClose, onSaved }: ResourceModalPro
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -472,14 +475,21 @@ interface CreateSopModalProps {
   onCreated: (resourceId: string) => void;
 }
 
-function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
+export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('# New SOP\n\n');
   const [poweredBy, setPoweredBy] = useState('');
+  const [videoUrlsText, setVideoUrlsText] = useState('');
+  const [sopCategory, setSopCategory] = useState<SopCategory | ''>('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -498,15 +508,25 @@ function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
       setError('Title is required.');
       return;
     }
+    const urls = parseEmbedUrls(videoUrlsText);
+    for (const u of urls) {
+      if (!toMediaEmbedUrl(u)) {
+        setError(`Invalid embed URL: ${u}`);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
     try {
       const doc = await apiClient.createDoc({
         category: 'SOP',
+        sop_category: sopCategory || null,
         title: title.trim(),
         description: description.trim(),
         content,
         powered_by: poweredBy.trim() || null,
+        video_url: urls[0] || null,
+        video_urls: urls,
       });
       onCreated(doc.resource_id);
     } catch (err: unknown) {
@@ -520,7 +540,9 @@ function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
     }
   };
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={(e) => e.target === backdropRef.current && onClose()}
@@ -551,6 +573,34 @@ function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
             />
           </div>
           <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">SOP category</label>
+            <select
+              value={sopCategory}
+              onChange={(e) => setSopCategory(e.target.value as SopCategory | '')}
+              className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+            >
+              <option value="">Uncategorized</option>
+              {Object.entries(SOP_CATEGORY_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">
+              Embed URLs (optional)
+            </label>
+            <textarea
+              value={videoUrlsText}
+              onChange={(e) => setVideoUrlsText(e.target.value)}
+              rows={3}
+              className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+              placeholder={"https://www.loom.com/share/…\nhttps://fathom.video/share/…"}
+            />
+            <p className="mt-1 text-[11px] text-gray-500">
+              One URL per line — YouTube, Vimeo, Loom, Fathom, or Figma / FigJam.
+            </p>
+          </div>
+          <div>
             <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500 mb-1">Document (Markdown)</label>
             <textarea
               value={content}
@@ -578,17 +628,14 @@ function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
 // ---------------------------------------------------------------------------
 // Org Library item modal (create/edit)
 // ---------------------------------------------------------------------------
-
-type OrgLibraryKind = 'text' | 'markdown' | 'image' | 'video_url' | 'url';
-const ORG_LIBRARY_TAGS = ['testimonials', 'case_studies', 'value', 'SOP', 'ai', 'other'] as const;
-type OrgLibraryTag = (typeof ORG_LIBRARY_TAGS)[number];
 
 interface OrgLibraryDraft {
   kind: OrgLibraryKind;
@@ -601,17 +648,17 @@ interface OrgLibraryDraft {
   content_mime?: string | null;
 }
 
-function OrgLibraryItemModal({
-  isOwner,
+export function OrgLibraryItemModal({
   mode,
   initial,
+  canEdit,
   onClose,
   onSaved,
   onDeleted,
 }: {
-  isOwner: boolean;
   mode: 'create' | 'edit';
   initial: OrgLibraryDraft & { id?: string };
+  canEdit: boolean;
   onClose: () => void;
   onSaved: () => void;
   onDeleted?: () => void;
@@ -627,8 +674,14 @@ function OrgLibraryItemModal({
     content_mime: initial.content_mime ?? null,
   });
   const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -652,12 +705,15 @@ function OrgLibraryItemModal({
   const handlePickImage = async (file: File | null) => {
     if (!file) return;
     const mime = file.type || 'image/png';
-    const buf = await file.arrayBuffer();
-    const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'));
+      reader.readAsDataURL(file);
+    });
+    const b64 = dataUrl.includes(',') ? dataUrl.split(',')[1]! : '';
     setDraft((d) => ({ ...d, content_b64: b64, content_mime: mime }));
   };
-
-  const canEdit = isOwner;
 
   const handleSave = async () => {
     if (!canEdit) return;
@@ -704,7 +760,15 @@ function OrgLibraryItemModal({
     }
   };
 
-  return (
+  const handleCopyWrittenResource = async () => {
+    await copyToClipboard(String(draft.content_text ?? ''));
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={(e) => e.target === backdropRef.current && onClose()}
@@ -720,15 +784,27 @@ function OrgLibraryItemModal({
               Store org-specific resources (text/markdown, images, or video URLs) and tag them for retrieval.
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 transition-colors"
-            aria-label="Close"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            {(draft.kind === 'text' || draft.kind === 'markdown') && (
+              <button
+                type="button"
+                onClick={() => void handleCopyWrittenResource()}
+                disabled={!String(draft.content_text ?? '')}
+                className="px-3 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600/60 text-gray-200 text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                {copied ? 'Copied' : 'Copy doc'}
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-200 hover:bg-gray-700/40 transition-colors"
+              aria-label="Close"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
@@ -887,136 +963,25 @@ function OrgLibraryItemModal({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
-// ---------------------------------------------------------------------------
-// Square resource tile
-// ---------------------------------------------------------------------------
-
-interface ResourceTileProps {
-  resource: Resource;
-  onClick: () => void;
-}
-
-function ResourceTile({ resource, onClick }: ResourceTileProps) {
-  const catStyle = CATEGORY_STYLES[resource.category];
-
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group relative aspect-square w-full rounded-lg border border-gray-200/20 dark:border-white/8 hover:border-violet-500/40 bg-gradient-to-br ${catStyle.bg} dark:bg-gray-800/40 p-5 flex flex-col text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]`}
-    >
-      <div className="absolute top-3 right-3 opacity-60 group-hover:opacity-100 transition-opacity">
-        {resource.category === 'AI Skill' ? (
-          <svg className="w-5 h-5 text-violet-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-        ) : resource.category === 'SOP' ? (
-          <svg className="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-          </svg>
-        ) : (
-          <svg className="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
-          </svg>
-        )}
-      </div>
-
-      <CategoryBadge category={resource.category} />
-
-      <h3 className="mt-3 text-base font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-2">
-        {resource.title}
-      </h3>
-
-      <p className="mt-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-3 flex-1">
-        {resource.description}
-      </p>
-
-      <div className="mt-auto pt-3 flex flex-wrap gap-1">
-        {resource.mcpRequired && resource.mcpRequired.length > 0
-          ? resource.mcpRequired.map((mcp) => (
-              <span
-                key={mcp}
-                className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium bg-gray-500/10 text-gray-500 dark:text-gray-500 border border-gray-500/15 truncate max-w-full"
-              >
-                {mcp}
-              </span>
-            ))
-          : resource.poweredBy
-            ? (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-violet-500/10 text-violet-400 border border-violet-500/20">
-                Powers product features
-              </span>
-            )
-            : resource.isCustom
-              ? (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
-                  Custom SOP
-                </span>
-              )
-              : null}
-      </div>
-
-      <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
-        <span className="text-[10px] text-gray-400 flex items-center gap-1">
-          Open
-          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </span>
-      </div>
-    </button>
-  );
-}
-
-const ALL_CATEGORIES: Array<ResourceCategory | 'All'> = ['All', 'AI Skill', 'SOP', 'Template', 'Guide'];
 
 // ---------------------------------------------------------------------------
-// Main panel
+// Main panel — org library only (platform SOPs live in consulting portal)
 // ---------------------------------------------------------------------------
 
-interface ResourcesPanelProps {
-  isOwner?: boolean;
-}
-
-export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps) {
-  const [docs, setDocs] = useState<Resource[]>([]);
-  const [view, setView] = useState<'docs' | 'library'>('docs');
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<ResourceCategory | 'All'>('All');
+export default function ResourcesPanel() {
   const [search, setSearch] = useState('');
-  const [openResource, setOpenResource] = useState<Resource | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
-
-  // Org library
-  const [libraryItems, setLibraryItems] = useState<Array<any>>([]);
-  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [canManageOrgLibrary, setCanManageOrgLibrary] = useState(false);
+  const [libraryItems, setLibraryItems] = useState<Array<Record<string, unknown>>>([]);
+  const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryError, setLibraryError] = useState<string | null>(null);
   const [showNewLibraryItem, setShowNewLibraryItem] = useState(false);
-  const [openLibraryItem, setOpenLibraryItem] = useState<any | null>(null);
+  const [openLibraryItem, setOpenLibraryItem] = useState<Record<string, unknown> | null>(null);
   const [libraryTagFilter, setLibraryTagFilter] = useState<OrgLibraryTag | 'All'>('All');
-
-  const loadDocs = useCallback(async () => {
-    try {
-      const rows = await apiClient.listDocs();
-      setDocs(rows.map(docMetaToResource));
-    } catch {
-      setDocs([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      await loadDocs();
-      if (!cancelled) setLoading(false);
-    })();
-    return () => { cancelled = true; };
-  }, [loadDocs]);
 
   const loadLibrary = useCallback(async () => {
     setLibraryLoading(true);
@@ -1024,58 +989,37 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
     try {
       const items = await apiClient.listOrgLibrary();
       setLibraryItems(Array.isArray(items) ? items : []);
-    } catch (e: any) {
-      setLibraryError(e?.response?.data?.detail || 'Failed to load library.');
+    } catch (e: unknown) {
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Failed to load library.';
+      setLibraryError(String(detail));
       setLibraryItems([]);
     } finally {
       setLibraryLoading(false);
     }
   }, []);
 
-  const merged: Resource[] = [];
-  const fromDb = new Map(docs.map((d) => [d.id, d]));
-  for (const skill of AI_SKILL_RESOURCES) {
-    merged.push(fromDb.get(skill.id) ?? skill);
-  }
-  for (const doc of docs) {
-    if (!AI_SKILL_RESOURCES.some((s) => s.id === doc.id)) merged.push(doc);
-  }
-  const allResources = merged;
+  useEffect(() => {
+    void loadLibrary();
+  }, [loadLibrary]);
 
-  const handleClose = useCallback(() => setOpenResource(null), []);
-
-  const handleSaved = useCallback(async () => {
-    await loadDocs();
-    if (openResource) {
-      const rows = await apiClient.listDocs();
-      const updated = rows.find((r) => r.resource_id === openResource.id);
-      if (updated) setOpenResource(docMetaToResource(updated));
-    }
-  }, [loadDocs, openResource]);
-
-  const handleCreated = useCallback(async (resourceId: string) => {
-    setShowCreate(false);
-    await loadDocs();
-    const rows = await apiClient.listDocs();
-    const created = rows.find((r) => r.resource_id === resourceId);
-    if (created) setOpenResource(docMetaToResource(created));
-  }, [loadDocs]);
-
-  const filtered = allResources.filter((r) => {
-    const matchesCategory = filter === 'All' || r.category === filter;
-    const searchLower = search.toLowerCase();
-    const matchesSearch =
-      !searchLower ||
-      r.title.toLowerCase().includes(searchLower) ||
-      r.description.toLowerCase().includes(searchLower) ||
-      r.category.toLowerCase().includes(searchLower);
-    return matchesCategory && matchesSearch;
-  });
-
-  const availableCategories = ALL_CATEGORIES.filter((cat) => {
-    if (cat === 'All') return true;
-    return allResources.some((r) => r.category === cat);
-  });
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getCurrentUser()
+      .then((user) => {
+        if (cancelled) return;
+        const role = String(user.role || 'member').toLowerCase().trim();
+        setCanManageOrgLibrary(role === 'admin' || role === 'member' || role === 'owner');
+      })
+      .catch(() => {
+        if (!cancelled) setCanManageOrgLibrary(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const availableLibraryTags = useMemo(() => {
     const used = new Set<string>();
@@ -1089,7 +1033,7 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
   const filteredLibraryItems = useMemo(() => {
     const searchLower = search.toLowerCase().trim();
     return libraryItems.filter((it) => {
-      const tags = Array.isArray(it.tags) ? it.tags.map(String) : [];
+      const tags: string[] = Array.isArray(it.tags) ? it.tags.map(String) : [];
       const matchesTag = libraryTagFilter === 'All' || tags.includes(libraryTagFilter);
       const matchesSearch =
         !searchLower ||
@@ -1108,111 +1052,38 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
 
   return (
     <>
-      <style jsx global>{`
-        .resource-md-content .md-h1 { font-size: 1.5rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: var(--tw-prose-headings, #f3f4f6); }
-        .resource-md-content .md-h2 { font-size: 1.25rem; font-weight: 700; margin: 1.25rem 0 0.5rem; color: var(--tw-prose-headings, #f3f4f6); }
-        .resource-md-content .md-h3 { font-size: 1.1rem; font-weight: 600; margin: 1rem 0 0.4rem; color: var(--tw-prose-headings, #f3f4f6); }
-        .resource-md-content .md-h4 { font-size: 1rem; font-weight: 600; margin: 0.75rem 0 0.3rem; color: var(--tw-prose-headings, #e5e7eb); }
-        .resource-md-content .md-hr { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 1.25rem 0; }
-        .resource-md-content .md-p { margin: 0.5rem 0; }
-        .resource-md-content .md-li { display: list-item; margin-left: 1.25rem; margin-bottom: 0.25rem; list-style-type: disc; }
-        .resource-md-content .md-li.md-ol { list-style-type: decimal; }
-        .resource-md-content .md-code-block {
-          display: block;
-          background: rgba(0,0,0,0.3);
-          border: 1px solid rgba(255,255,255,0.06);
-          border-radius: 0.5rem;
-          padding: 1rem;
-          margin: 0.75rem 0;
-          overflow-x: auto;
-          font-size: 0.8rem;
-          line-height: 1.6;
-          white-space: pre-wrap;
-          word-break: break-word;
-        }
-        .resource-md-content .md-inline-code {
-          background: rgba(139,92,246,0.12);
-          border: 1px solid rgba(139,92,246,0.2);
-          border-radius: 0.25rem;
-          padding: 0.1rem 0.35rem;
-          font-size: 0.85em;
-        }
-        .resource-md-content .md-link { color: #a78bfa; text-decoration: underline; text-underline-offset: 2px; }
-        .resource-md-content .md-link:hover { color: #c4b5fd; }
-        .resource-md-content strong { color: #f3f4f6; }
-      `}</style>
+      <style jsx global>{RESOURCE_MD_STYLES}</style>
 
       <div className="w-full max-w-5xl mx-auto space-y-6">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-1">Resources</h2>
             <p className="text-sm text-gray-500 dark:text-gray-400">
-              SOPs, AI skills, and business resources for your team. Click to view.
-              {isOwner && (
-                <span className="ml-2 inline-flex items-center gap-1 text-amber-400 text-xs font-semibold">
-                  Owner — you can create and edit SOP documents.
-                </span>
-              )}
+              Your organization&apos;s library — playbooks, SOPs, testimonials, and assets for this team.
+              Platform SOPs live in the consulting portal drawer.
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-lg border border-gray-200/60 dark:border-white/10 overflow-hidden">
-              <button
-                onClick={() => setView('docs')}
-                className={`px-3 py-2 text-xs font-semibold ${view === 'docs' ? 'bg-violet-600 text-white' : 'bg-transparent text-gray-500 dark:text-gray-300 hover:bg-gray-200/40 dark:hover:bg-gray-800/40'}`}
-              >
-                Docs
-              </button>
-              <button
-                onClick={() => {
-                  setView('library');
-                  if (libraryItems.length === 0) void loadLibrary();
-                }}
-                className={`px-3 py-2 text-xs font-semibold ${view === 'library' ? 'bg-violet-600 text-white' : 'bg-transparent text-gray-500 dark:text-gray-300 hover:bg-gray-200/40 dark:hover:bg-gray-800/40'}`}
-              >
-                Org Library
-              </button>
-            </div>
-            <div className="relative">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={view === 'library' ? 'Search library…' : 'Search resources…'}
-                className="pl-9 pr-4 py-2 text-sm rounded-lg bg-white/60 dark:bg-gray-800/60 border border-gray-200/60 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 w-56"
-              />
-            </div>
+          <div className="relative">
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search library…"
+              className="pl-9 pr-4 py-2 text-sm rounded-lg bg-white/60 dark:bg-gray-800/60 border border-gray-200/60 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40 w-56"
+            />
           </div>
         </div>
 
-        {view === 'docs' && availableCategories.length > 2 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            {availableCategories.map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setFilter(cat)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                  filter === cat
-                    ? 'bg-violet-600 text-white shadow-md'
-                    : 'bg-gray-200/60 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-300/60 dark:hover:bg-gray-600/50'
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {view === 'library' && (availableLibraryTags.length > 0 || libraryTagFilter !== 'All') && (
+        {(availableLibraryTags.length > 0 || libraryTagFilter !== 'All') && (
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setLibraryTagFilter('All')}
@@ -1244,48 +1115,60 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
         )}
 
         <div className="flex items-center gap-4 text-xs text-gray-500">
-          {view === 'docs' ? (
-            <>
-              <span>
-                {filtered.length} resource{filtered.length !== 1 ? 's' : ''}
-              </span>
-              <span>{AI_SKILL_RESOURCES.length} AI Skills</span>
-              <span>{allResources.filter((r) => r.category === 'SOP').length} SOPs</span>
-            </>
-          ) : (
-            <>
-              <span>
-                {filteredLibraryItems.length} item{filteredLibraryItems.length !== 1 ? 's' : ''}
-                {filteredLibraryItems.length !== libraryItems.length
-                  ? ` (of ${libraryItems.length})`
-                  : ''}
-              </span>
-              {libraryError ? <span className="text-rose-400">{libraryError}</span> : null}
-            </>
-          )}
+          <span>
+            {filteredLibraryItems.length} item{filteredLibraryItems.length !== 1 ? 's' : ''}
+            {filteredLibraryItems.length !== libraryItems.length ? ` (of ${libraryItems.length})` : ''}
+          </span>
+          {libraryError ? <span className="text-rose-400">{libraryError}</span> : null}
+          <button type="button" onClick={() => void loadLibrary()} className="text-violet-400 hover:text-violet-300">
+            Refresh
+          </button>
         </div>
 
-        {view === 'docs' && loading ? (
+        {libraryLoading ? (
           <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="aspect-square rounded-lg border border-gray-200/20 dark:border-white/8 bg-gray-800/40 animate-pulse" />
+              <div
+                key={i}
+                className="aspect-square rounded-lg border border-gray-200/20 dark:border-white/8 bg-gray-800/40 animate-pulse"
+              />
             ))}
           </div>
-        ) : view === 'docs' && filtered.length === 0 ? (
+        ) : filteredLibraryItems.length === 0 && libraryItems.length > 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <h3 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-1">No resources found</h3>
+            <h3 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-1">No items found</h3>
             <p className="text-sm text-gray-500">
-              {search ? `No resources match "${search}".` : 'No resources in this category yet.'}
+              {search
+                ? `No library items match "${search}".`
+                : libraryTagFilter !== 'All'
+                  ? `No items tagged "${libraryTagFilter}".`
+                  : 'No library items yet.'}
             </p>
           </div>
-        ) : view === 'docs' ? (
-          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-            {isOwner ? (
+        ) : libraryItems.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <h3 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-1">No library items yet</h3>
+            <p className="text-sm text-gray-500 mb-4">
+              Store org-specific testimonials, case studies, SOPs, value bullets, images, and video links.
+            </p>
+            {canManageOrgLibrary ? (
               <button
                 type="button"
-                onClick={() => setShowCreate(true)}
+                onClick={() => setShowNewLibraryItem(true)}
+                className="px-4 py-2 text-xs font-semibold rounded-lg bg-violet-600 hover:bg-violet-500 text-white"
+              >
+                New item
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
+            {canManageOrgLibrary ? (
+              <button
+                type="button"
+                onClick={() => setShowNewLibraryItem(true)}
                 className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
-                aria-label="Create new SOP"
+                aria-label="Create new library item"
               >
                 <div className="flex flex-col items-center gap-2">
                   <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
@@ -1293,125 +1176,53 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
                   </span>
-                  <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New SOP</span>
+                  <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New item</span>
                 </div>
               </button>
             ) : null}
-            {filtered.map((resource) => (
-              <ResourceTile
-                key={resource.id}
-                resource={resource}
-                onClick={() => setOpenResource(resource)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Store org-specific testimonials, case studies, SOPs, value bullets, images, and video links.
-              </p>
+
+            {filteredLibraryItems.map((it) => (
               <button
-                onClick={() => loadLibrary()}
-                className="text-xs text-violet-400 hover:text-violet-300"
+                key={String(it.id)}
+                type="button"
+                onClick={() => setOpenLibraryItem(it)}
+                className="group relative aspect-square w-full rounded-lg border border-gray-200/60 dark:border-white/10 hover:border-violet-500/30 bg-white/60 dark:bg-gray-900/30 p-5 flex flex-col text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
               >
-                Refresh
-              </button>
-            </div>
-
-            {libraryLoading ? (
-              <div className="text-sm text-gray-500">Loading…</div>
-            ) : filteredLibraryItems.length === 0 && libraryItems.length > 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <h3 className="text-base font-semibold text-gray-700 dark:text-gray-300 mb-1">No items found</h3>
-                <p className="text-sm text-gray-500">
-                  {search
-                    ? `No library items match "${search}".`
-                    : libraryTagFilter !== 'All'
-                      ? `No items tagged "${libraryTagFilter}".`
-                      : 'No library items yet.'}
+                <span className="text-[10px] px-2 py-1 rounded bg-gray-500/10 text-gray-500 border border-gray-500/15 self-start">
+                  {String(it.kind || 'text')}
+                </span>
+                <h3 className="mt-3 text-sm font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-2">
+                  {String(it.title || '')}
+                </h3>
+                <p className="mt-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-4 flex-1">
+                  {String(it.description || '')}
                 </p>
-              </div>
-            ) : (
-              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4">
-                {isOwner ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowNewLibraryItem(true)}
-                    className="group relative aspect-square w-full rounded-lg border border-dashed border-gray-300/60 dark:border-white/15 hover:border-violet-500/40 bg-white/50 dark:bg-gray-900/20 p-5 flex items-center justify-center text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
-                    aria-label="Create new library item"
-                  >
-                    <div className="flex flex-col items-center gap-2">
-                      <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-violet-600/15 border border-violet-500/20 text-violet-400 group-hover:bg-violet-600/20 transition-colors">
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                        </svg>
+                {Array.isArray(it.tags) && it.tags.length ? (
+                  <div className="mt-auto pt-3 flex flex-wrap gap-1">
+                    {it.tags.slice(0, 6).map((t: unknown) => (
+                      <span
+                        key={String(t)}
+                        className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                      >
+                        {String(t)}
                       </span>
-                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">New item</span>
-                    </div>
-                  </button>
+                    ))}
+                  </div>
                 ) : null}
-
-                {filteredLibraryItems.map((it: any) => (
-                  <button
-                    key={it.id}
-                    onClick={() =>
-                      setOpenLibraryItem(it)
-                    }
-                    className="group relative aspect-square w-full rounded-lg border border-gray-200/60 dark:border-white/10 hover:border-violet-500/30 bg-white/60 dark:bg-gray-900/30 p-5 flex flex-col text-left transition-all duration-200 hover:shadow-lg hover:shadow-violet-500/5 hover:scale-[1.02] active:scale-[0.98]"
-                  >
-                    <span className="text-[10px] px-2 py-1 rounded bg-gray-500/10 text-gray-500 border border-gray-500/15 self-start">
-                      {String(it.kind || 'text')}
-                    </span>
-                    <h3 className="mt-3 text-sm font-bold text-gray-900 dark:text-gray-100 leading-snug line-clamp-2">
-                      {it.title}
-                    </h3>
-                    <p className="mt-2 text-xs text-gray-600 dark:text-gray-400 leading-relaxed line-clamp-4 flex-1">
-                      {it.description}
-                    </p>
-                    {Array.isArray(it.tags) && it.tags.length ? (
-                      <div className="mt-auto pt-3 flex flex-wrap gap-1">
-                        {it.tags.slice(0, 6).map((t: string) => (
-                          <span
-                            key={t}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20"
-                          >
-                            {t}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            )}
+              </button>
+            ))}
           </div>
         )}
       </div>
 
-      {openResource && (
-        <ResourceModal
-          resource={openResource}
-          isOwner={isOwner}
-          onClose={handleClose}
-          onSaved={handleSaved}
-        />
-      )}
-
-      {showCreate && (
-        <CreateSopModal
-          onClose={() => setShowCreate(false)}
-          onCreated={handleCreated}
-        />
-      )}
-
-      {showNewLibraryItem && (
+      {showNewLibraryItem && canManageOrgLibrary && (
         <OrgLibraryItemModal
-          isOwner={isOwner}
           mode="create"
-          initial={{ kind: 'markdown', title: '', description: '', tags: [], content_text: '# New resource\n\n' }}
+          canEdit={canManageOrgLibrary}
+          initial={{ kind: 'markdown', title: '', description: '', tags: ['SOP'], content_text: '# New SOP\n\n' }}
           onClose={() => setShowNewLibraryItem(false)}
           onSaved={async () => {
+            setShowNewLibraryItem(false);
             await loadLibrary();
           }}
         />
@@ -1419,18 +1230,18 @@ export default function ResourcesPanel({ isOwner = false }: ResourcesPanelProps)
 
       {openLibraryItem && (
         <OrgLibraryItemModal
-          isOwner={isOwner}
-          mode={isOwner ? 'edit' : 'edit'}
+          mode="edit"
+          canEdit={canManageOrgLibrary}
           initial={{
             id: String(openLibraryItem.id),
             kind: (openLibraryItem.kind || 'markdown') as OrgLibraryKind,
             title: String(openLibraryItem.title || ''),
             description: String(openLibraryItem.description || ''),
             tags: (Array.isArray(openLibraryItem.tags) ? openLibraryItem.tags : []) as OrgLibraryTag[],
-            content_text: openLibraryItem.content_text ?? '',
-            content_url: openLibraryItem.content_url ?? '',
-            content_b64: openLibraryItem.content_b64 ?? null,
-            content_mime: openLibraryItem.content_mime ?? null,
+            content_text: (openLibraryItem.content_text as string | null | undefined) ?? '',
+            content_url: (openLibraryItem.content_url as string | null | undefined) ?? '',
+            content_b64: (openLibraryItem.content_b64 as string | null | undefined) ?? null,
+            content_mime: (openLibraryItem.content_mime as string | null | undefined) ?? null,
           }}
           onClose={() => setOpenLibraryItem(null)}
           onSaved={async () => {

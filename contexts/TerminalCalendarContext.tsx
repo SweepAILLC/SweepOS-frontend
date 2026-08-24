@@ -62,7 +62,7 @@ function bookingsDataFingerprint(
   past: CalendarSyncedBookingRow[]
 ): string {
   const rowKey = (r: CalendarSyncedBookingRow) =>
-    `${r.id}|${r.start_time}|${r.display_status}|${r.sale_closed}|${r.cancelled}`;
+    `${r.id}|${r.start_time}|${r.display_status}|${r.is_sales_call}|${r.sale_closed}|${r.cancelled}`;
   return `${upcoming.length}:${past.length}:${upcoming.map(rowKey).join(';')}:${past.map(rowKey).join(';')}`;
 }
 

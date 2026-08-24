@@ -1,3 +1,5 @@
+export type ConsultingTier = 'pro_consulting' | 'core_consulting';
+
 export interface Organization {
   id: string;
   name: string;
@@ -8,6 +10,16 @@ export interface Organization {
   funnel_count?: number;
   admin_email?: string;  // Only present when creating a new org
   admin_password?: string;  // Only present when creating a new org
+  consulting_tier?: ConsultingTier | null;
+  booking_url?: string | null;
+  cash_collected_30d_usd?: number;
+  cash_collected_prev_30d_usd?: number;
+  cash_collected_all_time_usd?: number;
+  mrr_usd?: number;
+  active_seconds_7d?: number;
+  active_seconds_30d?: number;
+  last_seen_at?: string | null;
+  currently_online?: boolean;
 }
 
 export interface HealthTrendPeriod {
@@ -19,11 +31,64 @@ export interface HealthTrendPeriod {
   stripe_revenue_usd: number;
   /** Monthly cash matching Finances "combined" (Stripe + Whop) when API provides it; charts prefer this over stripe-only. */
   combined_revenue_usd?: number | null;
+  /** Monthly deal/contract revenue (KPI revenue from closes + drawer contract amounts). */
+  deal_revenue_usd?: number | null;
   calls_booked_count: number;
+  /** Monthly KPI Command Center volume (sum of daily entries). */
+  kpi_closes_count?: number;
+  kpi_show_ups_count?: number;
+  kpi_calls_booked_count?: number;
+  kpi_outreach_sent_count?: number;
   cumulative_total_clients: number;
   active_clients_cohort: number;
   /** When set by API, preferred over derived cumulative revenue ÷ roster for LTV charts. */
   avg_client_ltv_usd?: number | null;
+}
+
+export interface LlmUsageFeatureBreakdown {
+  feature: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageOrgBreakdown {
+  org_id: string;
+  organization_name: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageSummary {
+  days: number;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  by_feature?: LlmUsageFeatureBreakdown[];
+  by_org?: LlmUsageOrgBreakdown[];
+}
+
+export interface LlmUsageTimeseriesPoint {
+  date: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+}
+
+export interface LlmUsageTimeseries {
+  org_id?: string | null;
+  organization_name?: string | null;
+  scope?: string | null;
+  days?: number | null;
+  period_start: string;
+  period_end: string;
+  calls: number;
+  total_tokens: number;
+  estimated_cost_usd: number;
+  points: LlmUsageTimeseriesPoint[];
 }
 
 export interface GlobalHealth {
@@ -68,6 +133,33 @@ export interface GlobalHealth {
   show_up_rate_last_30d_pct: number | null;
   close_rate_last_30d_pct: number | null;
   health_trend_periods: HealthTrendPeriod[];
+  llm_usage_last_30d?: LlmUsageSummary | null;
+  org_activity?: OrgActivityRow[];
+  currently_online_orgs?: number;
+  currently_online_users?: number;
+  active_seconds_7d?: number;
+  active_seconds_30d?: number;
+}
+
+export interface OrgActivityRow {
+  org_id: string;
+  organization_name: string;
+  consulting_tier?: string | null;
+  active_seconds_7d: number;
+  active_seconds_30d: number;
+  last_seen_at?: string | null;
+  currently_online: boolean;
+  online_users: number;
+}
+
+export interface OwnerOrgNotice {
+  id: string;
+  org_id: string;
+  organization_name?: string | null;
+  title: string;
+  body: string;
+  created_at: string;
+  read?: boolean;
 }
 
 export interface GlobalSettings {
@@ -133,5 +225,24 @@ export interface OrganizationDashboardSummary {
   manual_cash_all_time_usd?: number;
   total_processor_revenue_all_time_usd?: number;
   monthly_health_since_onboarding?: HealthTrendPeriod[];
+  /** Terminal-style KPIs for selected time scope */
+  kpi_scope?: string | null;
+  kpi_range_days?: number | null;
+  kpi_cash_usd?: number;
+  kpi_mrr_usd?: number;
+  kpi_avg_ltv_usd?: number | null;
+  kpi_upcoming_count?: number;
+  kpi_aov_usd?: number | null;
+  kpi_order_count?: number;
+  kpi_close_rate_pct?: number | null;
+  kpi_show_up_rate_pct?: number | null;
+  /** Growth / coaching (30d) — mirrors Owner Health product cards */
+  show_up_rate_last_30d_pct?: number | null;
+  close_rate_last_30d_pct?: number | null;
+  calls_booked_last_30d?: number;
+  calls_booked_previous_30d?: number;
+  lifecycle_active_clients_current?: number;
+  lifecycle_active_clients_previous_30d_cohort?: number;
+  llm_usage_last_30d?: LlmUsageSummary | null;
 }
 
