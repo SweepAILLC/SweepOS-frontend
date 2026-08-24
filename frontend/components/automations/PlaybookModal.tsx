@@ -6,6 +6,7 @@ import PlaybookCard from './PlaybookCard';
 
 const PLAYBOOK_SHORT: Record<AutomationPlaybook, string> = {
   pre_sale_post_booking: 'Post-booking',
+  pre_sale_pre_meeting: 'Pre-meeting',
   first_payment_onboarding: 'Onboarding',
   first_payment_referral: 'Referral ask',
   win_combined_ask: 'Combined ask',

@@ -20,7 +20,8 @@ const STATE_FILTERS: AutomationJobState[] = [
 ];
 
 const PLAYBOOK_LABEL: Record<AutomationPlaybook, string> = {
-  pre_sale_post_booking: 'Post-booking (pre-sale)',
+  pre_sale_post_booking: 'Post-booking',
+  pre_sale_pre_meeting: 'Pre-meeting',
   first_payment_onboarding: 'Onboarding',
   first_payment_referral: 'Referral',
   win_combined_ask: 'Win combined ask',

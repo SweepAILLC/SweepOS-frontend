@@ -33,6 +33,7 @@ const SAMPLE_KIND_LABEL: Record<string, string> = {
 
 const PLAYBOOK_AUTO_SAMPLE_KIND: Record<AutomationPlaybook, string> = {
   pre_sale_post_booking: 'onboarding_email',
+  pre_sale_pre_meeting: 'onboarding_email',
   first_payment_onboarding: 'onboarding_email',
   first_payment_referral: 'referral_campaign',
   win_combined_ask: 'referral_campaign',
@@ -64,7 +65,8 @@ function decodeSampleRef(ref?: AutomationHtmlTemplateRef | null): string {
 }
 
 const PLAYBOOK_LABEL: Record<AutomationPlaybook, string> = {
-  pre_sale_post_booking: 'Post-booking (pre-sale)',
+  pre_sale_post_booking: 'Post-booking (after booking lands)',
+  pre_sale_pre_meeting: 'Pre-meeting (before call)',
   first_payment_onboarding: 'Onboarding (first payment)',
   first_payment_referral: 'Referral ask (first payment + 1h)',
   win_combined_ask: 'Combined ask after win',
@@ -73,7 +75,9 @@ const PLAYBOOK_LABEL: Record<AutomationPlaybook, string> = {
 
 const PLAYBOOK_DESCRIPTION: Record<AutomationPlaybook, string> = {
   pre_sale_post_booking:
-    'Sent after a Calendly or Cal.com booking lands while the client has not paid yet. Use it for a primer / agenda / pre-call value email so the lead arrives warm. Configure which calendar events fire this step from the Booking trigger node on the timeline.',
+    'Sent after a Calendly or Cal.com booking lands while the client has not paid yet. Use the Wait node above this email to set how long after booking to send. Event selection is configured on the Booking lands trigger.',
+  pre_sale_pre_meeting:
+    'Second post-booking email, scheduled relative to the meeting start. Use the Wait node above this email to set how long before the meeting to send (e.g. 2 hours before). Uses the same booking event filter as Post-booking.',
   first_payment_onboarding:
     'Sent immediately after a client makes their first successful payment. Welcome them and outline the first checklist items.',
   first_payment_referral:
@@ -352,19 +356,34 @@ export default function PlaybookCard({ rule, onSaved, previewClientId, embedded 
         />
       </div>
 
-      <Section title="Timing" description="How long to wait after the previous step before this email sends.">
+      <Section
+        title="Timing"
+        description={
+          rule.playbook === 'pre_sale_pre_meeting'
+            ? 'How long before the meeting this email should send. Prefer editing via the Wait node on the timeline.'
+            : rule.playbook === 'pre_sale_post_booking'
+              ? 'How long after the booking lands before this email sends. Prefer editing via the Wait node on the timeline.'
+              : 'How long to wait after the previous step before this email sends.'
+        }
+      >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <label className="text-xs text-gray-600 dark:text-gray-300 space-y-1.5">
-            <span className="font-medium text-gray-800 dark:text-gray-200">Delay</span>
+            <span className="font-medium text-gray-800 dark:text-gray-200">
+              {rule.playbook === 'pre_sale_pre_meeting' ? 'Before meeting' : 'Delay'}
+            </span>
             <select
               value={draft.delay_seconds}
               onChange={(e) => setField('delay_seconds', Number(e.target.value))}
               className={fieldClass}
             >
-              <option value={0}>Immediate</option>
+              {rule.playbook !== 'pre_sale_pre_meeting' ? (
+                <option value={0}>Immediate</option>
+              ) : null}
+              <option value={900}>15 minutes</option>
               <option value={1800}>30 minutes</option>
               <option value={3600}>1 hour</option>
               <option value={2 * 3600}>2 hours</option>
+              <option value={6 * 3600}>6 hours</option>
               <option value={24 * 3600}>1 day</option>
               <option value={3 * 24 * 3600}>3 days</option>
             </select>

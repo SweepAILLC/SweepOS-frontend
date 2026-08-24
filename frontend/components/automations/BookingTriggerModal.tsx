@@ -98,7 +98,8 @@ export default function BookingTriggerModal({ rule, onClose, onSaved }: BookingT
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-violet-400/90">Trigger</p>
             <h3 className="text-base font-semibold text-white">Booking lands</h3>
             <p className="mt-1 text-xs text-gray-400">
-              Which Calendly / Cal.com events fire the post-booking email (client must not have paid yet).
+              Which sales call event types fire the post-booking email (client must not have paid yet).
+              Non-sales bookings never trigger this flow.
             </p>
           </div>
           <button
@@ -187,22 +188,50 @@ export function BookingTriggerFields({
       const calendlyEventsP = calendlyConnected
         ? apiClient.getCalendlyEventTypes({ count: 50, sort: 'name:asc' })
         : Promise.resolve(null);
+      const calcomSalesP = calcomConnected
+        ? apiClient.listSalesCallEventTypes('calcom')
+        : Promise.resolve({ event_type_ids: [] as string[] });
+      const calendlySalesP = calendlyConnected
+        ? apiClient.listSalesCallEventTypes('calendly')
+        : Promise.resolve({ event_type_ids: [] as string[] });
 
-      const [calcomRes, calendlyRes] = await Promise.allSettled([calcomEventsP, calendlyEventsP]);
+      const [calcomRes, calendlyRes, calcomSalesRes, calendlySalesRes] = await Promise.allSettled([
+        calcomEventsP,
+        calendlyEventsP,
+        calcomSalesP,
+        calendlySalesP,
+      ]);
       if (cancelled) return;
+
+      const nextSales = {
+        calcom: new Set<string>(),
+        calendly: new Set<string>(),
+      };
+      if (calcomSalesRes.status === 'fulfilled' && calcomSalesRes.value) {
+        const ids = (calcomSalesRes.value as { event_type_ids?: string[] }).event_type_ids || [];
+        nextSales.calcom = new Set(ids.map(String));
+      }
+      if (calendlySalesRes.status === 'fulfilled' && calendlySalesRes.value) {
+        const ids = (calendlySalesRes.value as { event_type_ids?: string[] }).event_type_ids || [];
+        nextSales.calendly = new Set(ids.map(String));
+      }
 
       const errors: string[] = [];
       if (calcomConnected) {
         if (calcomRes.status === 'fulfilled' && calcomRes.value) {
-          const data = calcomRes.value as { event_types?: Array<{ id: number | string; title: string; slug?: string }> };
+          const data = calcomRes.value as {
+            event_types?: Array<{ id: number | string; title: string; slug?: string }>;
+          };
           const list = Array.isArray(data.event_types) ? data.event_types : [];
           setCalcomOpts(
-            list.map((e) => ({
-              id: String(e.id),
-              label: e.title || e.slug || `Event ${e.id}`,
-              provider: 'calcom' as const,
-              slug: e.slug,
-            }))
+            list
+              .map((e) => ({
+                id: String(e.id),
+                label: e.title || e.slug || `Event ${e.id}`,
+                provider: 'calcom' as const,
+                slug: e.slug,
+              }))
+              .filter((e) => nextSales.calcom.has(e.id)),
           );
         } else {
           setCalcomOpts([]);
@@ -214,15 +243,19 @@ export function BookingTriggerFields({
 
       if (calendlyConnected) {
         if (calendlyRes.status === 'fulfilled' && calendlyRes.value) {
-          const data = calendlyRes.value as { collection?: Array<{ uri: string; name: string; slug?: string }> };
+          const data = calendlyRes.value as {
+            collection?: Array<{ uri: string; name: string; slug?: string }>;
+          };
           const list = Array.isArray(data.collection) ? data.collection : [];
           setCalendlyOpts(
-            list.map((e) => ({
-              id: e.uri,
-              label: e.name || e.slug || e.uri,
-              provider: 'calendly' as const,
-              slug: e.slug,
-            }))
+            list
+              .map((e) => ({
+                id: e.uri,
+                label: e.name || e.slug || e.uri,
+                provider: 'calendly' as const,
+                slug: e.slug,
+              }))
+              .filter((e) => nextSales.calendly.has(e.id)),
           );
         } else {
           setCalendlyOpts([]);
@@ -235,10 +268,20 @@ export function BookingTriggerFields({
       setLoadState('ready');
       if (!calcomConnected && !calendlyConnected) {
         setLoadError(
-          'No calendar provider is connected yet. Connect Calendly or Cal.com in the Calendar tab to populate this list.'
+          'No calendar provider is connected yet. Connect Calendly or Cal.com in the Calendar tab to populate this list.',
         );
       } else if (errors.length) {
         setLoadError(`${errors.join(' and ')} event-types fetch failed. Try again or check the integration.`);
+      } else if (
+        (calcomConnected && nextSales.calcom.size === 0) ||
+        (calendlyConnected && nextSales.calendly.size === 0)
+      ) {
+        // Soft hint only when both providers have zero sales types overall
+        if (nextSales.calcom.size === 0 && nextSales.calendly.size === 0) {
+          setLoadError(
+            'No sales call event types yet. Mark event types as Sales in the Calendar tab — only those fire this automation.',
+          );
+        }
       }
     })();
     return () => {
@@ -258,13 +301,14 @@ export function BookingTriggerFields({
         ? calcomOpts.map((o) => o.id)
         : next === 'calendly'
           ? calendlyOpts.map((o) => o.id)
-          : [...calcomOpts.map((o) => o.id), ...calendlyOpts.map((o) => o.id)]
+          : [...calcomOpts.map((o) => o.id), ...calendlyOpts.map((o) => o.id)],
     );
     const kept = (value?.event_type_ids ?? []).filter((id) => allowedIds.has(String(id)));
     onChange({
       provider: next,
       event_type_ids: kept,
       match_all_events: matchAll,
+      sales_calls_only: true,
     });
   };
 
@@ -276,6 +320,7 @@ export function BookingTriggerFields({
       provider,
       event_type_ids: Array.from(ids),
       match_all_events: matchAll,
+      sales_calls_only: true,
     });
   };
 
@@ -284,6 +329,7 @@ export function BookingTriggerFields({
       provider,
       event_type_ids: value?.event_type_ids ?? [],
       match_all_events: on,
+      sales_calls_only: true,
     });
   };
 
@@ -310,11 +356,11 @@ export function BookingTriggerFields({
 
   const selectionSummary = (() => {
     if (matchAll) {
-      return `Will fire for every booking from ${provider === 'any' ? 'either provider' : provider === 'calcom' ? 'Cal.com' : 'Calendly'}.`;
+      return `Will fire for every sales call from ${provider === 'any' ? 'either provider' : provider === 'calcom' ? 'Cal.com' : 'Calendly'} (non-sales bookings are ignored).`;
     }
     const n = selectedIds.size;
-    if (n === 0) return 'No events selected — nothing will send.';
-    return `Will fire for ${n} selected event${n === 1 ? '' : 's'}.`;
+    if (n === 0) return 'No sales event types selected — nothing will send.';
+    return `Will fire for ${n} selected sales event type${n === 1 ? '' : 's'}.`;
   })();
 
   const labelClass = dark ? 'text-gray-200' : 'text-gray-800 dark:text-gray-200';
@@ -343,8 +389,8 @@ export function BookingTriggerFields({
           <ToggleSwitch
             checked={matchAll}
             onChange={setMatchAll}
-            label="All bookings"
-            onLabel="All"
+            label="All sales bookings"
+            onLabel="All sales"
             offLabel="Pick"
             tone="cyan"
           />
@@ -353,14 +399,14 @@ export function BookingTriggerFields({
 
       {!matchAll && (
         <div className="space-y-1">
-          <div className={`text-[11px] font-medium ${labelClass}`}>Events that fire this automation</div>
+          <div className={`text-[11px] font-medium ${labelClass}`}>Sales event types that fire this automation</div>
           {loadState === 'loading' ? (
-            <div className={`text-xs ${mutedClass}`}>Loading event types…</div>
+            <div className={`text-xs ${mutedClass}`}>Loading sales event types…</div>
           ) : visibleOpts.length === 0 ? (
             <div className={`text-xs ${mutedClass}`}>
-              No event types found.{' '}
+              No sales call event types found.{' '}
               <Link className="underline" href="/?tab=calendar">
-                Connect a calendar →
+                Mark event types as Sales in Calendar →
               </Link>
             </div>
           ) : (
