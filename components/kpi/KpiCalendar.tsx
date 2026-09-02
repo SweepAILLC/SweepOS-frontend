@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { KpiDailyEntry, KpiEntryUpdatePayload, MetricThreshold } from '@/types/kpi';
+import type { KpiDailyEntry, KpiEntryUpdatePayload, KpiRepOption, MetricThreshold } from '@/types/kpi';
+import { apiClient } from '@/lib/api';
 import {
   formatKpiValue,
   kpiTierCellClass,
@@ -7,13 +8,15 @@ import {
   overallDayTier,
   tierForMetric,
 } from '@/lib/kpiBenchmarks';
+import KpiRevenueContributorsModal from './KpiRevenueContributorsModal';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-const COLOR_METRICS: Array<{ id: string; label: string }> = [
+export const COLOR_METRICS: Array<{ id: string; label: string }> = [
   { id: 'overall', label: 'Overall day' },
   { id: 'new_followers', label: 'New followers' },
   { id: 'outreach_sent', label: 'Outreach sent' },
+  { id: 'calls_booked_activity', label: 'Booked (activity)' },
   { id: 'outreach_reply_pct', label: 'Reply %' },
   { id: 'convo_to_booking_pct', label: 'Convo→Book %' },
   { id: 'show_up_pct', label: 'Show-up %' },
@@ -268,14 +271,25 @@ interface Props {
   thresholds: Record<string, MetricThreshold>;
   loading?: boolean;
   refreshing?: boolean;
-  onUpsertEntry: (entryDate: string, data: KpiEntryUpdatePayload) => Promise<KpiDailyEntry>;
+  onUpsertEntry: (
+    entryDate: string,
+    data: KpiEntryUpdatePayload,
+    repUserId?: string | null
+  ) => Promise<KpiDailyEntry>;
   /** Controlled visible month (shared with grid view via parent dashboard toggle). */
   year: number;
   month: number;
   compareMonths?: boolean;
-  onCompareChange?: (compare: boolean) => void;
   /** Ask parent to load entries covering the months currently on screen (incl. compare). */
   onVisibleRangeChange?: (start: string, end: string) => void;
+  /** Which metric drives cell coloring — owned by the parent toolbar, not this component. */
+  colorMetric?: string;
+  /**
+   * When true, hide the rep picker in the manual-entry modal — use for a calendar
+   * instance already scoped to one rep (e.g. the By Rep panel's calendar tab), where
+   * `entries` itself is pre-filtered and re-attributing per-cell would be confusing.
+   */
+  hideRepPicker?: boolean;
 }
 
 export default function KpiCalendar({
@@ -287,11 +301,11 @@ export default function KpiCalendar({
   year,
   month,
   compareMonths = false,
-  onCompareChange,
   onVisibleRangeChange,
+  hideRepPicker = false,
+  colorMetric = 'overall',
 }: Props) {
   const compare = compareMonths;
-  const [colorMetric, setColorMetric] = useState('overall');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
 
@@ -319,13 +333,42 @@ export default function KpiCalendar({
   const [form, setForm] = useState<KpiEntryUpdatePayload>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reps, setReps] = useState<KpiRepOption[]>([]);
+  const [modalRepId, setModalRepId] = useState('');
+  const [showContributors, setShowContributors] = useState(false);
+
+  useEffect(() => {
+    if (hideRepPicker) return;
+    let cancelled = false;
+    void apiClient
+      .getKpiReps()
+      .then((opts) => {
+        if (!cancelled) setReps(opts);
+      })
+      .catch(() => {
+        /* rep picker is optional — silently fall back to org-aggregate-only entry */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hideRepPicker]);
+
+  useEffect(() => {
+    // A per-rep row isn't fetched into `entries` (that list is org-aggregate only), so
+    // switching reps can't pre-fill their existing values here — start blank and let the
+    // additive/absolute save just apply to that rep's own row.
+    setModalRepId('');
+    setShowContributors(false);
+  }, [selectedDate]);
 
   useEffect(() => {
     if (!selectedDate) {
       setForm({});
       return;
     }
-    const e = selected;
+    // `selected` is the org-aggregate row; a specific rep's own values aren't
+    // fetched here, so pre-fill only for the aggregate (no rep chosen).
+    const e = modalRepId ? undefined : selected;
     setForm({
       total_followers: e?.total_followers ?? null,
       content_posted: e?.content_posted ?? null,
@@ -344,7 +387,7 @@ export default function KpiCalendar({
       revenue: e?.revenue ?? null,
       setter_context: e?.setter_context ?? null,
     });
-  }, [selectedDate, selected]);
+  }, [selectedDate, selected, modalRepId]);
 
   const setNum = (key: keyof KpiEntryUpdatePayload, raw: string) => {
     setForm((prev) => ({
@@ -358,7 +401,7 @@ export default function KpiCalendar({
     setSaving(true);
     setError(null);
     try {
-      await onUpsertEntry(selectedDate, form);
+      await onUpsertEntry(selectedDate, form, modalRepId || null);
     } catch (e: unknown) {
       const { formatApiError } = await import('@/lib/apiError');
       setError(formatApiError(e, 'Save failed'));
@@ -380,32 +423,6 @@ export default function KpiCalendar({
           {loading && entries.length === 0 ? 'Loading…' : 'Updating…'}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3 justify-end">
-        <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-          Color by
-          <select
-            className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
-            value={colorMetric}
-            onChange={(e) => setColorMetric(e.target.value)}
-          >
-            {COLOR_METRICS.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={compare}
-            onChange={(e) => onCompareChange?.(e.target.checked)}
-            className="rounded"
-          />
-          Two-month compare
-        </label>
-      </div>
-
       <div className={`flex flex-col ${compare ? 'lg:flex-row' : ''} gap-4`}>
         {compare && (
           <MonthGrid
@@ -430,15 +447,15 @@ export default function KpiCalendar({
       </div>
 
       {editOpen && selectedDate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-y-0 right-0 left-0 lg:left-[var(--app-sidebar-width,14rem)] z-50 flex items-center justify-center p-4">
           <div
-            className="absolute inset-0 bg-black/60"
+            className="absolute inset-0 bg-gray-500/75 dark:bg-gray-900/75"
             onClick={() => {
               setEditOpen(false);
               setSelectedDate(null);
             }}
           />
-          <div className="relative w-full max-w-3xl rounded-xl border border-white/10 glass-card p-4 max-h-[85vh] overflow-auto">
+          <div className="relative w-full max-w-3xl rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-4 max-h-[85vh] overflow-auto">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                 Edit KPI Entry — {selectedDate}
@@ -454,6 +471,26 @@ export default function KpiCalendar({
                 Close
               </button>
             </div>
+            {!hideRepPicker && reps.length > 0 && (
+              <label className="block text-xs text-gray-600 dark:text-gray-300 mb-3">
+                Log as
+                <span className="ml-1 text-[10px] text-gray-500">
+                  (a rep&apos;s row is separate from the org total — switching here starts blank)
+                </span>
+                <select
+                  value={modalRepId}
+                  onChange={(e) => setModalRepId(e.target.value)}
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
+                >
+                  <option value="">Org total (aggregate)</option>
+                  {reps.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <label className="text-gray-600 dark:text-gray-300">
                 Followers
@@ -461,7 +498,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.total_followers as number | null) ?? ''}
                   onChange={(e) => setNum('total_followers', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -474,7 +511,7 @@ export default function KpiCalendar({
                       content_posted: e.target.value === '' ? null : e.target.value === 'true',
                     }))
                   }
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 >
                   <option value="">—</option>
                   <option value="true">Yes</option>
@@ -487,7 +524,7 @@ export default function KpiCalendar({
                   type="text"
                   value={(form.best_content_type as string | null) ?? ''}
                   onChange={(e) => setForm((prev) => ({ ...prev, best_content_type: e.target.value || null }))}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -496,7 +533,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.inboxes_checked as number | null) ?? ''}
                   onChange={(e) => setNum('inboxes_checked', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -505,7 +542,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.outreach_sent as number | null) ?? ''}
                   onChange={(e) => setNum('outreach_sent', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -514,7 +551,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.respondents as number | null) ?? ''}
                   onChange={(e) => setNum('respondents', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -523,7 +560,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.inbound_icp_leads as number | null) ?? ''}
                   onChange={(e) => setNum('inbound_icp_leads', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -532,7 +569,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.followups_sent as number | null) ?? ''}
                   onChange={(e) => setNum('followups_sent', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -541,7 +578,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.new_conversations as number | null) ?? ''}
                   onChange={(e) => setNum('new_conversations', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -550,7 +587,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.conversations_nurtured as number | null) ?? ''}
                   onChange={(e) => setNum('conversations_nurtured', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -559,7 +596,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.calls_pitched as number | null) ?? ''}
                   onChange={(e) => setNum('calls_pitched', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -568,7 +605,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.inbound_bookings as number | null) ?? ''}
                   onChange={(e) => setNum('inbound_bookings', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -577,7 +614,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.outbound_bookings as number | null) ?? ''}
                   onChange={(e) => setNum('outbound_bookings', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -586,7 +623,7 @@ export default function KpiCalendar({
                   type="number"
                   value={(form.offers_made as number | null) ?? ''}
                   onChange={(e) => setNum('offers_made', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300">
@@ -596,7 +633,7 @@ export default function KpiCalendar({
                   step="0.01"
                   value={(form.revenue as number | null) ?? ''}
                   onChange={(e) => setNum('revenue', e.target.value)}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
               <label className="text-gray-600 dark:text-gray-300 md:col-span-2">
@@ -607,10 +644,22 @@ export default function KpiCalendar({
                     setForm((prev) => ({ ...prev, setter_context: e.target.value || null }))
                   }
                   rows={2}
-                  className="mt-1 w-full rounded border border-white/10 bg-white/5 px-2 py-1"
+                  className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
             </div>
+            {selected && (selected.cash_collected ?? 0) > 0 && (
+              <p className="mt-2 text-[11px] text-gray-500 flex items-center gap-1.5">
+                Cash collected {formatKpiValue(selected.cash_collected, 'currency')}
+                <button
+                  type="button"
+                  onClick={() => setShowContributors(true)}
+                  className="text-indigo-500 hover:text-indigo-400 underline"
+                >
+                  who contributed?
+                </button>
+              </p>
+            )}
             {selected &&
               ((selected.inbound_bookings ?? 0) + (selected.outbound_bookings ?? 0) > 0 ||
                 (selected.calls_booked ?? 0) > 0) && (
@@ -645,6 +694,13 @@ export default function KpiCalendar({
             </div>
           </div>
         </div>
+      )}
+
+      {showContributors && selectedDate && (
+        <KpiRevenueContributorsModal
+          entryDate={selectedDate}
+          onClose={() => setShowContributors(false)}
+        />
       )}
 
       <div className="flex flex-wrap items-center gap-4 text-[11px] text-gray-500 dark:text-gray-400">

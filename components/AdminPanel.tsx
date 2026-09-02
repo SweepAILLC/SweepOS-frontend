@@ -70,6 +70,7 @@ export default function AdminPanel() {
   const [showInviteOrg, setShowInviteOrg] = useState(false);
   const [inviteOrgName, setInviteOrgName] = useState('');
   const [inviteOrgAdminEmail, setInviteOrgAdminEmail] = useState('');
+  const [inviteOrgConsultingTier, setInviteOrgConsultingTier] = useState<'' | 'pro_consulting' | 'core_consulting'>('');
   const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
   const [maxUserSeatsInput, setMaxUserSeatsInput] = useState('');
   const [savingSeats, setSavingSeats] = useState(false);
@@ -142,9 +143,11 @@ export default function AdminPanel() {
       await apiClient.inviteOrganization({
         name: inviteOrgName.trim(),
         admin_email: inviteOrgAdminEmail.trim().toLowerCase(),
+        consulting_tier: inviteOrgConsultingTier || null,
       });
       setInviteOrgName('');
       setInviteOrgAdminEmail('');
+      setInviteOrgConsultingTier('');
       setShowInviteOrg(false);
       setError(null);
       alert(`Invitation sent to ${inviteOrgAdminEmail.trim()}. They will receive an email to set up their account.`);
@@ -506,12 +509,32 @@ export default function AdminPanel() {
                   placeholder="Admin email address"
                   className="w-full px-3 py-2 glass-input rounded-md"
                 />
+                <label className="block text-sm text-gray-600 dark:text-gray-400">
+                  Consulting tier
+                  <select
+                    value={inviteOrgConsultingTier}
+                    onChange={(e) =>
+                      setInviteOrgConsultingTier(e.target.value as '' | 'pro_consulting' | 'core_consulting')
+                    }
+                    className="mt-1 w-full px-3 py-2 glass-input rounded-md"
+                  >
+                    <option value="">Not a consulting org</option>
+                    <option value="core_consulting">Core consulting</option>
+                    <option value="pro_consulting">Pro consulting</option>
+                  </select>
+                </label>
                 <div className="flex gap-2">
                   <button onClick={handleInviteOrganization} className="glass-button neon-glow px-4 py-2 rounded-md">
                     Send Invitation
                   </button>
                   <button
-                    onClick={() => { setShowInviteOrg(false); setInviteOrgName(''); setInviteOrgAdminEmail(''); setError(null); }}
+                    onClick={() => {
+                      setShowInviteOrg(false);
+                      setInviteOrgName('');
+                      setInviteOrgAdminEmail('');
+                      setInviteOrgConsultingTier('');
+                      setError(null);
+                    }}
                     className="glass-button-secondary px-4 py-2 rounded-md hover:bg-white/20"
                   >
                     Cancel

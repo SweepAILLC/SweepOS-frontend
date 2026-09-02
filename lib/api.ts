@@ -1063,6 +1063,7 @@ class ApiClient {
       top_contributors_30d: [],
       top_contributors_90d: [],
       cash_by_source: { stripe: zeroSource, whop: zeroSource, manual: zeroSource },
+      active_clients_count: 0,
     };
   }
 
@@ -2242,6 +2243,7 @@ class ApiClient {
     const response = await this.client.delete(`/integrations/stripe/payments/${paymentId}`, {
       params: { use_treasury: useTreasury }
     });
+    invalidateCachesAfterManualPayment();
     return response.data;
   }
 
@@ -2493,7 +2495,11 @@ class ApiClient {
   }
 
   // Admin: Invite organization (email-based onboarding)
-  async inviteOrganization(data: { name: string; admin_email: string }) {
+  async inviteOrganization(data: {
+    name: string;
+    admin_email: string;
+    consulting_tier?: 'pro_consulting' | 'core_consulting' | null;
+  }) {
     const response = await this.client.post('/admin/organizations/invite', data);
     cache.delete(CACHE_KEYS.ADMIN_INVITATIONS);
     cache.delete(CACHE_KEYS.ADMIN_ORGANIZATIONS);
@@ -3479,6 +3485,8 @@ class ApiClient {
     end?: string;
     /** When false, skip live calendar/payment sync for faster month navigation. */
     sync?: boolean;
+    /** Filter to one rep's own rows instead of the org aggregate (rep_user_id NULL). */
+    rep_user_id?: string;
   }): Promise<import('@/types/kpi').KpiDailyEntry[]> {
     const response = await this.client.get('/kpi/entries', { params: params || {} });
     return Array.isArray(response.data) ? response.data : [];
@@ -3494,9 +3502,12 @@ class ApiClient {
 
   async upsertKpiEntry(
     entryDate: string,
-    data: import('@/types/kpi').KpiEntryUpdatePayload
+    data: import('@/types/kpi').KpiEntryUpdatePayload,
+    repUserId?: string | null
   ): Promise<import('@/types/kpi').KpiDailyEntry> {
-    const response = await this.client.put(`/kpi/entries/${entryDate}`, data);
+    const response = await this.client.put(`/kpi/entries/${entryDate}`, data, {
+      params: repUserId ? { rep_user_id: repUserId } : undefined,
+    });
     return response.data;
   }
 
@@ -3507,8 +3518,39 @@ class ApiClient {
     return response.data;
   }
 
-  async deleteKpiEntry(entryDate: string): Promise<void> {
-    await this.client.delete(`/kpi/entries/${entryDate}`);
+  async deleteKpiEntry(entryDate: string, repUserId?: string | null): Promise<void> {
+    await this.client.delete(`/kpi/entries/${entryDate}`, {
+      params: repUserId ? { rep_user_id: repUserId } : undefined,
+    });
+  }
+
+  async getKpiReps(): Promise<import('@/types/kpi').KpiRepOption[]> {
+    const response = await this.client.get('/kpi/reps');
+    return Array.isArray(response.data?.reps) ? response.data.reps : [];
+  }
+
+  async getPublicKpiReps(token: string): Promise<import('@/types/kpi').KpiRepOption[]> {
+    const response = await this.client.get(`/kpi/public/${token}/reps`);
+    return Array.isArray(response.data?.reps) ? response.data.reps : [];
+  }
+
+  async getKpiRepPerformance(params?: {
+    days?: number;
+    start?: string;
+    end?: string;
+  }): Promise<import('@/types/kpi').KpiRepPerformanceResponse> {
+    const response = await this.client.get('/kpi/rep-performance', { params: params || {} });
+    return response.data;
+  }
+
+  async getAdminKpiRepPerformance(
+    orgId: string,
+    params?: { days?: number; start?: string; end?: string }
+  ): Promise<import('@/types/kpi').KpiRepPerformanceResponse> {
+    const response = await this.client.get(`/admin/organizations/${orgId}/kpi/rep-performance`, {
+      params: params || {},
+    });
+    return response.data;
   }
 
   async getKpiRollups(months = 12): Promise<import('@/types/kpi').KpiMonthlyRollup[]> {
@@ -3565,6 +3607,13 @@ class ApiClient {
     return response.data;
   }
 
+  async getKpiRevenueContributors(
+    entryDate: string
+  ): Promise<import('@/types/kpi').KpiRevenueContributorsResponse> {
+    const response = await this.client.get(`/kpi/entries/${entryDate}/revenue-contributors`);
+    return response.data;
+  }
+
   async getKpiAutopopulateStatus(): Promise<import('@/types/kpi').KpiAutopopulateStatusResponse> {
     const response = await this.client.get('/kpi/autopopulate-status');
     return response.data;
@@ -3577,17 +3626,26 @@ class ApiClient {
     return response.data;
   }
 
-  async getPublicKpiEntry(token: string, entryDate: string): Promise<import('@/types/kpi').KpiDailyEntry> {
-    const response = await this.client.get(`/kpi/public/${token}/entries/${entryDate}`);
+  async getPublicKpiEntry(
+    token: string,
+    entryDate: string,
+    repUserId?: string | null
+  ): Promise<import('@/types/kpi').KpiDailyEntry> {
+    const response = await this.client.get(`/kpi/public/${token}/entries/${entryDate}`, {
+      params: repUserId ? { rep_user_id: repUserId } : undefined,
+    });
     return response.data;
   }
 
   async upsertPublicKpiEntry(
     token: string,
     entryDate: string,
-    data: import('@/types/kpi').KpiEntryUpdatePayload
+    data: import('@/types/kpi').KpiEntryUpdatePayload,
+    repUserId?: string | null
   ): Promise<import('@/types/kpi').KpiDailyEntry> {
-    const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data);
+    const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data, {
+      params: repUserId ? { rep_user_id: repUserId } : undefined,
+    });
     return response.data;
   }
 

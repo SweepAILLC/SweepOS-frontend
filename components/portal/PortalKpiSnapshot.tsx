@@ -16,7 +16,7 @@ type Range = 7 | 30 | 90;
 
 /** Activity metrics shown as cards — excludes cash which owner dashboard already surfaces. */
 const CARD_KEYS = new Set([
-  'outreach_sent',
+  'total_conversations',
   'calls_booked',
   'calls_taken',
   'closes',
@@ -98,7 +98,10 @@ export default function PortalKpiSnapshot({
   const hasData = (snapshot?.days_with_data || 0) > 0;
   const chartData = (snapshot?.series || []).map((e) => ({
     date: shortDate(e.date),
-    Outreach: e.outreach_sent ?? 0,
+    Conversations:
+      e.total_conversations ??
+      e.outreach_sent ??
+      0,
     Booked: e.calls_booked ?? 0,
     Closes: e.closes ?? 0,
   }));
@@ -122,11 +125,15 @@ export default function PortalKpiSnapshot({
             KPI Snapshot
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Logged activity from the KPI tracker — outreach through closes.
+            Logged activity from the KPI tracker — conversations through closes.
           </p>
         </div>
         {rangeControls ? (
           <div className="flex flex-wrap items-center gap-2 text-xs">{rangeControls}</div>
+        ) : controlled ? (
+          <span className="text-[11px] text-gray-500 dark:text-gray-400 tabular-nums">
+            {rangeStart} → {rangeEnd}
+          </span>
         ) : (
           <div className="flex gap-1">
             {([7, 30, 90] as Range[]).map((r) => (
@@ -211,7 +218,7 @@ export default function PortalKpiSnapshot({
 
           <div>
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wide">
-              Daily Activity — Outreach / Booked / Closes
+              Daily Activity — Conversations / Booked / Closes
             </p>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -240,7 +247,7 @@ export default function PortalKpiSnapshot({
                     color: '#e5e7eb',
                   }}
                 />
-                <Bar dataKey="Outreach" fill="#818cf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="Conversations" fill="#818cf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Booked" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Closes" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={28} />
               </BarChart>

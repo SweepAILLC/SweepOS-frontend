@@ -187,6 +187,7 @@ export default function Navbar({
       <button
         key={tab}
         type="button"
+        data-tour={`nav-${tab}`}
         onClick={() => handleTabChange(tab)}
         className={`relative ${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${
           unlocked ? '' : 'opacity-80'
@@ -224,6 +225,7 @@ export default function Navbar({
       <button
         key={tab}
         type="button"
+        data-tour={`nav-${tab}`}
         onClick={() => handleTabChange(tab)}
         className={`${navBtnBase} ${btnLayout} ${active ? navBtnActive : navBtnInactive} ${opts?.extraClass ?? ''} ${active ? 'ring-2 ring-violet-500/50' : ''} ${
           unlocked ? '' : 'opacity-80'
@@ -254,6 +256,7 @@ export default function Navbar({
   const brandBlock = (
     <button
       type="button"
+      data-tour="nav-org_portal"
       onClick={() => {
         onTabChange(canOpenOrgPortal ? 'org_portal' : 'terminal');
         closeMobileNav();

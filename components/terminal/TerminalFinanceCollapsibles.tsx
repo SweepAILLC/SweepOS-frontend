@@ -20,6 +20,7 @@ import {
 } from '@/lib/cache';
 import EmailComposer from '@/components/brevo/EmailComposer';
 import ManualPaymentDetailModal from '@/components/terminal/ManualPaymentDetailModal';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import type { Payment } from '@/types/integration';
 import type { Client } from '@/types/client';
 
@@ -176,6 +177,8 @@ export default function TerminalFinanceCollapsibles({
     receipt_url: '',
   });
   const [selectedManualPayment, setSelectedManualPayment] = useState<Payment | null>(null);
+  const [paymentToDelete, setPaymentToDelete] = useState<Payment | null>(null);
+  const [deletingPayment, setDeletingPayment] = useState(false);
 
   const pageSize = 50;
 
@@ -347,6 +350,23 @@ export default function TerminalFinanceCollapsibles({
     setAssignConfirmClient(null);
     setSearchQuery('');
     setAssignError(null);
+  };
+
+  const handleDeleteStripePayment = async () => {
+    if (!paymentToDelete) return;
+    setDeletingPayment(true);
+    try {
+      await apiClient.deleteStripePayment(paymentToDelete.id, true);
+      setPayments((prev) => prev.filter((p) => p.id !== paymentToDelete.id));
+      setPaymentToDelete(null);
+      window.dispatchEvent(new CustomEvent(STRIPE_DATA_UPDATED_EVENT));
+      void loadPayments(1);
+    } catch (error: unknown) {
+      const ax = error as { response?: { data?: { detail?: string } } };
+      alert(ax?.response?.data?.detail || 'Failed to delete payment.');
+    } finally {
+      setDeletingPayment(false);
+    }
   };
 
   const handleAssignPayment = async (clientId: string) => {
@@ -849,6 +869,7 @@ export default function TerminalFinanceCollapsibles({
                           {formatCurrency((p.amount_cents || 0) / 100)}
                         </td>
                         <td className="py-2">
+                          <div className="flex flex-wrap items-center gap-2">
                           {isManual ? (
                             <button
                               type="button"
@@ -874,6 +895,19 @@ export default function TerminalFinanceCollapsibles({
                           ) : (
                             <span className="text-xs text-gray-400">Linked</span>
                           )}
+                          {!isManual ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPaymentToDelete(p);
+                              }}
+                              className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -917,6 +951,25 @@ export default function TerminalFinanceCollapsibles({
           initialTextContent={getRecoveryEmailTemplate(recoveryPayment).textContent}
         />
       )}
+
+      <ConfirmDialog
+        isOpen={paymentToDelete != null}
+        onClose={() => {
+          if (!deletingPayment) setPaymentToDelete(null);
+        }}
+        title="Remove this payment?"
+        description={
+          paymentToDelete
+            ? `Remove ${formatCurrency((paymentToDelete.amount_cents || 0) / 100)} for ${
+                paymentToDelete.client_name || paymentToDelete.client_email || 'this customer'
+              } from Sweep? Use this for refunds or incorrect imports. Stripe itself is unchanged.`
+            : undefined
+        }
+        confirmLabel={deletingPayment ? 'Deleting…' : 'Delete'}
+        variant="danger"
+        busy={deletingPayment}
+        onConfirm={() => void handleDeleteStripePayment()}
+      />
     </div>
   );
 }

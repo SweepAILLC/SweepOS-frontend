@@ -18,6 +18,7 @@ import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import { CashAndLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
+import KpiRepPerformancePanel from '@/components/kpi/KpiRepPerformancePanel';
 import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
 import OrgFunnelSimulatorSnapshots from '@/components/owner/OrgFunnelSimulatorSnapshots';
 import {
@@ -314,6 +315,15 @@ export default function OrgOwnerDashboardModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Shared date window for the KPI snapshot + By Rep panel below — previously each
+  // ran its own disconnected range; both now read the same 30-day window.
+  const [kpiRangeStart] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 29);
+    return d.toISOString().slice(0, 10);
+  });
+  const [kpiRangeEnd] = useState(() => new Date().toISOString().slice(0, 10));
+
   const llm = dashboardData.llm_usage_last_30d;
   const periods = dashboardData.monthly_health_since_onboarding ?? [];
   const rangeLabel = dashboardPeriodLabel(timeRange);
@@ -461,7 +471,15 @@ export default function OrgOwnerDashboardModal({
           <OrgFunnelSimulatorSnapshots orgId={orgId} />
 
           {/* KPI Snapshot for this org */}
-          <PortalKpiSnapshot isActive orgId={orgId} />
+          <PortalKpiSnapshot isActive orgId={orgId} rangeStart={kpiRangeStart} rangeEnd={kpiRangeEnd} />
+
+          {/* By-rep (setter/closer) performance for this org */}
+          <KpiRepPerformancePanel
+            isActive
+            orgId={orgId}
+            rangeStart={kpiRangeStart}
+            rangeEnd={kpiRangeEnd}
+          />
 
           {/* Terminal KPIs + time scope */}
           <section className="glass-card p-3 sm:p-4 rounded-xl border border-gray-200 dark:border-white/10">

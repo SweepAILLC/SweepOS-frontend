@@ -12,14 +12,14 @@ import type {
   KpiMonthlyRollup,
 } from '@/types/kpi';
 import { DEFAULT_THRESHOLDS } from '@/lib/kpiBenchmarks';
-import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiGrid from './KpiGrid';
-import KpiCalendar from './KpiCalendar';
+import KpiCalendar, { COLOR_METRICS } from './KpiCalendar';
 import KpiBenchmarkSettings from './KpiBenchmarkSettings';
 import KpiFlagsBanner from './KpiFlagsBanner';
 import KpiCsvImportModal from './KpiCsvImportModal';
+import KpiRepPerformancePanel from './KpiRepPerformancePanel';
 
-type ViewId = 'grid' | 'calendar' | 'settings';
+type ViewId = 'calendar' | 'by-rep' | 'settings';
 
 function toYmd(d: Date): string {
   const y = d.getFullYear();
@@ -86,6 +86,8 @@ export default function KpiCommandCenterPanel() {
   const [flagsLoading, setFlagsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [dataView, setDataView] = useState<'calendar' | 'grid'>('calendar');
+  const [colorMetric, setColorMetric] = useState('overall');
   const loadGen = React.useRef(0);
   const hasLoadedOnce = React.useRef(false);
   const syncOnNextLoad = React.useRef(true);
@@ -105,12 +107,16 @@ export default function KpiCommandCenterPanel() {
     return `${startLabel} + ${endLabel}`;
   }, [compareMonths, visibleMonth.year, visibleMonth.month, visibleStartMonth.year, visibleStartMonth.month]);
 
-  // Deep-link: /?tab=kpi_command_center&view=settings|calendar|grid
+  // Deep-link: /?tab=kpi_command_center&view=settings|calendar|by-rep|grid
   useEffect(() => {
     if (!router.isReady) return;
     const v = router.query.view;
-    if (v === 'settings' || v === 'calendar' || v === 'grid') {
+    if (v === 'settings' || v === 'calendar' || v === 'by-rep') {
       setView(v);
+      if (v === 'calendar') setDataView('calendar');
+    } else if (v === 'grid') {
+      setView('calendar');
+      setDataView('grid');
     }
   }, [router.isReady, router.query.view]);
 
@@ -293,15 +299,23 @@ export default function KpiCommandCenterPanel() {
     }
   };
 
-  const upsertEntry = useCallback(async (entryDate: string, data: KpiEntryUpdatePayload) => {
-    const updated = await apiClient.upsertKpiEntry(entryDate, data);
-    setEntries((prev) => {
-      const next = [...prev];
-      const idx = next.findIndex((e) => e.entry_date === entryDate);
-      if (idx >= 0) next[idx] = updated;
-      else next.push(updated);
-      return next;
-    });
+  const upsertEntry = useCallback(async (
+    entryDate: string,
+    data: KpiEntryUpdatePayload,
+    repUserId?: string | null
+  ) => {
+    const updated = await apiClient.upsertKpiEntry(entryDate, data, repUserId);
+    // A per-rep save doesn't belong in this org-aggregate-only entries list
+    // (GET /kpi/entries excludes rep rows) — only merge in aggregate saves.
+    if (!repUserId) {
+      setEntries((prev) => {
+        const next = [...prev];
+        const idx = next.findIndex((e) => e.entry_date === entryDate);
+        if (idx >= 0) next[idx] = updated;
+        else next.push(updated);
+        return next;
+      });
+    }
     void loadFlags();
     if (
       typeof window !== 'undefined' &&
@@ -317,7 +331,7 @@ export default function KpiCommandCenterPanel() {
   }, [loadFlags]);
 
   return (
-    <div className="w-full space-y-5">
+    <div className="w-full space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
@@ -334,26 +348,11 @@ export default function KpiCommandCenterPanel() {
               {loading ? 'Loading…' : refreshing ? 'Refreshing…' : 'Updating…'}
             </span>
           )}
-          <button
-            type="button"
-            onClick={() => forceReload()}
-            disabled={loading || refreshing}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-800 dark:text-gray-100 hover:bg-white/10 disabled:opacity-50"
-          >
-            Refresh
-          </button>
-          <button
-            type="button"
-            onClick={() => setImportOpen(true)}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-800 dark:text-gray-100 hover:bg-white/10"
-          >
-            Import CSV
-          </button>
           <div className="flex rounded-lg border border-white/10 overflow-hidden">
             {(
               [
-                ['grid', 'Grid'],
                 ['calendar', 'Calendar'],
+                ['by-rep', 'By Rep'],
                 ['settings', 'Benchmarks'],
               ] as const
             ).map(([id, label]) => (
@@ -374,57 +373,104 @@ export default function KpiCommandCenterPanel() {
         </div>
       </div>
 
-      {view !== 'settings' && (
-        <>
-          <KpiFlagsBanner flags={flags} loading={flagsLoading} />
+      {/* Consolidated toolbar — month + calendar/grid live here. */}
+      <div className="glass-card rounded-xl border border-white/10 px-3 py-2.5 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={() => shiftMonth(-1)}
+          className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 text-xs"
+        >
+          ← Prev
+        </button>
+        <div className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-gray-800 dark:text-gray-100">
+          <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            Viewing
+          </span>
+          <div className="text-xs font-semibold leading-tight">{visibleWindowLabel}</div>
+          <div className="text-[10px] text-gray-500 dark:text-gray-400">
+            {rangeStart} → {rangeEnd}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => shiftMonth(1)}
+          className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 text-xs"
+        >
+          Next →
+        </button>
 
-          <PortalKpiSnapshot
-            isActive
-            showFlags={false}
-            rangeStart={rangeStart}
-            rangeEnd={rangeEnd}
-            emptyHint="No KPI entries logged yet for this period. Log days in the calendar or grid below."
-            rangeControls={
+        {view === 'calendar' && (
+          <>
+            <span className="hidden sm:block w-px self-stretch bg-white/10 mx-1" aria-hidden />
+            <div className="flex rounded-lg border border-white/10 overflow-hidden">
+              {(
+                [
+                  ['calendar', 'Calendar'],
+                  ['grid', 'Grid'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setDataView(id)}
+                  className={`px-3 py-1 text-xs font-medium ${
+                    dataView === id
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-white/10'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {dataView === 'calendar' && (
               <>
-                <button
-                  type="button"
-                  onClick={() => shiftMonth(-1)}
-                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100"
-                >
-                  ← Prev month
-                </button>
-                <div className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-gray-800 dark:text-gray-100">
-                  <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Viewing
-                  </span>
-                  <div className="text-xs font-semibold leading-tight">{visibleWindowLabel}</div>
-                  <div className="text-[10px] text-gray-500 dark:text-gray-400">
-                    {rangeStart} → {rangeEnd}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const n = new Date();
-                    setCompareMonths(false);
-                    setVisibleMonth(n.getFullYear(), n.getMonth(), false);
-                  }}
-                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 font-medium"
-                >
-                  This month
-                </button>
-                <button
-                  type="button"
-                  onClick={() => shiftMonth(1)}
-                  className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100"
-                >
-                  Next month →
-                </button>
+                <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                  Color by
+                  <select
+                    className="rounded-lg solid-input px-2 py-1 text-xs"
+                    value={colorMetric}
+                    onChange={(e) => setColorMetric(e.target.value)}
+                  >
+                    {COLOR_METRICS.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={compareMonths}
+                    onChange={(e) => onCompareChange(e.target.checked)}
+                    className="rounded"
+                  />
+                  Two-month compare
+                </label>
               </>
-            }
-          />
-        </>
-      )}
+            )}
+          </>
+        )}
+
+        <div className="flex-1 min-w-0" />
+
+        <button
+          type="button"
+          onClick={() => forceReload()}
+          disabled={loading || refreshing}
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-800 dark:text-gray-100 hover:bg-white/10 disabled:opacity-50"
+        >
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={() => setImportOpen(true)}
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-800 dark:text-gray-100 hover:bg-white/10"
+        >
+          Import CSV
+        </button>
+      </div>
 
       {error && (
         <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-200 flex flex-wrap items-center justify-between gap-2">
@@ -439,38 +485,7 @@ export default function KpiCommandCenterPanel() {
         </div>
       )}
 
-      {view === 'grid' && (
-        <KpiGrid
-          entries={entries}
-          rollups={rollups}
-          thresholds={thresholds}
-          autoPopulatedColumns={autopopStatus.autopopulated_columns}
-          loading={loading}
-          refreshing={refreshing || softUpdating}
-          onEntriesChange={(next) => {
-            setEntries(next);
-          }}
-          rangeStart={rangeStart}
-          rangeEnd={rangeEnd}
-        />
-      )}
-
-      {view === 'calendar' && (
-        <KpiCalendar
-          entries={entries}
-          thresholds={thresholds}
-          loading={loading}
-          refreshing={refreshing || softUpdating}
-          onUpsertEntry={upsertEntry}
-          year={visibleMonth.year}
-          month={visibleMonth.month}
-          compareMonths={compareMonths}
-          onCompareChange={onCompareChange}
-          onVisibleRangeChange={onCalendarVisibleRangeChange}
-        />
-      )}
-
-      {view === 'settings' && (
+      {view === 'settings' ? (
         <KpiBenchmarkSettings
           initial={benchmarks}
           onSaved={(b) => {
@@ -478,6 +493,55 @@ export default function KpiCommandCenterPanel() {
             void loadFlags();
           }}
         />
+      ) : (
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          <div className="flex-1 min-w-0 space-y-4 w-full">
+            {view === 'calendar' && dataView === 'calendar' && (
+              <KpiCalendar
+                entries={entries}
+                thresholds={thresholds}
+                loading={loading}
+                refreshing={refreshing || softUpdating}
+                onUpsertEntry={upsertEntry}
+                year={visibleMonth.year}
+                month={visibleMonth.month}
+                compareMonths={compareMonths}
+                onVisibleRangeChange={onCalendarVisibleRangeChange}
+                colorMetric={colorMetric}
+              />
+            )}
+
+            {view === 'calendar' && dataView === 'grid' && (
+              <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 overflow-x-auto">
+                <KpiGrid
+                  entries={entries}
+                  rollups={rollups}
+                  thresholds={thresholds}
+                  autoPopulatedColumns={autopopStatus.autopopulated_columns}
+                  loading={loading}
+                  refreshing={refreshing || softUpdating}
+                  onEntriesChange={(next) => {
+                    setEntries(next);
+                  }}
+                  rangeStart={rangeStart}
+                  rangeEnd={rangeEnd}
+                />
+              </div>
+            )}
+
+            {view === 'by-rep' && (
+              <KpiRepPerformancePanel isActive rangeStart={rangeStart} rangeEnd={rangeEnd} />
+            )}
+
+          </div>
+
+          <aside
+            className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto"
+            aria-label="Issues that need attention"
+          >
+            <KpiFlagsBanner flags={flags} loading={flagsLoading} variant="sidebar" />
+          </aside>
+        </div>
       )}
 
       <KpiCsvImportModal

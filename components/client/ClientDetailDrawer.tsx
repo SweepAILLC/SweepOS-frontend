@@ -759,11 +759,24 @@ export default function ClientDetailDrawer({
                             nextCheckIn={nextCheckIn}
                             onOpenCalendar={() => setShowCheckInCalendar(true)}
                             onAddManualPayment={() => setShowManualPaymentForm(true)}
-                            onDeleteManualPayment={async (paymentId) => {
-                              if (!confirm('Delete this manual payment?')) return;
-                              setDeletingPaymentId(paymentId);
+                            onDeletePayment={async (payment) => {
+                              const isManual = payment.type === 'manual_payment';
+                              if (
+                                !confirm(
+                                  isManual
+                                    ? 'Delete this manual payment?'
+                                    : 'Remove this Stripe payment from Sweep? Use this for refunds or incorrect imports. Stripe itself is unchanged.'
+                                )
+                              ) {
+                                return;
+                              }
+                              setDeletingPaymentId(payment.id);
                               try {
-                                await apiClient.deleteManualPayment(client.id, paymentId);
+                                if (isManual) {
+                                  await apiClient.deleteManualPayment(client.id, payment.id);
+                                } else {
+                                  await apiClient.deleteStripePayment(payment.id, true);
+                                }
                                 loadPayments();
                                 onUpdate();
                               } catch (error: unknown) {

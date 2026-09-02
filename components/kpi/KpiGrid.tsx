@@ -14,6 +14,7 @@ import {
   tierForMetric,
 } from '@/lib/kpiBenchmarks';
 import { exportKpiEntriesCsv } from '@/lib/kpiCsv';
+import KpiRevenueContributorsModal from './KpiRevenueContributorsModal';
 
 type ColKind = 'int' | 'pct' | 'currency' | 'bool' | 'text';
 type ColDataSource = 'manual' | 'calculated' | 'system';
@@ -27,6 +28,8 @@ interface ColDef {
   /** Benchmark metric key for RAG shading (when applicable). */
   shadeMetric?: string;
   width?: string;
+  /** Extra explanatory tooltip appended to the header title. */
+  help?: string;
 }
 
 const COLUMNS: ColDef[] = [
@@ -53,6 +56,14 @@ const COLUMNS: ColDef[] = [
   { key: 'inbound_bookings', label: 'Inbound Bookings', kind: 'int', editable: true, dataSource: 'manual' },
   { key: 'outbound_bookings', label: 'Outbound Bookings', kind: 'int', editable: true, dataSource: 'manual' },
   { key: 'calls_booked', label: 'Calls Booked', kind: 'int', editable: true, dataSource: 'manual' },
+  {
+    key: 'calls_booked_activity',
+    label: 'Booked (Activity)',
+    kind: 'int',
+    editable: true,
+    dataSource: 'manual',
+    help: 'Calls booked on this day (by booking date), regardless of when the meeting is scheduled for — contrast with Calls Booked, which counts by meeting date.',
+  },
   { key: 'calls_taken', label: 'Calls Taken', kind: 'int', editable: true, dataSource: 'manual' },
   { key: 'offers_made', label: 'Offers Made', kind: 'int', editable: true, dataSource: 'manual' },
   { key: 'no_shows', label: 'No-Shows', kind: 'int', editable: true, dataSource: 'manual' },
@@ -73,7 +84,7 @@ function stickyDateColClass(extra = ''): string {
     'sticky left-0 z-20',
     // Opaque so scrolled cells don’t show through
     'bg-gray-50 dark:bg-gray-950',
-    'border-r border-white/10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
+    'border-r border-gray-200 dark:border-white/10 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
     extra,
   ]
     .filter(Boolean)
@@ -155,6 +166,7 @@ export default function KpiGrid({
   const [draft, setDraft] = useState<string>('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState<string | null>(null);
+  const [contributorsDate, setContributorsDate] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null);
   const autoCols = useMemo(() => new Set(autoPopulatedColumns), [autoPopulatedColumns]);
 
@@ -283,13 +295,9 @@ export default function KpiGrid({
     [persist]
   );
 
-  const startEdit = (
-    date: string,
-    col: ColDef,
-    current: unknown,
-    isAutoColumn: boolean
-  ) => {
-    if (!col.editable || isAutoColumn) return;
+  const startEdit = (date: string, col: ColDef, current: unknown) => {
+    // Percentage / ratio (calculated) columns stay locked; AUTO fields are editable overrides.
+    if (!col.editable) return;
     setEditing({ date, key: col.key });
     if (col.kind === 'bool') {
       setDraft(current ? 'true' : 'false');
@@ -313,20 +321,6 @@ export default function KpiGrid({
     }
   };
 
-  const addToday = async () => {
-    const today = toYmd(new Date());
-    try {
-      const updated = await apiClient.upsertKpiEntry(today, {});
-      const next = [...entries];
-      const idx = next.findIndex((e) => e.entry_date === today);
-      if (idx >= 0) next[idx] = updated;
-      else next.push(updated);
-      onEntriesChange(next);
-    } catch {
-      setSaveError('Could not create today\'s row');
-    }
-  };
-
   // Group rollups that intersect the visible range for footer rows
   const visibleRollups = useMemo(() => {
     return rollups.filter(
@@ -341,7 +335,7 @@ export default function KpiGrid({
           <label className="text-xs text-gray-500 dark:text-gray-400">
             Filter metric with data
             <select
-              className="ml-2 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+              className="ml-2 rounded-lg solid-input px-2 py-1 text-xs"
               value={filterMetric}
               onChange={(e) => setFilterMetric(e.target.value)}
             >
@@ -363,13 +357,6 @@ export default function KpiGrid({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => void addToday()}
-            className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-gray-800 dark:text-gray-100 hover:bg-white/10"
-          >
-            Ensure today
-          </button>
-          <button
-            type="button"
             onClick={() => exportKpiEntriesCsv(entries)}
             className="rounded-lg bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 text-xs font-medium text-white"
           >
@@ -378,7 +365,7 @@ export default function KpiGrid({
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-white/10 glass-card relative">
+      <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-white/10 relative">
         {refreshing && (
           <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 bg-black/40 rounded px-2 py-0.5 pointer-events-none">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
@@ -387,7 +374,7 @@ export default function KpiGrid({
         )}
         <table className="w-full min-w-[1400px] text-xs">
           <thead>
-            <tr className="border-b border-white/10 bg-white/5">
+            <tr className="border-b border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5">
               {COLUMNS.map((col) => {
                 const isAutoColumn = autoCols.has(col.key);
                 return (
@@ -404,6 +391,7 @@ export default function KpiGrid({
                           : ''
                   }`}
                   onClick={() => toggleSort(col.key)}
+                  title={col.help}
                 >
                   {col.label}
                   {sortKey === col.key && (
@@ -412,7 +400,7 @@ export default function KpiGrid({
                   {isAutoColumn && (
                     <span
                       className="ml-1 text-[9px] px-1 py-0.5 rounded border border-cyan-400/40 bg-cyan-500/20 text-cyan-800 dark:text-cyan-200"
-                      title="Auto-populated from integration data when available"
+                      title="Auto-populated from integration data when available — editable override"
                     >
                       AUTO
                     </span>
@@ -427,7 +415,7 @@ export default function KpiGrid({
               })}
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-gray-100 dark:divide-white/5">
             {loading && sortedDates.length === 0 && (
               <tr>
                 <td colSpan={COLUMNS.length} className="px-3 py-8 text-center text-gray-400">
@@ -439,7 +427,7 @@ export default function KpiGrid({
                 const entry = entryByDate.get(d);
                 const throughToday = d <= todayYmd();
                 return (
-                  <tr key={d} className="group/row hover:bg-white/5">
+                  <tr key={d} className="group/row hover:bg-gray-50 dark:hover:bg-white/5">
                     {COLUMNS.map((col) => {
                       const isAutoColumn = autoCols.has(col.key);
                       let raw: unknown =
@@ -466,7 +454,7 @@ export default function KpiGrid({
                             thresholds
                           )
                         : null;
-                      const isEditableCell = col.editable && !isAutoColumn;
+                      const isEditableCell = col.editable;
                       const cellClass = `px-2 py-1.5 whitespace-nowrap ${kpiTierCellClass(shade)} ${
                         isEditableCell ? 'cursor-pointer' : 'text-gray-500 dark:text-gray-400'
                       } ${col.key === 'entry_date' ? stickyDateColClass('font-medium text-gray-800 dark:text-gray-100 group-hover/row:bg-gray-100 dark:group-hover/row:bg-gray-900') : ''}`;
@@ -520,20 +508,39 @@ export default function KpiGrid({
                         <td
                           key={col.key}
                           className={cellClass}
-                          onClick={() => startEdit(d, col, raw, isAutoColumn)}
+                          onClick={() => startEdit(d, col, raw)}
                           title={
                             col.dataSource === 'calculated'
-                              ? 'Calculated'
-                              : isAutoColumn
-                                ? 'Auto-populated from integration data'
+                              ? 'Calculated from other columns'
+                              : isAutoColumn && col.editable
+                                ? 'Auto-populated when available — click to override'
                                 : col.editable
                                   ? 'Click to edit'
                                   : 'System'
                           }
                         >
-                          {col.key === 'entry_date'
-                            ? d
-                            : formatKpiValue(raw as number | boolean | string | null, col.kind)}
+                          {col.key === 'entry_date' ? (
+                            d
+                          ) : col.key === 'cash_collected' ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              {formatKpiValue(raw as number | null, col.kind)}
+                              {typeof raw === 'number' && raw > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setContributorsDate(d);
+                                  }}
+                                  className="text-[10px] text-indigo-500 hover:text-indigo-400 underline"
+                                  title="View which clients contributed"
+                                >
+                                  who?
+                                </button>
+                              )}
+                            </span>
+                          ) : (
+                            formatKpiValue(raw as number | boolean | string | null, col.kind)
+                          )}
                         </td>
                       );
                     })}
@@ -546,7 +553,7 @@ export default function KpiGrid({
               {visibleRollups.map((r) => (
                 <tr
                   key={r.period_label}
-                  className="border-t border-white/20 bg-indigo-500/10 font-medium"
+                  className="border-t border-gray-200 dark:border-white/20 bg-indigo-500/10 font-medium"
                 >
                   {COLUMNS.map((col, i) => {
                     if (i === 0) {
@@ -574,11 +581,17 @@ export default function KpiGrid({
         </table>
       </div>
       <p className="text-[11px] text-gray-500 dark:text-gray-400">
-        Click any editable cell to update — changes autosave. <span className="font-medium">AUTO</span> columns are
-        auto-populated only when integration data is available, <span className="font-medium">ƒ</span> columns are calculated,
-        and other editable columns are manual.
+        Click any editable cell to update — changes autosave. <span className="font-medium">AUTO</span> columns can be
+        overridden (integration fills them when available). <span className="font-medium">ƒ</span> percentage / ratio
+        columns are calculated from other columns and stay locked.
         Green / amber / red shading follows your org benchmarks.
       </p>
+      {contributorsDate && (
+        <KpiRevenueContributorsModal
+          entryDate={contributorsDate}
+          onClose={() => setContributorsDate(null)}
+        />
+      )}
     </div>
   );
 }

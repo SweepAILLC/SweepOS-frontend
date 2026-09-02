@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
-import type { KpiDailyEntry, KpiEntryUpdatePayload } from '@/types/kpi';
+import type { KpiDailyEntry, KpiEntryUpdatePayload, KpiRepOption } from '@/types/kpi';
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -103,16 +103,35 @@ function KpiEntryFormClient() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done'>('form');
+  const [reps, setReps] = useState<KpiRepOption[]>([]);
+  const [repUserId, setRepUserId] = useState<string>('');
   const loadGen = useRef(0);
 
-  const loadEntry = useCallback(async (tok: string, date: string) => {
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void apiClient
+      .getPublicKpiReps(token)
+      .then((opts) => {
+        if (!cancelled) setReps(opts);
+      })
+      .catch(() => {
+        /* rep picker is optional — silently fall back to org-aggregate-only entry */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const loadEntry = useCallback(async (tok: string, date: string, rep: string) => {
     const gen = ++loadGen.current;
     setLoading(true);
     setLoadError(null);
     setMessage(null);
     setSaveError(null);
     try {
-      const row = await apiClient.getPublicKpiEntry(tok, date);
+      const row = await apiClient.getPublicKpiEntry(tok, date, rep || null);
       if (gen !== loadGen.current) return;
       setLogged(row);
       setForm(emptyForm());
@@ -133,8 +152,8 @@ function KpiEntryFormClient() {
       setLoadError('Missing entry token in the URL.');
       return;
     }
-    void loadEntry(token, entryDate);
-  }, [router.isReady, token, entryDate, loadEntry]);
+    void loadEntry(token, entryDate, repUserId);
+  }, [router.isReady, token, entryDate, repUserId, loadEntry]);
 
   const setNum = (key: keyof KpiEntryUpdatePayload, raw: string) => {
     setForm((prev) => ({ ...prev, [key]: raw === '' ? null : Number(raw) }));
@@ -154,27 +173,66 @@ function KpiEntryFormClient() {
       return;
     }
     setSaving(true);
+    setPhase('submitting');
     setSaveError(null);
     setMessage(null);
     try {
       const payload: KpiEntryUpdatePayload = {};
-      for (const [k, v] of Object.entries(form)) {
+      for (const [key, v] of Object.entries(form)) {
         if (v === null || v === undefined || v === '') continue;
         if (typeof v === 'number' && Number.isNaN(v)) continue;
-        (payload as Record<string, unknown>)[k] = v;
+        (payload as Record<string, unknown>)[key] = v;
       }
-      const updated = await apiClient.upsertPublicKpiEntry(token, entryDate, payload);
+      const updated = await apiClient.upsertPublicKpiEntry(token, entryDate, payload, repUserId || null);
       setLogged(updated);
       setForm(emptyForm());
-      setMessage('Added to day totals. You can submit more anytime.');
+      setMessage('Added to day totals.');
+      setPhase('done');
     } catch (err) {
       setSaveError(formatApiError(err, 'Save failed. Please try again.'));
+      setPhase('form');
     } finally {
       setSaving(false);
     }
   };
 
   const formDisabled = !token || saving;
+
+  if (phase === 'submitting') {
+    return (
+      <SurveyShell>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center space-y-3">
+          <div className="mx-auto h-8 w-8 rounded-full border-2 border-indigo-400/40 border-t-indigo-300 animate-spin" />
+          <p className="text-sm text-gray-200 font-medium">Submitting…</p>
+          <p className="text-xs text-gray-500">Adding your numbers to today&apos;s totals.</p>
+        </div>
+      </SurveyShell>
+    );
+  }
+
+  if (phase === 'done') {
+    return (
+      <SurveyShell>
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-4 text-center">
+          <p className="text-lg font-semibold text-emerald-100">Submitted</p>
+          <p className="text-sm text-emerald-100/80">
+            {message || 'Added to day totals.'}
+          </p>
+          <button
+            type="button"
+            onClick={() => {
+              setPhase('form');
+              setMessage(null);
+              setSaveError(null);
+            }}
+            className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            Back to survey
+          </button>
+        </div>
+      </SurveyShell>
+    );
+  }
 
   return (
     <SurveyShell>
@@ -184,7 +242,7 @@ function KpiEntryFormClient() {
           {token && (
             <button
               type="button"
-              onClick={() => void loadEntry(token, entryDate)}
+              onClick={() => void loadEntry(token, entryDate, repUserId)}
               className="rounded border border-red-400/40 px-2 py-1 text-xs hover:bg-red-500/20"
             >
               Retry
@@ -202,6 +260,28 @@ function KpiEntryFormClient() {
             <span className="inline-block h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
             {logged ? 'Refreshing…' : 'Loading…'}
           </div>
+        )}
+
+        {reps.length > 0 && (
+          <label className="block text-sm">
+            Who are you?
+            <span className="ml-1 text-[11px] text-gray-500">
+              (attributes today&apos;s numbers to you instead of the shared org total)
+            </span>
+            <select
+              value={repUserId}
+              onChange={(e) => setRepUserId(e.target.value)}
+              disabled={!token || saving}
+              className="mt-1 w-full rounded border border-white/10 bg-black/30 px-2 py-1.5 disabled:opacity-50"
+            >
+              <option value="">Org total (shared)</option>
+              {reps.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
 
         <label className="block text-sm">
@@ -351,7 +431,7 @@ function KpiEntryFormClient() {
           {token ? (
             <button
               type="button"
-              onClick={() => void loadEntry(token, entryDate)}
+              onClick={() => void loadEntry(token, entryDate, repUserId)}
               disabled={loading || saving}
               className="rounded border border-white/15 px-3 py-2 text-sm text-gray-300 hover:bg-white/5 disabled:opacity-50"
             >

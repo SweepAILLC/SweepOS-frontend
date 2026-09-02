@@ -23,7 +23,6 @@ import {
   calendarTrendSummaryApiParams,
   mapCalendarTrendSummaryFromApi,
   computeCalendarTrendSummaryFromRows,
-  computeCalendarUpcomingCountTrendPct,
   computeCalendarCloseRateTrendPp,
   computeCalendarShowUpRateTrendPp,
   computeAvgRevenuePerCustomerTrend,
@@ -111,6 +110,7 @@ export default function TerminalKpiRow() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [calendarTrendSummary, setCalendarTrendSummary] = useState<CalendarTrendSummary | null>(null);
+  const [activeClientsCount, setActiveClientsCount] = useState<number | null>(null);
 
   const hasLoadedOnce = useRef(false);
 
@@ -150,8 +150,12 @@ export default function TerminalKpiRow() {
     if (terminalRes.status === 'fulfilled') {
       termSum = terminalRes.value as TerminalSummaryForWidgets;
       setTerminalSummary(termSum);
+      setActiveClientsCount(
+        typeof termSum.active_clients_count === 'number' ? termSum.active_clients_count : null
+      );
     } else {
       setTerminalSummary(null);
+      setActiveClientsCount(null);
     }
 
     if (tlRes.status === 'fulfilled') {
@@ -265,10 +269,6 @@ export default function TerminalKpiRow() {
     return computeCalendarCloseRateTrendPp(syncedUpcoming, syncedPast, kpiTimeRange);
   }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
 
-  const calendarUpcomingTrendPct = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarUpcomingCountTrendPct(syncedUpcoming, syncedPast, kpiTimeRange);
-  }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
 
   const calendarShowUpTrendPp = useMemo(() => {
     if (!connectedProvider) return null;
@@ -418,16 +418,12 @@ export default function TerminalKpiRow() {
               ),
             },
             {
-              key: 'upcoming',
+              key: 'active_clients',
               tile: (
                 <KpiTile
-                  label={`Upcoming (${rangeLabelLower})`}
-                  value={
-                    connectedProvider && calendarTrendSummary
-                      ? String(calendarTrendSummary.upcomingCount)
-                      : '—'
-                  }
-                  trendPct={calendarUpcomingTrendPct}
+                  label="Active Clients"
+                  value={activeClientsCount != null ? String(activeClientsCount) : '—'}
+                  sub="Active + offboarding"
                 />
               ),
             },

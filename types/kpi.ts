@@ -8,6 +8,8 @@ export interface KpiDailyEntry {
   id: string;
   org_id: string;
   entry_date: string; // YYYY-MM-DD
+  /** Set when this row is one rep's own entry rather than the org aggregate. */
+  rep_user_id?: string | null;
   total_followers: number | null;
   new_followers: number | null;
   content_posted: boolean | null;
@@ -25,6 +27,8 @@ export interface KpiDailyEntry {
   inbound_bookings: number | null;
   outbound_bookings: number | null;
   calls_booked: number | null;
+  /** Calls booked ON this day (by booking/creation date) — contrast with calls_booked, which counts by meeting date. */
+  calls_booked_activity: number | null;
   calls_taken: number | null;
   offers_made: number | null;
   no_shows: number | null;
@@ -58,6 +62,7 @@ export type KpiManualField =
   | 'inbound_bookings'
   | 'outbound_bookings'
   | 'calls_booked'
+  | 'calls_booked_activity'
   | 'calls_taken'
   | 'offers_made'
   | 'no_shows'
@@ -89,6 +94,7 @@ export interface KpiMonthlyRollup {
   inbound_bookings: number;
   outbound_bookings: number;
   calls_booked: number;
+  calls_booked_activity: number;
   calls_taken: number;
   offers_made: number;
   no_shows: number;
@@ -169,6 +175,7 @@ export interface KpiSnapshotCard {
 export interface KpiSnapshotSeriesPoint {
   date: string;
   outreach_sent: number | null;
+  total_conversations?: number | null;
   calls_booked: number | null;
   calls_taken: number | null;
   closes: number | null;
@@ -193,4 +200,67 @@ export interface KpiSnapshotResponse {
   series: KpiSnapshotSeriesPoint[];
   calendar_available: boolean;
   payments_available: boolean;
+}
+
+/** One org member selectable as a rep (setter or closer) for attribution. */
+export interface KpiRepOption {
+  id: string;
+  name: string;
+  email: string | null;
+  role: string | null;
+}
+
+export interface KpiRepOptionsResponse {
+  reps: KpiRepOption[];
+}
+
+/** One period's totals for one rep — mirrors backend KpiRepPerformanceMetrics. */
+export interface KpiRepPerformanceMetrics {
+  outreach_sent: number;
+  calls_booked: number;
+  calls_booked_activity: number;
+  calls_taken: number;
+  no_shows: number;
+  closes: number;
+  cash_collected_cents: number;
+  show_up_pct: number | null;
+  closing_rate_pct: number | null;
+}
+
+export type KpiRepPerformanceMetricKey = keyof KpiRepPerformanceMetrics;
+
+export interface KpiRepPerformanceRow {
+  rep_user_id: string;
+  rep_name: string;
+  rep_email: string | null;
+  current: KpiRepPerformanceMetrics;
+  previous: KpiRepPerformanceMetrics;
+  /** Each metric's own best calendar month over the trailing lookback — not necessarily the same month for every metric. */
+  personal_best: KpiRepPerformanceMetrics;
+  personal_best_month: Record<string, string | null>;
+}
+
+export interface KpiRepPerformanceResponse {
+  org_id: string;
+  range_start: string;
+  range_end: string;
+  previous_range_start: string;
+  previous_range_end: string;
+  generated_at: string;
+  reps: KpiRepPerformanceRow[];
+}
+
+/** Which clients' payments made up a day's cash_collected — mirrors GET /kpi/entries/{date}/revenue-contributors */
+export interface KpiRevenueContributor {
+  client_id: string | null;
+  client_name: string;
+  amount_cents: number;
+  source: 'stripe' | 'whop' | 'manual';
+  payment_id: string;
+}
+
+export interface KpiRevenueContributorsResponse {
+  entry_date: string;
+  total_cents: number;
+  contributors: KpiRevenueContributor[];
 }

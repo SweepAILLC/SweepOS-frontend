@@ -72,6 +72,67 @@ body {
     @apply bg-white/10 dark:bg-white/5 border border-white/20 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400;
   }
 
+  /* For form fields on a SOLID surface (bg-white/dark:bg-gray-800 modals, cards).
+     glass-input is translucent by design and only reads correctly over a
+     glass-card backdrop — using it on a solid background makes fields nearly
+     invisible in light mode (white-on-white). Use this instead there. */
+  .solid-input {
+    @apply bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500;
+  }
+
+  /* driver.js (onboarding tour) ships a light-only default skin — pair it for
+     dark mode so the popover doesn't look like a stray white card. The overlay
+     itself intentionally covers the full page including the sidebar (a guided
+     spotlight tour, unlike the KPI modals — dimming everything but the
+     highlighted step is the point). */
+  .sweep-onboarding-popover.driver-popover {
+    @apply rounded-xl shadow-xl;
+  }
+  .dark .sweep-onboarding-popover.driver-popover {
+    background-color: theme('colors.gray.800');
+    color: theme('colors.gray.100');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-title {
+    color: theme('colors.gray.100');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-description {
+    color: theme('colors.gray.300');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-progress-text {
+    color: theme('colors.gray.400');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-close-btn {
+    color: theme('colors.gray.500');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-close-btn:hover,
+  .dark .sweep-onboarding-popover .driver-popover-close-btn:focus {
+    color: theme('colors.gray.200');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-footer-btn {
+    background-color: theme('colors.gray.700');
+    border-color: theme('colors.gray.600');
+    color: theme('colors.gray.100');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-footer-btn:hover,
+  .dark .sweep-onboarding-popover .driver-popover-footer-btn:focus {
+    background-color: theme('colors.gray.600');
+  }
+  /* Per-side, matching driver.js's own arrow rules (each side keeps 3 of 4
+     border-*-color transparent) — a blanket `border-color` here would win on
+     specificity and undo that, turning the arrow into a solid square. */
+  .dark .sweep-onboarding-popover .driver-popover-arrow-side-left {
+    border-left-color: theme('colors.gray.800');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-arrow-side-right {
+    border-right-color: theme('colors.gray.800');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-arrow-side-top {
+    border-top-color: theme('colors.gray.800');
+  }
+  .dark .sweep-onboarding-popover .driver-popover-arrow-side-bottom {
+    border-bottom-color: theme('colors.gray.800');
+  }
+
   /* Shiny CTA Button */
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@500&display=swap');
 

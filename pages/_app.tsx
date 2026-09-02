@@ -3,6 +3,7 @@ import Head from 'next/head';
 import { useEffect, useRef } from 'react';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import '../styles/globals.css';
+import 'driver.js/dist/driver.css';
 import { ThemeProvider } from '@/contexts/ThemeContext';
 import { LoadingProvider } from '@/contexts/LoadingContext';
 import { SidebarProvider } from '@/contexts/SidebarContext';

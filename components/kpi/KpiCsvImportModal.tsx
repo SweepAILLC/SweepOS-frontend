@@ -100,9 +100,9 @@ export default function KpiCsvImportModal({ open, onClose, onImported }: Props) 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/60" onClick={handleClose} />
-      <div className="relative w-full max-w-2xl rounded-xl border border-white/10 glass-card p-5 max-h-[85vh] overflow-auto">
+    <div className="fixed inset-y-0 right-0 left-0 lg:left-[var(--app-sidebar-width,14rem)] z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-gray-500/75 dark:bg-gray-900/75" onClick={handleClose} />
+      <div className="relative w-full max-w-2xl rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-xl p-5 max-h-[85vh] overflow-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
             Import KPI history (CSV)
@@ -148,13 +148,13 @@ export default function KpiCsvImportModal({ open, onClose, onImported }: Props) 
               className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
                 dragActive
                   ? 'border-indigo-500 bg-indigo-500/5'
-                  : 'border-white/20 hover:border-indigo-400'
+                  : 'border-gray-300 dark:border-white/20 hover:border-indigo-400'
               }`}
             >
               <p className="text-sm text-gray-600 dark:text-gray-300">
                 Drop a CSV here, or <span className="font-medium text-indigo-500">click to browse</span>
               </p>
-              <p className="text-xs text-gray-400 mt-1">Max 500 rows · date required</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Max 500 rows · date required</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -191,9 +191,9 @@ export default function KpiCsvImportModal({ open, onClose, onImported }: Props) 
                 {w}
               </p>
             ))}
-            <div className="overflow-x-auto rounded border border-white/10 max-h-64">
+            <div className="overflow-x-auto rounded border border-gray-200 dark:border-white/10 max-h-64">
               <table className="w-full text-xs min-w-[900px]">
-                <thead className="bg-white/5 sticky top-0">
+                <thead className="bg-gray-100 dark:bg-white/5 sticky top-0">
                   <tr>
                     {[
                       'entry_date',
@@ -229,7 +229,7 @@ export default function KpiCsvImportModal({ open, onClose, onImported }: Props) 
                 </tbody>
               </table>
               {result.rows.length > 50 && (
-                <p className="text-[11px] text-gray-400 px-2 py-1">
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 px-2 py-1">
                   Showing first 50 of {result.rows.length} rows
                 </p>
               )}
@@ -241,7 +241,7 @@ export default function KpiCsvImportModal({ open, onClose, onImported }: Props) 
                   setPhase('upload');
                   setResult(null);
                 }}
-                className="rounded border border-white/10 px-3 py-1.5 text-sm hover:bg-white/5"
+                className="rounded border border-gray-300 dark:border-white/10 px-3 py-1.5 text-sm hover:bg-gray-100 dark:hover:bg-white/5"
               >
                 Back
               </button>

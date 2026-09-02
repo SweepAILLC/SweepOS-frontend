@@ -15,12 +15,20 @@ const SEV_RANK: Record<KpiFlag['severity'], number> = {
   info: 2,
 };
 
+const SEV_DOT: Record<KpiFlag['severity'], string> = {
+  critical: 'bg-red-500',
+  watch: 'bg-amber-500',
+  info: 'bg-gray-400',
+};
+
 interface Props {
   flags: KpiFlag[];
   loading?: boolean;
+  /** Vertical sticky column on the right of the KPI tab. */
+  variant?: 'banner' | 'sidebar';
 }
 
-export default function KpiFlagsBanner({ flags, loading }: Props) {
+export default function KpiFlagsBanner({ flags, loading, variant = 'banner' }: Props) {
   const topFlags = useMemo(() => {
     const sorted = [...flags].sort((a, b) => {
       const sev = (SEV_RANK[a.severity] ?? 9) - (SEV_RANK[b.severity] ?? 9);
@@ -32,10 +40,16 @@ export default function KpiFlagsBanner({ flags, loading }: Props) {
     return sorted.slice(0, TOP_FLAGS);
   }, [flags]);
 
-  // Soft load: only blank the banner on the very first scan (no flags yet).
+  const topSeverity = topFlags[0]?.severity ?? 'info';
+  const isSidebar = variant === 'sidebar';
+
   if (loading && flags.length === 0) {
     return (
-      <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-gray-400 animate-pulse">
+      <div
+        className={`rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-gray-400 animate-pulse ${
+          isSidebar ? 'min-h-[8rem]' : ''
+        }`}
+      >
         Scanning for bottlenecks…
       </div>
     );
@@ -43,30 +57,43 @@ export default function KpiFlagsBanner({ flags, loading }: Props) {
 
   if (!flags.length) {
     return (
-      <div className="rounded-xl border border-green-400/20 bg-green-500/10 px-4 py-3 text-sm text-green-800 dark:text-green-200">
+      <div className="rounded-xl border border-green-400/20 bg-green-500/10 px-4 py-2.5 text-sm text-green-800 dark:text-green-200">
         No bottlenecks detected in the recent window. Keep logging daily metrics.
       </div>
     );
   }
 
   return (
-    <div className="space-y-2 relative">
+    <div
+      className={`relative rounded-xl border border-white/10 bg-white/5 ${
+        isSidebar ? 'flex flex-col min-h-0' : 'space-y-2'
+      }`}
+    >
       {loading ? (
-        <div className="absolute top-0 right-0 z-10 inline-flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 bg-black/30 rounded px-2 py-0.5 pointer-events-none">
+        <div className="absolute top-2 right-2 z-10 inline-flex items-center gap-1.5 text-[10px] text-gray-500 dark:text-gray-400 bg-black/30 rounded px-2 py-0.5 pointer-events-none">
           <span className="inline-block h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
-          Updating insights…
+          Updating…
         </div>
       ) : null}
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
-          Top bottlenecks
-          <span className="ml-1.5 font-normal text-gray-500 dark:text-gray-400">
-            ({topFlags.length}
-            {flags.length > TOP_FLAGS ? ` of ${flags.length}` : ''})
-          </span>
-        </h3>
+
+      <div
+        className={`flex items-center gap-2 px-4 py-2.5 ${
+          isSidebar ? 'border-b border-white/10 shrink-0' : ''
+        }`}
+      >
+        <span className={`inline-block h-2 w-2 rounded-full shrink-0 ${SEV_DOT[topSeverity]}`} aria-hidden />
+        <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 leading-snug">
+          {flags.length} issue{flags.length === 1 ? '' : 's'} need attention
+        </span>
       </div>
-      <ul className="grid grid-cols-2 gap-2">
+
+      <ul
+        className={
+          isSidebar
+            ? 'flex flex-col gap-2 p-3 overflow-y-auto min-h-0'
+            : 'grid grid-cols-2 gap-2 px-3 pb-3'
+        }
+      >
         {topFlags.map((flag) => {
           const href = flag.related_feature
             ? KPI_RELATED_FEATURE_HREF[flag.related_feature]
@@ -79,7 +106,7 @@ export default function KpiFlagsBanner({ flags, loading }: Props) {
               ? 'border-red-400/30 bg-red-500/10'
               : flag.severity === 'watch'
                 ? 'border-amber-400/30 bg-amber-500/10'
-                : 'border-white/10 bg-white/5';
+                : 'border-white/10 bg-white/[0.03]';
           return (
             <li
               key={flag.id}
@@ -101,11 +128,11 @@ export default function KpiFlagsBanner({ flags, loading }: Props) {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-gray-800 dark:text-gray-100 leading-snug line-clamp-2">
+              <p className="text-xs text-gray-800 dark:text-gray-100 leading-snug">
                 {flag.message}
               </p>
               {flag.comparison && (
-                <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400 line-clamp-1">
+                <p className="mt-0.5 text-[10px] text-gray-500 dark:text-gray-400">
                   {flag.comparison}
                 </p>
               )}

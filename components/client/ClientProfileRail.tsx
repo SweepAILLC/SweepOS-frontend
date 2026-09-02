@@ -40,7 +40,7 @@ interface ClientProfileRailProps {
   } | null;
   onOpenCalendar: () => void;
   onAddManualPayment: () => void;
-  onDeleteManualPayment: (paymentId: string) => Promise<void>;
+  onDeletePayment: (payment: { id: string; type?: string | null }) => Promise<void>;
   deletingPaymentId: string | null;
   onClientSaved?: (client: Client) => void;
   onReloadPayments?: () => void;
@@ -65,7 +65,7 @@ export default function ClientProfileRail({
   nextCheckIn,
   onOpenCalendar,
   onAddManualPayment,
-  onDeleteManualPayment,
+  onDeletePayment,
   deletingPaymentId,
   onClientSaved,
   onReloadPayments,
@@ -366,10 +366,16 @@ export default function ClientProfileRail({
                 <p className="text-gray-500 mt-0.5">
                   {payment.created_at ? formatDate(payment.created_at) : '—'}
                 </p>
-                {payment.type === 'manual_payment' ? (
+                {payment.type === 'manual_payment' ||
+                payment.type === 'stripe_payment' ||
+                payment.type === 'treasury_transaction' ||
+                payment.type === 'charge' ||
+                payment.type === 'payment_intent' ||
+                payment.type === 'invoice' ||
+                !payment.type ? (
                   <button
                     type="button"
-                    onClick={() => void onDeleteManualPayment(payment.id)}
+                    onClick={() => void onDeletePayment(payment)}
                     disabled={deletingPaymentId === payment.id}
                     className="mt-1 text-red-600 hover:text-red-800 disabled:opacity-50"
                   >

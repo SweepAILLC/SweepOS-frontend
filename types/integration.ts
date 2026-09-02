@@ -357,6 +357,8 @@ export interface TerminalSummaryForWidgets {
     whop?: TerminalCashSourceTotals;
     manual?: TerminalCashSourceTotals;
   };
+  /** Active + offboarding clients. */
+  active_clients_count?: number;
 }
 
 /** GET /integrations/finances/summary */

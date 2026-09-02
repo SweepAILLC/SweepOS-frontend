@@ -88,6 +88,19 @@ const nextConfig = {
   
   // Webpack optimizations
   webpack: (config, { dev, isServer }) => {
+    // Dev-in-Docker: the bind mount puts .next's own build output inside the
+    // watched tree. Without an explicit ignore, the watcher can pick up the
+    // dev server's own writes as "file changed," triggering another rebuild
+    // that writes more output — a self-sustaining infinite recompile loop
+    // (symptom: page stuck flickering between loading and blank as Fast
+    // Refresh full-reloads nonstop). Excluding build output breaks the cycle.
+    if (dev) {
+      config.watchOptions = {
+        ...config.watchOptions,
+        ignored: ['**/node_modules/**', '**/.git/**', '**/.next/**'],
+      };
+    }
+
     // Production optimizations
     if (!dev && !isServer) {
       config.optimization = {

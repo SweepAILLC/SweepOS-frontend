@@ -70,6 +70,7 @@ function CloseSurveyClient() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'done'>('form');
 
   const [clientQuery, setClientQuery] = useState('');
   const [clientId, setClientId] = useState('');
@@ -166,6 +167,21 @@ function CloseSurveyClient() {
     return n;
   };
 
+  const resetForAnother = () => {
+    setPhase('form');
+    setSuccessMsg(null);
+    setSaveError(null);
+    setClientId('');
+    setDealOutcome(null);
+    setCashCollected('');
+    setCallNotes('');
+    setRecordingUrl('');
+    setOfferSlot('');
+    setOfferName('');
+    setContractAmount('');
+    setCloserUserId('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !clientId || dealOutcome === null) {
@@ -173,6 +189,7 @@ function CloseSurveyClient() {
       return;
     }
     setSaving(true);
+    setPhase('submitting');
     setSaveError(null);
     setSuccessMsg(null);
     try {
@@ -194,12 +211,11 @@ function CloseSurveyClient() {
         lead_source_key: leadSourceKey || 'organic',
       };
       const res = await apiClient.submitCloseSurvey(token, payload);
-      setSuccessMsg(res.message || 'Logged — pipeline / payments / KPI will refresh.');
-      setCashCollected('');
-      setCallNotes('');
-      setRecordingUrl('');
+      setSuccessMsg(res.message || 'Logged — pipeline / payments / KPI will refresh in the background.');
+      setPhase('done');
     } catch (err) {
       setSaveError(formatApiError(err, 'Submit failed'));
+      setPhase('form');
     } finally {
       setSaving(false);
     }
@@ -230,6 +246,40 @@ function CloseSurveyClient() {
       <SurveyShell>
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
           {loadError || 'Survey not found'}
+        </div>
+      </SurveyShell>
+    );
+  }
+
+  if (phase === 'submitting') {
+    return (
+      <SurveyShell>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-8 text-center space-y-3">
+          <div className="mx-auto h-8 w-8 rounded-full border-2 border-cyan-400/40 border-t-cyan-300 animate-spin" />
+          <p className="text-sm text-gray-200 font-medium">Submitting…</p>
+          <p className="text-xs text-gray-500">
+            Saving outcome and refreshing pipeline / KPI in the background.
+          </p>
+        </div>
+      </SurveyShell>
+    );
+  }
+
+  if (phase === 'done') {
+    return (
+      <SurveyShell>
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-4 text-center">
+          <p className="text-lg font-semibold text-emerald-100">Submitted</p>
+          <p className="text-sm text-emerald-100/80">
+            {successMsg || 'Logged — pipeline / payments / KPI will refresh in the background.'}
+          </p>
+          <button
+            type="button"
+            onClick={resetForAnother}
+            className="w-full rounded-lg bg-cyan-600 hover:bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white"
+          >
+            Back to survey
+          </button>
         </div>
       </SurveyShell>
     );
@@ -313,9 +363,9 @@ function CloseSurveyClient() {
           <div className="flex gap-3">
             {(
               [
-                ['yes', 'Yes'],
-                ['no', 'No'],
-                ['no_show', 'No-show'],
+                ['yes', 'Close'],
+                ['no', 'No Close'],
+                ['no_show', 'No show'],
               ] as const
             ).map(([val, label]) => (
               <label

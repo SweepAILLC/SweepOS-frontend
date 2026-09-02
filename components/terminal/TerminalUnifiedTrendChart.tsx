@@ -4,7 +4,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, mem
 import {
   ComposedChart,
   Area,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -22,9 +21,9 @@ import type { HealthTrendPeriod } from '@/types/admin';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { chartRevealBudgetMs, PREMIUM_LINE_ANIMATION } from '@/lib/premiumMotion';
 import { ChartSkeleton, PremiumContentGate } from '@/components/ui/PremiumMotion';
+import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 
 const MONEY_CHART_HEIGHT = 180;
-const ACTIVITY_CHART_HEIGHT = 180;
 
 type ChartRange = '6m' | '12m' | 'all';
 
@@ -40,9 +39,8 @@ function sliceChartRange<T>(data: T[], range: ChartRange): T[] {
   return data.slice(-months);
 }
 
-/** Shared gutters so both charts' timelines share the same plot width. */
+/** Left cash axis gutter for the money chart. */
 const LEFT_AXIS_WIDTH = 56;
-const RIGHT_AXIS_WIDTH = 44;
 const CHART_MARGIN = { top: 6, right: 16, left: 4, bottom: 0 };
 const AXIS_MARGIN = { top: 6, right: 0, left: 0, bottom: 44 };
 const X_AXIS_HEIGHT = 44;
@@ -65,33 +63,6 @@ const MONEY_LEGEND = [
   { label: 'Revenue', color: '#6366f1' },
 ] as const;
 
-/** Left axis = call outcomes (smaller scale); right = outreach volume (larger scale). */
-const ACTIVITY_SERIES = [
-  {
-    label: 'Closes',
-    color: '#22c55e',
-    dataKey: 'kpi_closes_count' as const,
-    yAxisId: 'left' as const,
-  },
-  {
-    label: 'Show-ups',
-    color: '#8b5cf6',
-    dataKey: 'kpi_show_ups_count' as const,
-    yAxisId: 'left' as const,
-  },
-  {
-    label: 'Booked calls',
-    color: '#0ea5e9',
-    dataKey: 'kpi_calls_booked_count' as const,
-    yAxisId: 'left' as const,
-  },
-  {
-    label: 'Outbounds sent',
-    color: '#f97316',
-    dataKey: 'kpi_outreach_sent_count' as const,
-    yAxisId: 'right' as const,
-  },
-] as const;
 
 function axisMax(values: number[]): number {
   const max = values.reduce((m, v) => (Number.isFinite(v) ? Math.max(m, v) : m), 0);
@@ -101,29 +72,7 @@ function axisMax(values: number[]): number {
 
 type ChartOffset = { left: number; top: number; right: number; bottom: number };
 
-type TrendChartRow = ReturnType<typeof healthTrendPeriodsWithFinancesCash>[number] & {
-  kpi_closes_count: number;
-  kpi_show_ups_count: number;
-  kpi_calls_booked_count: number;
-  kpi_outreach_sent_count: number;
-};
-
-function withActivityCounts(
-  periods: HealthTrendPeriod[]
-): TrendChartRow[] {
-  return healthTrendPeriodsWithFinancesCash(periods).map((p) => ({
-    ...p,
-    kpi_closes_count: Number(p.kpi_closes_count ?? 0),
-    kpi_show_ups_count: Number(p.kpi_show_ups_count ?? 0),
-    // Prefer calendar sales bookings; KPI daily sum is often empty for unopened months.
-    kpi_calls_booked_count: Number(
-      (p.calls_booked_count != null && p.calls_booked_count > 0
-        ? p.calls_booked_count
-        : p.kpi_calls_booked_count) ?? 0
-    ),
-    kpi_outreach_sent_count: Number(p.kpi_outreach_sent_count ?? 0),
-  }));
-}
+type TrendChartRow = ReturnType<typeof healthTrendPeriodsWithFinancesCash>[number];
 
 const LeftCashAxisChart = memo(function LeftCashAxisChart({
   data,
@@ -151,58 +100,6 @@ const LeftCashAxisChart = memo(function LeftCashAxisChart({
   );
 });
 
-const LeftCountAxisChart = memo(function LeftCountAxisChart({
-  data,
-  domain,
-  height,
-  tickClass,
-}: {
-  data: TrendChartRow[];
-  domain: [number, number];
-  height: number;
-  tickClass: string;
-}) {
-  return (
-    <ComposedChart width={LEFT_AXIS_WIDTH} height={height} data={data} margin={AXIS_MARGIN}>
-      <YAxis
-        yAxisId="left"
-        width={LEFT_AXIS_WIDTH}
-        domain={domain}
-        tickCount={Y_TICK_COUNT}
-        tick={{ fontSize: 10 }}
-        allowDecimals={false}
-        className={tickClass}
-      />
-    </ComposedChart>
-  );
-});
-
-const RightCountAxisChart = memo(function RightCountAxisChart({
-  data,
-  domain,
-  height,
-  tickClass,
-}: {
-  data: TrendChartRow[];
-  domain: [number, number];
-  height: number;
-  tickClass: string;
-}) {
-  return (
-    <ComposedChart width={RIGHT_AXIS_WIDTH} height={height} data={data} margin={AXIS_MARGIN}>
-      <YAxis
-        yAxisId="right"
-        orientation="right"
-        width={RIGHT_AXIS_WIDTH}
-        domain={domain}
-        tickCount={Y_TICK_COUNT}
-        tick={{ fontSize: 10 }}
-        allowDecimals={false}
-        className={tickClass}
-      />
-    </ComposedChart>
-  );
-});
 
 function ChartRevealClip({
   width: chartWidth = 0,
@@ -263,7 +160,6 @@ export default function TerminalUnifiedTrendChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const revealFrameRef = useRef<number | null>(null);
   const moneyClipId = useRef(`terminal-money-reveal-${Math.random().toString(36).slice(2, 9)}`);
-  const activityClipId = useRef(`terminal-activity-reveal-${Math.random().toString(36).slice(2, 9)}`);
   const fetchGenRef = useRef(0);
 
   const reloadTrends = useCallback((opts?: { forceRefresh?: boolean; animate?: boolean }) => {
@@ -329,7 +225,7 @@ export default function TerminalUnifiedTrendChart() {
     return () => ro.disconnect();
   }, [measureContainer]);
 
-  const chartData = useMemo(() => withActivityCounts(periods), [periods]);
+  const chartData = useMemo(() => healthTrendPeriodsWithFinancesCash(periods), [periods]);
 
   const rangedChartData = useMemo(
     () => sliceChartRange(chartData, chartRange),
@@ -346,39 +242,15 @@ export default function TerminalUnifiedTrendChart() {
     [rangedChartData]
   );
 
-  const activityLeftDomain = useMemo(
-    (): [number, number] => [
-      0,
-      axisMax(
-        rangedChartData.flatMap((d) => [
-          d.kpi_closes_count,
-          d.kpi_show_ups_count,
-          d.kpi_calls_booked_count,
-        ])
-      ),
-    ],
-    [rangedChartData]
-  );
-
-  const activityRightDomain = useMemo(
-    (): [number, number] => [
-      0,
-      axisMax(rangedChartData.map((d) => d.kpi_outreach_sent_count)),
-    ],
-    [rangedChartData]
-  );
 
   const plotWidth = useMemo(() => {
     const base = viewportWidth > 0 ? viewportWidth : 720;
-    return Math.max(200, base - LEFT_AXIS_WIDTH - RIGHT_AXIS_WIDTH);
+    return Math.max(200, base - LEFT_AXIS_WIDTH);
   }, [viewportWidth]);
 
   const revealInProgress = animateChart && revealProgress < 1;
   const moneyClipPath =
     revealInProgress && revealProgress > 0 ? `url(#${moneyClipId.current})` : undefined;
-  const activityClipPath =
-    revealInProgress && revealProgress > 0 ? `url(#${activityClipId.current})` : undefined;
-
   useLayoutEffect(() => {
     if (loading || rangedChartData.length === 0) return;
     measureContainer();
@@ -607,8 +479,6 @@ export default function TerminalUnifiedTrendChart() {
                   </div>
                 </div>
 
-                {/* Spacer matches activity right axis so timelines align. */}
-                <div className="shrink-0" style={{ width: RIGHT_AXIS_WIDTH }} aria-hidden />
               </div>
             </div>
           ) : null}
@@ -616,151 +486,12 @@ export default function TerminalUnifiedTrendChart() {
         </div>
       </div>
 
-      {/* Activity: closes, show-ups, booked calls, outbounds */}
-      <div className="glass-card p-4 sm:p-6 min-w-0 flex flex-col">
-        <div className="mb-3 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100">
-              Sales activity
-            </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              {rangeDescription} — outcomes + calendar sales bookings (left), outbounds (right).
-            </p>
-          </div>
-        </div>
+      <PortalKpiSnapshot
+        isActive
+        showFlags={false}
+        emptyHint="No KPI entries logged yet. Head to the KPI Command Center tab to start tracking."
+      />
 
-        <PremiumContentGate
-          loading={loading}
-          animate={false}
-          skeleton={<ChartSkeleton height={ACTIVITY_CHART_HEIGHT} />}
-        >
-          {rangedChartData.length === 0 ? (
-            <div
-              className="flex items-center justify-center text-sm text-gray-500 premium-reveal"
-              style={{ height: ACTIVITY_CHART_HEIGHT }}
-            >
-              No monthly data yet.
-            </div>
-          ) : plotWidth > 0 ? (
-            <div className="w-full min-w-0">
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs text-gray-600 dark:text-gray-400">
-                {ACTIVITY_SERIES.map((item) => (
-                  <span key={item.label} className="inline-flex items-center gap-1.5">
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-sm"
-                      style={{ backgroundColor: item.color }}
-                    />
-                    {item.label}
-                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                      {item.yAxisId === 'left' ? 'L' : 'R'}
-                    </span>
-                  </span>
-                ))}
-              </div>
-
-              <div className="flex w-full min-w-0" style={{ height: ACTIVITY_CHART_HEIGHT }}>
-                <div className="shrink-0" style={{ width: LEFT_AXIS_WIDTH }}>
-                  <LeftCountAxisChart
-                    data={rangedChartData}
-                    domain={activityLeftDomain}
-                    height={ACTIVITY_CHART_HEIGHT}
-                    tickClass={axisTickClass}
-                  />
-                </div>
-
-                <div className="min-w-0 flex-1 overflow-hidden">
-                  <div style={{ width: plotWidth, height: ACTIVITY_CHART_HEIGHT }}>
-                    <ComposedChart
-                      width={plotWidth}
-                      height={ACTIVITY_CHART_HEIGHT}
-                      data={rangedChartData}
-                      margin={CHART_MARGIN}
-                    >
-                      <Customized
-                        component={(props: {
-                          width?: number;
-                          height?: number;
-                          offset?: ChartOffset;
-                        }) => (
-                          <ChartRevealClip
-                            width={props.width}
-                            height={props.height}
-                            offset={props.offset}
-                            revealProgress={revealProgress}
-                            clipId={activityClipId.current}
-                          />
-                        )}
-                      />
-                      <CartesianGrid
-                        strokeDasharray="3 3"
-                        className="stroke-gray-200 dark:stroke-white/10"
-                      />
-                      <XAxis
-                        dataKey="period_label"
-                        tick={{ fontSize: 10 }}
-                        angle={-35}
-                        textAnchor="end"
-                        height={X_AXIS_HEIGHT}
-                        padding={X_AXIS_PADDING}
-                        interval={rangedChartData.length > 14 ? 'preserveStartEnd' : 0}
-                        className={axisTickClass}
-                      />
-                      <YAxis
-                        yAxisId="left"
-                        hide
-                        width={0}
-                        domain={activityLeftDomain}
-                        tickCount={Y_TICK_COUNT}
-                        allowDecimals={false}
-                      />
-                      <YAxis
-                        yAxisId="right"
-                        hide
-                        width={0}
-                        domain={activityRightDomain}
-                        tickCount={Y_TICK_COUNT}
-                        allowDecimals={false}
-                      />
-                      <Tooltip
-                        {...tooltipStyle}
-                        formatter={(value: number, name: string) => [
-                          Number(value).toLocaleString(),
-                          name,
-                        ]}
-                      />
-                      {ACTIVITY_SERIES.map((item) => (
-                        <Line
-                          key={item.dataKey}
-                          yAxisId={item.yAxisId}
-                          type="monotone"
-                          dataKey={item.dataKey}
-                          name={item.label}
-                          stroke={item.color}
-                          strokeWidth={2}
-                          dot={{ r: 2.5 }}
-                          connectNulls
-                          clipPath={activityClipPath}
-                          {...PREMIUM_LINE_ANIMATION}
-                          isAnimationActive={false}
-                        />
-                      ))}
-                    </ComposedChart>
-                  </div>
-                </div>
-
-                <div className="shrink-0" style={{ width: RIGHT_AXIS_WIDTH }}>
-                  <RightCountAxisChart
-                    data={rangedChartData}
-                    domain={activityRightDomain}
-                    height={ACTIVITY_CHART_HEIGHT}
-                    tickClass={axisTickClass}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </PremiumContentGate>
-      </div>
     </div>
   );
 }

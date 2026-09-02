@@ -31,6 +31,7 @@ import {
 } from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
+import { hasSeenOnboardingTour, markOnboardingTourSeen, startOnboardingTour } from '@/lib/onboardingTour';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -87,6 +88,7 @@ export default function Dashboard() {
   const [automationsAwaitingApproval, setAutomationsAwaitingApproval] = useState(0);
   const [consultingTier, setConsultingTier] = useState<ConsultingTier | null>(null);
   const [bookingUrl, setBookingUrl] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Read tab from localStorage only after mount. Loading shell is shown until auth
   // finishes, so useEffect is enough and avoids SSR useLayoutEffect hydration warnings.
@@ -144,6 +146,7 @@ export default function Dashboard() {
         const user = await apiClient.getCurrentUser();
         if (!isMounted) return;
 
+        if (user.id) setCurrentUserId(String(user.id));
         const userIsOwner = String(user.role || '').toLowerCase().trim() === 'owner';
         setIsOwner(userIsOwner);
         setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
@@ -402,6 +405,35 @@ export default function Dashboard() {
     }
   }, [loading, activeTab, isSystemOwner, setGlobalLoading]);
 
+  // Shared by the Navbar's own clicks and the onboarding tour, so the tour opens
+  // the real tab content behind each step instead of just pointing at the button.
+  const handleTabChange = (tab: TabId) => {
+    if (tab === activeTab) return;
+    setActiveTab(tab);
+    // Drop deep-link leftovers immediately so sticky ?tab=/&view=/&sub= can't snap back.
+    if (router.query.tab || router.query.view || router.query.funnelId || router.query.sub) {
+      lastConsumedDeepLinkRef.current = null;
+      void router.replace('/', undefined, { shallow: true });
+    }
+  };
+
+  // First-run product tour — once per user (localStorage), after the shell (and
+  // nav buttons the tour targets) has painted. Never blocks or delays the app.
+  const tourStartedRef = useRef(false);
+  useEffect(() => {
+    if (loading || !currentUserId || tourStartedRef.current) return;
+    if (hasSeenOnboardingTour(currentUserId)) return;
+    tourStartedRef.current = true;
+    const timer = setTimeout(() => {
+      startOnboardingTour(
+        { isOwner, userRole, consultingTier, isSystemOwner },
+        { onDone: () => markOnboardingTourSeen(currentUserId), onNavigateToTab: handleTabChange }
+      );
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, currentUserId, isOwner, userRole, consultingTier, isSystemOwner]);
+
   // Integrations live under Settings → Integrations.
   useEffect(() => {
     if (loading) return;
@@ -470,15 +502,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Navbar 
         activeTab={activeTab} 
-        onTabChange={(tab) => {
-          if (tab === activeTab) return;
-          setActiveTab(tab);
-          // Drop deep-link leftovers immediately so sticky ?tab=/&view=/&sub= can't snap back.
-          if (router.query.tab || router.query.view || router.query.funnelId || router.query.sub) {
-            lastConsumedDeepLinkRef.current = null;
-            void router.replace('/', undefined, { shallow: true });
-          }
-        }} 
+        onTabChange={handleTabChange}
         isOwner={isOwner && !isSystemOwner}
         tabPermissions={tabPermissions}
         userRole={userRole || 'member'}
@@ -514,7 +538,7 @@ export default function Dashboard() {
       >
         <main
           className={`min-w-0 mx-auto px-3 sm:px-4 lg:px-5 py-3 sm:py-6 overflow-x-hidden ${
-            activeTab === 'pipeline' || activeTab === 'terminal' || activeTab === 'org_portal'
+            activeTab === 'pipeline' || activeTab === 'terminal' || activeTab === 'org_portal' || activeTab === 'kpi_command_center'
               ? 'max-w-none w-full'
               : 'max-w-7xl'
           }`}
@@ -632,7 +656,12 @@ export default function Dashboard() {
           hasTabAccess('settings') ? (
             <div className="w-full">
               <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
-              <SettingsPanel />
+              <SettingsPanel
+                isOwner={isOwner}
+                consultingTier={consultingTier}
+                isSystemOwner={isSystemOwner}
+                onNavigateToTab={handleTabChange}
+              />
             </div>
           ) : (
             <RestrictedTabView tabName="settings" />
