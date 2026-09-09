@@ -3742,6 +3742,14 @@ class ApiClient {
     return response.data;
   }
 
+  async createCloseSurveyClient(
+    token: string,
+    data: import('@/types/closeSurvey').CloseSurveyCreateClientPayload
+  ): Promise<import('@/types/closeSurvey').CloseSurveyClientOption> {
+    const response = await this.client.post(`/close-survey/public/${token}/clients`, data);
+    return response.data;
+  }
+
   async submitCloseSurvey(
     token: string,
     data: import('@/types/closeSurvey').CloseSurveySubmitPayload

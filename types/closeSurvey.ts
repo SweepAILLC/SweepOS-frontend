@@ -32,6 +32,16 @@ export interface CloseSurveyLeadSourceOption {
   funnel_id?: string | null;
 }
 
+export interface CloseSurveyCreateClientPayload {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  instagram?: string;
+  lifecycle_state?: string;
+  notes?: string;
+}
+
 export interface CloseSurveyMetaResponse {
   org_name: string;
   clients: CloseSurveyClientOption[];

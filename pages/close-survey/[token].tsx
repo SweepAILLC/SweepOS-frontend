@@ -1,7 +1,10 @@
 import { useRouter } from 'next/router';
+import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
+import { normalizeLifecycleColumn } from '@/lib/pipelineColumns';
+import type { Client } from '@/types/client';
 import type {
   CloseSurveyClientOption,
   CloseSurveyCloserOption,
@@ -12,6 +15,10 @@ import type {
   CloseSurveyPaymentSource,
   CloseSurveySubmitPayload,
 } from '@/types/closeSurvey';
+
+const ClientCreateModal = dynamic(() => import('@/components/client/ClientCreateModal'), {
+  ssr: false,
+});
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -75,6 +82,7 @@ function CloseSurveyClient() {
   const [clientQuery, setClientQuery] = useState('');
   const [clientId, setClientId] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [dealOutcome, setDealOutcome] = useState<CloseSurveyDealOutcome | null>(null);
   const [closerUserId, setCloserUserId] = useState('');
   const [leadSourceKey, setLeadSourceKey] = useState('organic');
@@ -330,6 +338,16 @@ function CloseSurveyClient() {
                 placeholder="Type a name or email"
                 className="w-full border-b border-white/10 bg-transparent px-3 py-2 text-sm outline-none"
               />
+              <button
+                type="button"
+                className="w-full border-b border-white/10 px-3 py-2 text-left text-sm text-cyan-300 hover:bg-white/10"
+                onClick={() => {
+                  setPickerOpen(false);
+                  setCreateOpen(true);
+                }}
+              >
+                + Create new client
+              </button>
               <ul className="max-h-56 overflow-y-auto py-1">
                 {filteredClients.length === 0 ? (
                   <li className="px-3 py-2 text-xs text-gray-500">No matches</li>
@@ -417,6 +435,7 @@ function CloseSurveyClient() {
             {leadSources.map((s) => (
               <option key={s.key} value={s.key}>
                 {s.label}
+                {s.funnel_id ? ' (Funnel)' : ''}
               </option>
             ))}
           </select>
@@ -547,6 +566,51 @@ function CloseSurveyClient() {
           {saving ? 'Saving…' : 'Log close'}
         </button>
       </form>
+      {createOpen && token ? (
+        <ClientCreateModal
+          allowCsv={false}
+          onClose={() => setCreateOpen(false)}
+          createClient={async (data) => {
+            const created = await apiClient.createCloseSurveyClient(token, data);
+            const lifecycle =
+              normalizeLifecycleColumn(created.lifecycle_state) ?? data.lifecycle_state;
+            const mapped: Client = {
+              id: created.id,
+              first_name: data.first_name,
+              last_name: data.last_name,
+              email: created.email || data.email,
+              lifecycle_state: lifecycle,
+              estimated_mrr: 0,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            };
+            return mapped;
+          }}
+          onClientCreated={(client) => {
+            const name =
+              [client.first_name, client.last_name].filter(Boolean).join(' ').trim() ||
+              client.email ||
+              'Unnamed client';
+            const opt: CloseSurveyClientOption = {
+              id: client.id,
+              name,
+              email: client.email || null,
+              lifecycle_state: client.lifecycle_state,
+            };
+            setMeta((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    clients: [opt, ...prev.clients.filter((c) => c.id !== opt.id)],
+                  }
+                : prev
+            );
+            setClientId(client.id);
+            setCreateOpen(false);
+            setPickerOpen(false);
+          }}
+        />
+      ) : null}
     </SurveyShell>
   );
 }

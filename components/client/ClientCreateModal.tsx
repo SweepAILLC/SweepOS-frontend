@@ -7,10 +7,24 @@ import { parseCsvFile, downloadCsvTemplate, type CsvImportRow, type CsvParseResu
 import type { Client } from '@/types/client';
 import { normalizeLifecycleColumn } from '@/lib/pipelineColumns';
 
+export type ClientCreatePayload = {
+  first_name?: string;
+  last_name?: string;
+  email?: string;
+  phone?: string;
+  instagram?: string;
+  lifecycle_state: PipelineColumnId;
+  notes?: string;
+};
+
 interface ClientCreateModalProps {
   onClose: () => void;
   onClientCreated: (client: Client) => void;
-  onImportComplete: () => void;
+  onImportComplete?: () => void;
+  /** Hide CSV tab (public post-call form). Default true for pipeline. */
+  allowCsv?: boolean;
+  /** Inject create call so public tokenized form can reuse this modal without auth. */
+  createClient?: (data: ClientCreatePayload) => Promise<Client>;
 }
 
 type Tab = 'single' | 'csv';
@@ -32,6 +46,8 @@ export default function ClientCreateModal({
   onClose,
   onClientCreated,
   onImportComplete,
+  allowCsv = true,
+  createClient,
 }: ClientCreateModalProps) {
   const [tab, setTab] = useState<Tab>('single');
 
@@ -67,7 +83,7 @@ export default function ClientCreateModal({
     }
     setCreating(true);
     try {
-      const clientData = {
+      const clientData: ClientCreatePayload = {
         first_name: formData.first_name || undefined,
         last_name: formData.last_name || undefined,
         email: formData.email || undefined,
@@ -76,7 +92,8 @@ export default function ClientCreateModal({
         lifecycle_state: formData.lifecycle_state,
         notes: formData.notes || undefined,
       };
-      const newClient = await apiClient.createClient(clientData);
+      const creator = createClient ?? ((data) => apiClient.createClient(data));
+      const newClient = await creator(clientData);
       const created: Client = {
         ...newClient,
         lifecycle_state:
@@ -149,7 +166,7 @@ export default function ClientCreateModal({
   };
 
   const handleDismissResults = () => {
-    onImportComplete();
+    onImportComplete?.();
     onClose();
   };
 
@@ -168,6 +185,7 @@ export default function ClientCreateModal({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white dark:glass-card rounded-lg shadow-lg border border-gray-200 dark:border-white/10 neon-glow p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
         {/* Tabs */}
+        {allowCsv && (
         <div className="flex border-b border-gray-200 dark:border-white/10 mb-4">
           <button
             type="button"
@@ -192,6 +210,7 @@ export default function ClientCreateModal({
             Import CSV
           </button>
         </div>
+        )}
 
         {/* ── TAB: Single Client ── */}
         {tab === 'single' && (
@@ -286,7 +305,7 @@ export default function ClientCreateModal({
         )}
 
         {/* ── TAB: Import CSV ── */}
-        {tab === 'csv' && (
+        {allowCsv && tab === 'csv' && (
           <>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Import Clients from CSV</h3>
 
