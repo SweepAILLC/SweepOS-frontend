@@ -64,7 +64,7 @@ function AnswersCell({ answers }: { answers?: Record<string, unknown> | null }) 
   if (entries.length === 0) {
     return <span>—</span>;
   }
-  const compact = entries.map(([k, v]) => ).join(' · ');
+  const compact = entries.map(([k, v]) => k + ': ' + v).join(' · ');
   const canExpand = entries.length > 1 || compact.length > 80;
 
   return (
