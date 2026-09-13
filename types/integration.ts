@@ -414,3 +414,29 @@ export interface FinancesTimelinePoint {
   total_revenue: number;
 }
 
+
+export interface DiscordEventType {
+  key: string;
+  label: string;
+}
+
+export interface DiscordChannel {
+  id: string;
+  name: string;
+  type: number;
+  position: number;
+}
+
+export interface DiscordChannelMapping {
+  event_type: string;
+  channel_id: string;
+  channel_name?: string | null;
+}
+
+export interface DiscordStatus {
+  connected: boolean;
+  guild_id?: string;
+  guild_name?: string | null;
+  bot_configured: boolean;
+  oauth_configured: boolean;
+}

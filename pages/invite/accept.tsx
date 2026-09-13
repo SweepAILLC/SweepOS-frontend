@@ -207,9 +207,18 @@ export default function InviteAcceptPage() {
                 autoComplete="new-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="Choose a password"
+                placeholder={
+                  validateState.needs_email
+                    ? 'Choose a password (or your existing account password, to join)'
+                    : 'Choose a password'
+                }
                 className="block w-full px-3 py-2 glass-input rounded-md sm:text-sm"
               />
+              {validateState.needs_email && (
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Already have an account with this email? Enter its password to join.
+                </p>
+              )}
             </div>
           </div>
 
