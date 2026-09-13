@@ -3757,6 +3757,60 @@ class ApiClient {
     const response = await this.client.post(`/close-survey/public/${token}/submit`, data);
     return response.data;
   }
+
+  async getOrgTimezone(orgId: string) {
+    const response = await this.client.get(`/organizations/${orgId}/timezone`);
+    return response.data as { timezone: string };
+  }
+
+  async setOrgTimezone(orgId: string, timezone: string) {
+    const response = await this.client.patch(`/organizations/${orgId}/timezone`, { timezone });
+    return response.data as { timezone: string };
+  }
+
+  async startDiscordOAuth() {
+    const response = await this.client.post('/oauth/discord/start');
+    return response.data as { redirect_url: string };
+  }
+
+  async getDiscordStatus() {
+    const response = await this.client.get('/oauth/discord/status');
+    return response.data as import('@/types/integration').DiscordStatus;
+  }
+
+  async disconnectDiscord() {
+    await this.client.delete('/oauth/discord/disconnect');
+  }
+
+  async listDiscordChannels() {
+    const response = await this.client.get('/oauth/discord/channels');
+    return response.data as { guild_id: string; channels: import('@/types/integration').DiscordChannel[] };
+  }
+
+  async getDiscordChannelMappings() {
+    const response = await this.client.get('/oauth/discord/channel-mappings');
+    return response.data as {
+      event_types: import('@/types/integration').DiscordEventType[];
+      mappings: import('@/types/integration').DiscordChannelMapping[];
+    };
+  }
+
+  async setDiscordChannelMapping(eventType: string, channelId: string, channelName?: string) {
+    const response = await this.client.put(`/oauth/discord/channel-mappings/${eventType}`, {
+      channel_id: channelId,
+      channel_name: channelName,
+    });
+    return response.data;
+  }
+
+  async deleteDiscordChannelMapping(eventType: string) {
+    await this.client.delete(`/oauth/discord/channel-mappings/${eventType}`);
+  }
+
+  async sendDiscordTest(eventType: string) {
+    const response = await this.client.post(`/oauth/discord/test/${eventType}`);
+    return response.data;
+  }
 }
 
 export const apiClient = new ApiClient();

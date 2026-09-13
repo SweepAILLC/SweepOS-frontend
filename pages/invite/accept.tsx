@@ -10,6 +10,7 @@ type ValidateState = {
   invitation_type?: string;
   role?: string;
   message?: string;
+  needs_email?: boolean;
 };
 
 export default function InviteAcceptPage() {
@@ -40,6 +41,7 @@ export default function InviteAcceptPage() {
             invitation_type: data.invitation_type,
             role: data.role,
             message: data.message,
+            needs_email: (data as any).needs_email,
           });
         }
       } catch (err: any) {
@@ -159,11 +161,17 @@ export default function InviteAcceptPage() {
               autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Set your password (leave blank if you already have an account)"
+              placeholder={
+                validateState.needs_email
+                  ? 'Set a password (or enter your existing account password to join)'
+                  : 'Set your password (leave blank if you already have an account)'
+              }
               className="block w-full px-3 py-2 glass-input rounded-md sm:text-sm"
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              New users: enter a password. Existing users: leave blank and click Accept.
+              {validateState.needs_email
+                ? 'New users: set a password. Already have an account with this email? Enter its password to join.'
+                : 'New users: enter a password. Existing users: leave blank and click Accept.'}
             </p>
           </div>
           <div>

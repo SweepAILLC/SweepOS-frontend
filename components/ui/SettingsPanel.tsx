@@ -8,6 +8,7 @@ import { useLoading } from '@/contexts/LoadingContext';
 import UsersPanel from '@/components/UsersPanel';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import NotificationSettingsCard from '@/components/ui/NotificationSettingsCard';
+import OrgTimezoneCard from '@/components/ui/OrgTimezoneCard';
 import { startOnboardingTour } from '@/lib/onboardingTour';
 
 type SettingsSection =
@@ -630,7 +631,10 @@ export default function SettingsPanel({
           )}
 
           {section === 'notifications' && isAdminOrOwner && currentOrgId && (
-            <NotificationSettingsCard orgId={currentOrgId} />
+            <div className="space-y-6">
+              <OrgTimezoneCard orgId={currentOrgId} />
+              <NotificationSettingsCard orgId={currentOrgId} />
+            </div>
           )}
 
           {section === 'privacy' && (

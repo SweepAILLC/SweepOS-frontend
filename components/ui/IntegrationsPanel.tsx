@@ -9,10 +9,11 @@ import {
 } from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
+import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
 import { isOrgAdminRole } from '@/lib/tabAccess';
 import { formatApiError } from '@/lib/apiError';
-import type { BrevoStatus, CalComStatus, CalendlyStatus } from '@/types/integration';
+import type { BrevoStatus, CalComStatus, CalendlyStatus, DiscordStatus } from '@/types/integration';
 
 type IntegrationModal =
   | 'brevo'
@@ -23,6 +24,7 @@ type IntegrationModal =
   | 'whop'
   | 'claude'
   | 'instagram'
+  | 'discord'
   | null;
 
 const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
@@ -72,6 +74,20 @@ function InstagramTileMark() {
     >
       <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
         <path d="M12 7.2A4.8 4.8 0 1 0 12 16.8 4.8 4.8 0 0 0 12 7.2Zm0 7.9a3.1 3.1 0 1 1 0-6.2 3.1 3.1 0 0 1 0 6.2Zm5.3-8.1a1.12 1.12 0 1 1-2.24 0 1.12 1.12 0 0 1 2.24 0ZM21.5 7.5c-.05-1.14-.25-1.92-.53-2.6a5.24 5.24 0 0 0-1.2-1.9 5.24 5.24 0 0 0-1.9-1.2c-.68-.28-1.46-.48-2.6-.53C14.13 1.2 13.77 1.2 12 1.2s-2.13 0-2.87.07c-1.14.05-1.92.25-2.6.53a5.24 5.24 0 0 0-1.9 1.2 5.24 5.24 0 0 0-1.2 1.9c-.28.68-.48 1.46-.53 2.6C2.83 8.24 2.83 8.6 2.83 10.37v3.26c0 1.77 0 2.13.07 2.87.05 1.14.25 1.92.53 2.6a5.24 5.24 0 0 0 1.2 1.9 5.24 5.24 0 0 0 1.9 1.2c.68.28 1.46.48 2.6.53.74.07 1.1.07 2.87.07s2.13 0 2.87-.07c1.14-.05 1.92-.25 2.6-.53a5.24 5.24 0 0 0 1.9-1.2 5.24 5.24 0 0 0 1.2-1.9c.28-.68.48-1.46.53-2.6.07-.74.07-1.1.07-2.87V10.37c0-1.77 0-2.13-.07-2.87Zm-1.7 6.3c0 1.73-.01 1.94-.07 2.63-.06 1.04-.22 1.6-.37 1.98-.19.5-.42.85-.8 1.23-.38.38-.73.61-1.23.8-.38.15-.94.31-1.98.37-.69.06-.9.07-2.63.07s-1.94-.01-2.63-.07c-1.04-.06-1.6-.22-1.98-.37a3.32 3.32 0 0 1-1.23-.8 3.32 3.32 0 0 1-.8-1.23c-.15-.38-.31-.94-.37-1.98-.06-.69-.07-.9-.07-2.63V10.2c0-1.73.01-1.94.07-2.63.06-1.04.22-1.6.37-1.98.19-.5.42-.85.8-1.23.38-.38.73-.61 1.23-.8.38-.15.94-.31 1.98-.37.69-.06.9-.07 2.63-.07s1.94.01 2.63.07c1.04.06 1.6.22 1.98.37.5.19.85.42 1.23.8.38.38.61.73.8 1.23.15.38.31.94.37 1.98.06.69.07.9.07 2.63v3.6Z" />
+      </svg>
+    </div>
+  );
+}
+
+function DiscordTileMark() {
+  return (
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
+      style={{ background: '#5865F2' }}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
+        <path d="M20.317 4.37a19.79 19.79 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 002.163 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.009c.12.099.246.198.373.292a.077.077 0 01-.006.128 12.3 12.3 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.84 19.84 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.334-.956 2.419-2.157 2.419zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.334-.946 2.419-2.157 2.419z" />
       </svg>
     </div>
   );
@@ -211,6 +227,7 @@ export default function IntegrationsPanel() {
   const [canManageIntegrations, setCanManageIntegrations] = useState(false);
   const [modal, setModal] = useState<IntegrationModal>(null);
   const [brevoSummary, setBrevoSummary] = useState<BrevoStatus | null>(null);
+  const [discordSummary, setDiscordSummary] = useState<DiscordStatus | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeStatus, setStripeStatus] = useState<StripeConnectionStatus | null>(null);
@@ -252,6 +269,15 @@ export default function IntegrationsPanel() {
     }
   }, []);
 
+  const refreshDiscordSummary = useCallback(async () => {
+    try {
+      const data = await apiClient.getDiscordStatus();
+      setDiscordSummary(data);
+    } catch {
+      setDiscordSummary(null);
+    }
+  }, []);
+
   const refreshIntegrationSummaries = useCallback(async () => {
     try {
       const [stripeSt, calcom, calendly, whop, ig] = await Promise.all([
@@ -284,11 +310,12 @@ export default function IntegrationsPanel() {
     try {
       setLoading(true);
       setError(null);
-      const [settings, user, brevo, fStatus] = await Promise.all([
+      const [settings, user, brevo, fStatus, discord] = await Promise.all([
         apiClient.getUserSettings(),
         apiClient.getCurrentUser(),
         apiClient.getBrevoStatus().catch(() => null),
         apiClient.getFathomStatus().catch(() => null),
+        apiClient.getDiscordStatus().catch(() => null),
       ]);
       {
         const loadedKey = typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '';
@@ -297,6 +324,7 @@ export default function IntegrationsPanel() {
       }
       setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
       setBrevoSummary(brevo);
+      setDiscordSummary(discord);
       setFathomStatus(fStatus);
       await refreshIntegrationSummaries();
     } catch (err: unknown) {
@@ -646,6 +674,7 @@ export default function IntegrationsPanel() {
   }
 
   const brevoConnected = brevoSummary?.connected === true;
+  const discordConnected = discordSummary?.connected === true;
   const fathomConfigured = fathomApiKey.trim().length > 0 || fathomStatus?.configured === true;
   const fathomWebhookActive =
     !fathomWebhookRegistering &&
@@ -835,7 +864,38 @@ export default function IntegrationsPanel() {
             </p>
           </div>
         </button>
+
+        <button type="button" onClick={() => setModal('discord')} className={tileBtn} data-tour="integration-discord">
+          <div className="flex h-full min-h-0 flex-col">
+            <DiscordTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Discord</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Notifications &amp; forms
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                discordConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {discordConnected ? 'Connected' : 'Not connected'}
+            </p>
+          </div>
+        </button>
       </div>
+
+      {modal === 'discord' && (
+        <SquareModalShell title="Discord" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <DiscordIntegrationCard
+              canManage={canManageIntegrations}
+              embedded
+              onConnectionChange={refreshDiscordSummary}
+            />
+          </div>
+        </SquareModalShell>
+      )}
 
       {modal === 'brevo' && (
         <SquareModalShell title="Brevo" onClose={() => setModal(null)}>
