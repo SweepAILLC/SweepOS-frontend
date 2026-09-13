@@ -70,7 +70,14 @@ function axisMax(values: number[]): number {
   return Math.ceil(max * 1.08);
 }
 
-type ChartOffset = { left: number; top: number; right: number; bottom: number };
+type ChartOffset = {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width?: number;
+  height?: number;
+};
 
 type TrendChartRow = ReturnType<typeof healthTrendPeriodsWithFinancesCash>[number];
 
@@ -116,22 +123,28 @@ function ChartRevealClip({
 }) {
   const plotLeft = offset?.left ?? 0;
   const plotTop = offset?.top ?? 0;
-  const plotWidth =
-    offset != null ? Math.max(0, chartWidth - offset.left - offset.right) : chartWidth;
-  const plotHeight =
-    offset != null ? Math.max(0, chartHeight - offset.top - offset.bottom) : chartHeight;
+  const rawWidth =
+    offset != null && typeof offset.width === 'number' && offset.width > 0
+      ? offset.width
+      : offset != null
+        ? chartWidth - (Number(offset.left) || 0) - (Number(offset.right) || 0)
+        : chartWidth;
+  const rawHeight =
+    offset != null && typeof offset.height === 'number' && offset.height > 0
+      ? offset.height
+      : offset != null
+        ? chartHeight - (Number(offset.top) || 0) - (Number(offset.bottom) || 0)
+        : chartHeight;
+  const plotW = Math.max(0, rawWidth);
+  const plotH = Math.max(0, rawHeight);
+  const clipW = Math.max(0, plotW * Math.min(1, Math.max(0, revealProgress)));
 
-  if (plotWidth <= 0 || plotHeight <= 0) return null;
+  if (plotW < 1 || plotH < 1 || clipW < 0.5) return null;
 
   return (
     <defs>
       <clipPath id={clipId}>
-        <rect
-          x={plotLeft}
-          y={plotTop}
-          width={plotWidth * revealProgress}
-          height={plotHeight}
-        />
+        <rect x={plotLeft} y={plotTop} width={clipW} height={plotH} />
       </clipPath>
     </defs>
   );
@@ -428,7 +441,11 @@ export default function TerminalUnifiedTrendChart() {
                         angle={-35}
                         textAnchor="end"
                         height={X_AXIS_HEIGHT}
-                        padding={X_AXIS_PADDING}
+                        padding={
+                          rangedChartData.length <= 2
+                            ? { left: 0, right: 0 }
+                            : X_AXIS_PADDING
+                        }
                         interval={rangedChartData.length > 14 ? 'preserveStartEnd' : 0}
                         className={axisTickClass}
                       />
@@ -489,6 +506,7 @@ export default function TerminalUnifiedTrendChart() {
       <PortalKpiSnapshot
         isActive
         showFlags={false}
+        syncLive
         emptyHint="No KPI entries logged yet. Head to the KPI Command Center tab to start tracking."
       />
 

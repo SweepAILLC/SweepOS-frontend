@@ -14,6 +14,7 @@ import Cookies from 'js-cookie';
 import { apiClient, isSweepSessionAuthFailure } from '@/lib/api';
 import { pingActivityHeartbeat } from '@/lib/consultingNotices';
 import { clearSessionCaches } from '@/lib/cache';
+import MandatoryOnboardingGate from '@/components/ui/MandatoryOnboardingGate';
 
 export default function App({ Component, pageProps }: AppProps) {
   const keepAliveIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -128,7 +129,9 @@ export default function App({ Component, pageProps }: AppProps) {
             <LoadingProvider>
               <GlobalLoadingOverlay />
               <ToastContainer />
-              <Component {...pageProps} />
+              <MandatoryOnboardingGate>
+                <Component {...pageProps} />
+              </MandatoryOnboardingGate>
             </LoadingProvider>
           </SidebarProvider>
         </ToastProvider>

@@ -5,6 +5,8 @@ import type { PipelineColumnId } from '@/lib/pipelineColumns';
 import ClientKanbanBoard from '@/components/client/ClientKanbanBoard';
 import PipelineSnapshot from '@/components/pipeline/PipelineSnapshot';
 import { useLoading } from '@/contexts/LoadingContext';
+import { apiClient } from '@/lib/api';
+import { formatProgramDateRange } from '@/lib/dashboardTimeRange';
 import {
   consumePipelineColumnFilter,
   hydratePipelineStoreFromCache,
@@ -18,6 +20,7 @@ interface PipelineDashboardProps {
 
 export default function PipelineDashboard({ isActive = true }: PipelineDashboardProps) {
   const [filteredColumn, setFilteredColumn] = useState<string | null>(null);
+  const [programRangeLabel, setProgramRangeLabel] = useState<string | null>(null);
   const { setLoading: setGlobalLoading } = useLoading();
 
   useEffect(() => {
@@ -25,6 +28,28 @@ export default function PipelineDashboard({ isActive = true }: PipelineDashboard
     setGlobalLoading(false);
     hydratePipelineStoreFromCache();
   }, [isActive, setGlobalLoading]);
+
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const user = (await apiClient.getCurrentUser()) as {
+          program_start_date?: string | null;
+          program_end_date?: string | null;
+        };
+        if (cancelled) return;
+        setProgramRangeLabel(
+          formatProgramDateRange(user.program_start_date, user.program_end_date)
+        );
+      } catch {
+        if (!cancelled) setProgramRangeLabel(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -54,6 +79,8 @@ export default function PipelineDashboard({ isActive = true }: PipelineDashboard
             Pipeline
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+            {programRangeLabel ? `Program ${programRangeLabel}` : null}
+            {programRangeLabel ? ' · ' : null}
             Cold Lead → Nurturing → Qualified → Booked → Active → Offboarding → Dead
           </p>
         </div>

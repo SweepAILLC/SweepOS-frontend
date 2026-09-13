@@ -861,9 +861,9 @@ export default function TerminalFinanceCollapsibles({
                           <div className="font-medium truncate max-w-[120px]">
                             {p.client_name || p.client_email || 'Unknown'}
                           </div>
-                          {p.client_email && p.client_name && (
+                          {p.client_email && p.client_email !== p.client_name ? (
                             <div className="text-xs text-gray-500 truncate max-w-[120px]">{p.client_email}</div>
-                          )}
+                          ) : null}
                         </td>
                         <td className="py-2 pr-2 tabular-nums whitespace-nowrap">
                           {formatCurrency((p.amount_cents || 0) / 100)}

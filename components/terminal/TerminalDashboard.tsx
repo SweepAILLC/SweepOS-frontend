@@ -100,10 +100,9 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
     setGlobalLoading(false);
   }, [setGlobalLoading]);
 
-  /** Warm terminal summary + priorities; chart fetches its own monthly trends. */
+  /** Warm terminal summary; chart fetches its own monthly trends. */
   useEffect(() => {
     void apiClient.getTerminalSummary(false);
-    void apiClient.getPerformanceSnapshot(false).catch(() => {});
     void apiClient
       .getOutreachInbox({ include_performance: false, include_automations: true, limit: 50 })
       .catch(() => {});

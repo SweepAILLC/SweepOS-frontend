@@ -11,6 +11,7 @@ import {
 } from '@/lib/resources';
 import { ResourceModal } from '@/components/ui/ResourcesPanel';
 import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
+import ContentAngleMapModal from '@/components/portal/ContentAngleMapModal';
 
 const FUNNEL_SIMULATOR_TILE: Resource = {
   id: 'funnel-simulator',
@@ -20,16 +21,28 @@ const FUNNEL_SIMULATOR_TILE: Resource = {
   category: 'Template',
 };
 
-type PortalToolsSectionProps = {
-  isActive?: boolean;
+const CONTENT_ANGLE_MAP_TILE: Resource = {
+  id: 'content-angle-map',
+  title: 'Content Angle Map',
+  description: 'TOF / MOF / BOF formats and messaging angles.',
+  category: 'Template',
 };
 
-export default function PortalToolsSection({ isActive = true }: PortalToolsSectionProps) {
+type PortalToolsSectionProps = {
+  isActive?: boolean;
+  organizationName?: string | null;
+};
+
+export default function PortalToolsSection({
+  isActive = true,
+  organizationName,
+}: PortalToolsSectionProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [openResource, setOpenResource] = useState<Resource | null>(null);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
+  const [angleMapOpen, setAngleMapOpen] = useState(false);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -54,7 +67,11 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
   }, [isActive, loadDocs]);
 
   const tools = useMemo(() => {
-    const all = [FUNNEL_SIMULATOR_TILE, ...mergeDocsWithAiSkills(docs).filter(isToolResource)];
+    const all = [
+      FUNNEL_SIMULATOR_TILE,
+      CONTENT_ANGLE_MAP_TILE,
+      ...mergeDocsWithAiSkills(docs).filter(isToolResource),
+    ];
     const q = search.trim().toLowerCase();
     if (!q) return all;
     return all.filter(
@@ -116,6 +133,7 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
                 type="button"
                 onClick={() => {
                   if (resource.id === 'funnel-simulator') setSimulatorOpen(true);
+                  else if (resource.id === 'content-angle-map') setAngleMapOpen(true);
                   else setOpenResource(resource);
                 }}
                 className={`text-left rounded-lg border border-gray-200/60 dark:border-white/10 bg-gradient-to-br ${styles.bg} p-3.5 hover:border-sky-400/40 transition-colors`}
@@ -136,6 +154,12 @@ export default function PortalToolsSection({ isActive = true }: PortalToolsSecti
       )}
 
       {simulatorOpen ? <FunnelSimulatorModal onClose={() => setSimulatorOpen(false)} /> : null}
+      {angleMapOpen ? (
+        <ContentAngleMapModal
+          organizationName={organizationName}
+          onClose={() => setAngleMapOpen(false)}
+        />
+      ) : null}
 
       {openResource ? (
         <ResourceModal

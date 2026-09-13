@@ -7,6 +7,22 @@ import type { FinancesCombinedSummary } from '@/types/integration';
 
 export type DashboardTimeRange = number | 'mtd' | 'all';
 
+/** Org program window from YYYY-MM-DD (local, no UTC shift). */
+export function formatProgramDateRange(
+  start?: string | null,
+  end?: string | null,
+): string | null {
+  if (!start && !end) return null;
+  const fmt = (iso: string) => {
+    const [y, m, d] = iso.slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return iso.slice(0, 10);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { dateStyle: 'medium' });
+  };
+  if (start && end) return `${fmt(start)} – ${fmt(end)}`;
+  if (start) return `Starts ${fmt(start)}`;
+  return `Ends ${fmt(end as string)}`;
+}
+
 export function dashboardPeriodLabel(tr: DashboardTimeRange): string {
   if (tr === 'mtd') return 'Month to date';
   if (tr === 'all') return 'All recorded history';
@@ -369,6 +385,10 @@ export function terminalFailedPaymentsParams(tr: DashboardTimeRange): {
 
 export function isManualStripePaymentRow(p: { stripe_id?: string | null }): boolean {
   return !!p.stripe_id?.startsWith('manual:');
+}
+
+export function isWhopStripePaymentRow(p: { stripe_id?: string | null }): boolean {
+  return !!p.stripe_id?.startsWith('whop:');
 }
 
 /**

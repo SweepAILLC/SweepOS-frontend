@@ -1142,11 +1142,14 @@ export default function IntelligencePanel({
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Personal story</label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                    Your journey — background, what led you here, and what makes your approach different. Seeds the Content Angle Map personal-brand angles.
+                  </p>
                   <textarea
                     value={profile.personal_story || ''}
                     onChange={(e) => update('personal_story', e.target.value)}
                     rows={5}
-                    placeholder="e.g. I burned out as a corporate trainer, rebuilt my health after my second child, and now help other moms do the same without all-or-nothing plans."
+                    placeholder="Tell us about your journey — your background, what led you here, and what makes your approach different."
                     className="w-full px-3 py-2 glass-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
                 </div>

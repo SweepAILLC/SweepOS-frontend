@@ -33,37 +33,52 @@ const nextConfig = {
   
   // Headers for caching and security
   async headers() {
+    const securityHeaders = [
+      { key: 'X-DNS-Prefetch-Control', value: 'on' },
+      { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'Referrer-Policy', value: 'origin-when-cross-origin' },
+    ];
+    // Dev chunks are unhashed (/_next/static/chunks/webpack.js). A long-lived
+    // cache (browser or Cloudflare in front of local) keeps an old HMR runtime
+    // that requests a dead hot-update hash forever: overlay ↔ loading flicker.
+    if (process.env.NODE_ENV !== 'production') {
+      return [
+        {
+          source: '/:path*',
+          headers: [
+            ...securityHeaders,
+            {
+              key: 'Cache-Control',
+              value: 'no-store, no-cache, must-revalidate, max-age=0',
+            },
+            { key: 'Pragma', value: 'no-cache' },
+          ],
+        },
+      ];
+    }
     return [
       {
         source: '/:path*',
-        headers: [
-          {
-            key: 'X-DNS-Prefetch-Control',
-            value: 'on'
-          },
-          {
-            key: 'X-Frame-Options',
-            value: 'SAMEORIGIN'
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff'
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'origin-when-cross-origin'
-          },
-        ],
+        headers: securityHeaders,
       },
-      {
-        source: '/_next/static/:path*',
-        headers: [
-          {
-            key: 'Cache-Control',
-            value: 'public, max-age=31536000, immutable',
-          },
-        ],
-      },
+      // Never set immutable cache on /_next/static in `next dev`.
+      // Webpack HMR files reuse hashes; a year-long cache (or a 404 cached
+      // as immutable) makes Fast Refresh full-reload in a tight loop:
+      // overlay (stale useRef) ↔ loading screen.
+      ...(process.env.NODE_ENV === 'production'
+        ? [
+            {
+              source: '/_next/static/:path*',
+              headers: [
+                {
+                  key: 'Cache-Control',
+                  value: 'public, max-age=31536000, immutable',
+                },
+              ],
+            },
+          ]
+        : []),
       {
         source: '/SWEEP_favicon.png',
         headers: [

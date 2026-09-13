@@ -1,6 +1,19 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
 import type { Client } from '@/types/client';
+import type {
+  FunnelSimulatorBaselines,
+  FunnelSimulatorScenario,
+  FunnelSimulatorScenarioWrite,
+} from '@/types/funnelSimulator';
+import type {
+  CloseSurveyClientOption,
+  CloseSurveyCreateClientPayload,
+  CloseSurveyEntryLinkResponse,
+  CloseSurveyMetaResponse,
+  CloseSurveySubmitPayload,
+  CloseSurveySubmitResponse,
+} from '@/types/closeSurvey';
 import {
   cache,
   CACHE_KEYS,
@@ -124,17 +137,6 @@ export interface FathomWebhookSetupResponse {
   error?: string;
 }
 
-export interface StripeConnectionStatus {
-  connected: boolean;
-  message?: string | null;
-  account_id?: string | null;
-  webhook_active?: boolean;
-  webhook_status?: 'active' | 'not_registered' | 'not_configured' | string | null;
-  webhook_endpoint_id?: string | null;
-  webhook_url?: string | null;
-  last_webhook_processed_at?: string | null;
-}
-
 /** Response from POST /integrations/fathom/sync */
 export interface FathomSyncResponse {
   skipped?: boolean;
@@ -151,6 +153,172 @@ export interface FathomSyncResponse {
   skipped_no_client_match?: number;
   call_insights_queued?: number;
   pending_insight_record_ids?: string[];
+}
+
+// --- Instagram Performance Intel (Composio-backed) ---
+
+export interface InstagramStatus {
+  connected: boolean;
+  configured?: boolean;
+  composio_configured?: boolean;
+  auth_config_id?: string | null;
+  username?: string | null;
+  ig_user_id?: string | null;
+  followers_count?: number | null;
+  capabilities?: { insights?: boolean; reason?: string | null; [key: string]: unknown };
+  last_sync_at?: string | null;
+  message?: string | null;
+}
+
+export interface InstagramPostCard {
+  ig_media_id: string;
+  permalink?: string | null;
+  thumbnail_url?: string | null;
+  format_bucket?: string | null;
+  hook_text?: string | null;
+  caption?: string | null;
+  engagement_rate_pct?: number | null;
+  reach?: number | null;
+  saved?: number | null;
+  views?: number | null;
+}
+
+export interface InstagramTrendPoint {
+  week_start: string;
+  reach?: number | null;
+  saved?: number | null;
+  engagement_rate_pct?: number | null;
+}
+
+export interface InstagramPerformanceSummary {
+  reach?: number | null;
+  prev_reach?: number | null;
+  reach_delta_pct?: number | null;
+  views?: number | null;
+  prev_views?: number | null;
+  views_delta_pct?: number | null;
+  saved?: number | null;
+  prev_saved?: number | null;
+  saved_delta_pct?: number | null;
+  engagement_rate_pct?: number | null;
+  prev_engagement_rate_pct?: number | null;
+  engagement_rate_delta_pct?: number | null;
+  posts?: number | null;
+  prev_period_posts?: number | null;
+  follower_growth?: number | null;
+  comparison_label?: string | null;
+}
+
+export interface InstagramPerformanceFlag {
+  id: string;
+  title: string;
+  detail: string;
+}
+
+export interface InstagramPerformance {
+  connected: boolean;
+  org_id?: string;
+  days?: number;
+  summary: InstagramPerformanceSummary | null;
+  trend: InstagramTrendPoint[];
+  top_posts: InstagramPostCard[];
+  bottom_posts: InstagramPostCard[];
+  what_works?: unknown[];
+  verdicts?: unknown[];
+  flags: InstagramPerformanceFlag[];
+  capabilities?: { insights?: boolean; reason?: string | null; [key: string]: unknown };
+  unsettled_post_count: number;
+  last_synced_at?: string | null;
+  usage?: string | null;
+  username?: string | null;
+}
+
+export interface StripeConnectionStatus {
+  connected: boolean;
+  message?: string | null;
+  account_id?: string | null;
+  webhook_active: boolean;
+  webhook_status?: string | null;
+  webhook_endpoint_id?: string | null;
+  webhook_url?: string | null;
+  last_webhook_processed_at?: string | null;
+}
+
+// --- Portal shared pads (consulting-tier multi-tab live notepad) ---
+
+export const MAX_PORTAL_SHARED_PADS = 10;
+
+export interface PortalSharedPadSummary {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  revision: number;
+  updated_by_name?: string | null;
+  updated_at: string;
+}
+
+export interface PortalSharedPad {
+  id: string;
+  org_id: string;
+  title: string;
+  sort_order: number;
+  content: string;
+  revision: number;
+  updated_by?: string | null;
+  updated_by_name?: string | null;
+  created_at: string;
+  updated_at: string;
+  unchanged: boolean;
+}
+
+// --- Resource docs (SOP / AI-skill catalog) ---
+
+export interface ResourceDocSummary {
+  resource_id: string;
+  category: string;
+  sop_category: string | null;
+  title: string;
+  description: string;
+  powered_by: string | null;
+  video_url: string | null;
+  video_urls?: string[] | null;
+  is_custom: boolean;
+  is_builtin: boolean;
+  updated_at: string | null;
+  sort_order?: number | null;
+}
+
+export interface ResourceDoc extends ResourceDocSummary {
+  content: string;
+}
+
+// --- Content Angle Map (consulting portal) ---
+
+export type ContentAngleCard = 'icp' | 'personal_brand';
+export type ContentAngleStage = 'tof' | 'mof' | 'bof';
+
+export interface ContentAngleItem {
+  id: string;
+  text: string;
+  manually_edited: boolean;
+}
+
+export interface ContentAngleMap {
+  org_id: string;
+  organization_name: string;
+  icp_angles: ContentAngleItem[];
+  personal_brand_angles: ContentAngleItem[];
+  format_pills_tof: string[];
+  format_pills_mof: string[];
+  format_pills_bof: string[];
+  icp_placeholders: string[];
+  brand_placeholders: string[];
+  last_generated_at?: string | null;
+  last_generated_icp_at?: string | null;
+  last_generated_brand_at?: string | null;
+  can_generate_icp: boolean;
+  can_generate_brand: boolean;
 }
 
 /** GET /auth/me/sales-content-themes — org-wide recurring objection/circumstance themes. */
@@ -285,123 +453,6 @@ export interface ContentStudioBootstrap {
   batch_id: string | null;
 }
 
-/** Instagram Performance Intel (Composio-backed) */
-export interface InstagramCapabilities {
-  insights: boolean;
-  reason?: string | null;
-  followers_count?: number | null;
-}
-
-export interface InstagramStatus {
-  connected: boolean;
-  configured: boolean;
-  composio_configured?: boolean;
-  auth_config_id?: string | null;
-  username?: string | null;
-  ig_user_id?: string | null;
-  followers_count?: number | null;
-  capabilities: InstagramCapabilities;
-  last_sync_at?: string | null;
-  message?: string | null;
-}
-
-export interface InstagramWhatWorks {
-  dimension: string;
-  dimension_label?: string;
-  value: string;
-  value_label?: string;
-  n: number;
-  median_engagement_rate: number;
-  org_median_engagement_rate: number;
-  lift_vs_median_pct: number;
-  verdict: 'double_down' | 'keep' | 'stop';
-  confidence?: 'high' | 'low';
-  summary?: string;
-  example_hooks?: string[];
-}
-
-export interface InstagramPostCard {
-  ig_media_id: string;
-  permalink?: string | null;
-  thumbnail_url?: string | null;
-  caption?: string | null;
-  hook_text?: string | null;
-  hook_pattern?: string | null;
-  format_bucket?: string | null;
-  funnel_stage?: string | null;
-  theme_keys?: string[];
-  posted_at?: string | null;
-  views?: number | null;
-  reach?: number | null;
-  saved?: number | null;
-  likes?: number | null;
-  comments?: number | null;
-  shares?: number | null;
-  total_interactions?: number | null;
-  engagement_rate_pct?: number | null;
-  save_rate_pct?: number | null;
-  insights_status?: string | null;
-  metrics_settled?: boolean;
-  linked_concept_id?: string | null;
-  avg_watch_time_sec?: number | null;
-}
-
-export interface InstagramTrendPoint {
-  week_start: string;
-  reach: number;
-  saved: number;
-  views: number;
-  posting_volume: number;
-  engagement_rate_pct?: number | null;
-}
-
-export interface InstagramPerformance {
-  connected: boolean;
-  org_id: string;
-  days: number;
-  range_start?: string;
-  range_end?: string;
-  summary: {
-    posts: number;
-    reach: number;
-    reach_delta_pct?: number | null;
-    views: number;
-    views_delta_pct?: number | null;
-    saved: number;
-    saved_delta_pct?: number | null;
-    engagement_rate_pct?: number | null;
-    engagement_rate_delta_pct?: number | null;
-    followers_count?: number | null;
-    follower_growth?: number | null;
-    prev_period_posts?: number;
-    prev_reach?: number | null;
-    prev_views?: number | null;
-    prev_saved?: number | null;
-    prev_engagement_rate_pct?: number | null;
-    comparison_label?: string | null;
-    prev_range_start?: string | null;
-    prev_range_end?: string | null;
-  } | null;
-  trend: InstagramTrendPoint[];
-  top_posts: InstagramPostCard[];
-  bottom_posts: InstagramPostCard[];
-  what_works: InstagramWhatWorks[];
-  verdicts: string[];
-  flags: Array<{
-    id: string;
-    severity: string;
-    title: string;
-    detail: string;
-    metric?: string;
-    drop_pct?: number;
-  }>;
-  capabilities: InstagramCapabilities;
-  unsettled_post_count: number;
-  last_synced_at?: string | null;
-  username?: string | null;
-  usage?: string;
-}
-
 /** GET /call-library — Fathom call coaching reports */
 export interface CallLibraryAttendee {
   email?: string;
@@ -416,8 +467,6 @@ export type CallLibraryDealBilling =
   | 'recurring_annual'
   | null;
 
-export type CallLibraryAnalysisKind = 'sales' | 'glance';
-
 export interface CallLibraryItem {
   id: string;
   fathom_recording_id: number | null;
@@ -426,8 +475,8 @@ export interface CallLibraryItem {
   status: string;
   failure_reason?: string | null;
   client_name: string | null;
-  /** sales = full audit; glance = AI paragraph + Fathom summary only. */
-  analysis_kind?: CallLibraryAnalysisKind | string | null;
+  /** "sales" = full sales-call breakdown ran; "glance" = lightweight non-sales summary. */
+  analysis_kind?: 'sales' | 'glance' | null;
   call_score: number | null;
   /** True only when the LLM is confident the sale was closed on this call. */
   deal_closed?: boolean;
@@ -547,15 +596,27 @@ export function isSweepSessionAuthFailure(error: AxiosError): boolean {
 }
 
 // ----- Automation engine types ------------------------------------------------
-export type AutomationPlaybook = string;
+export type AutomationPlaybook =
+  | 'pre_sale_post_booking'
+  | 'pre_sale_pre_meeting'
+  | 'first_payment_onboarding'
+  | 'first_payment_referral'
+  | 'win_combined_ask'
+  | 'offboarding_recap_ask';
 
+/** UI flow tabs grouping playbook steps (post_booking | onboarding | wins_ascension). */
 export type AutomationFlow = 'post_booking' | 'onboarding' | 'wins_ascension';
-export type AutomationTriggerKind = 'booking' | 'payment' | 'win' | 'offboarding';
+
+/** action = email/playbook send; wait = delay-only node, does not enqueue a send. */
+export type AutomationNodeKind = 'action' | 'wait';
+
 export type AutomationScheduleMode =
   | 'after_trigger'
   | 'after_booking'
   | 'after_previous'
   | 'before_meeting';
+
+export type AutomationTriggerKind = 'booking' | 'payment' | 'win' | 'offboarding';
 
 export type AutomationContentMode = 'ai_generated' | 'html_template';
 
@@ -589,10 +650,7 @@ export interface AutomationTriggerConfig {
   provider?: 'calcom' | 'calendly' | 'any' | null;
   event_type_ids?: string[] | null;
   match_all_events?: boolean | null;
-  sales_calls_only?: boolean | null;
 }
-
-export type AutomationNodeKind = 'action' | 'wait';
 
 export interface AutomationRule {
   id: string;
@@ -611,12 +669,12 @@ export interface AutomationRule {
   combine_top_n: number;
   require_approval: boolean;
   approval_ttl_hours?: number | null;
+  // Flow metadata — groups/orders steps on the Automations canvas.
   flow?: AutomationFlow | null;
   trigger_kind?: AutomationTriggerKind | null;
   schedule_mode?: AutomationScheduleMode | null;
-  step_index?: number | null;
-  /** Canvas node type: action sends email; wait only advances the chain clock. */
-  node_kind?: AutomationNodeKind | null;
+  step_index: number;
+  node_kind: AutomationNodeKind;
   is_protected?: boolean;
   last_modified_by?: string | null;
   created_at: string;
@@ -643,19 +701,10 @@ export interface AutomationRuleUpdate {
   node_kind?: AutomationNodeKind | null;
 }
 
-export interface AutomationFlowStepCreate {
-  trigger_kind: AutomationTriggerKind;
-  node_kind?: AutomationNodeKind;
-  schedule_mode?: AutomationScheduleMode;
-  delay_seconds?: number;
-  subject_template?: string | null;
-  insert_before_playbook?: string | null;
-}
-
 export interface AutomationFlowTestStepResult {
   playbook: string;
-  node_kind: string;
-  trigger_kind?: string | null;
+  node_kind: AutomationNodeKind;
+  trigger_kind?: AutomationTriggerKind | null;
   step_index?: number | null;
   enabled: boolean;
   status: string;
@@ -767,53 +816,6 @@ export interface OutreachInboxResponse {
   items: OutreachInboxItem[];
   awaiting_approval_count: number;
   performance_task_count: number;
-}
-
-/** Org portal to-do item (GET/POST/PATCH /portal/todos). */
-export interface PortalTodo {
-  id: string;
-  org_id: string;
-  title: string;
-  description: string | null;
-  completed: boolean;
-  due_date: string | null;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/** Shared live notepad tab (GET/PUT /portal/shared-pads/{id}). */
-export interface PortalSharedPad {
-  id: string;
-  org_id: string;
-  title: string;
-  sort_order: number;
-  content: string;
-  revision: number;
-  updated_by: string | null;
-  updated_by_name: string | null;
-  created_at: string;
-  updated_at: string;
-  unchanged?: boolean;
-}
-
-export interface PortalSharedPadSummary {
-  id: string;
-  org_id: string;
-  title: string;
-  sort_order: number;
-  revision: number;
-  updated_by_name: string | null;
-  updated_at: string;
-}
-
-export const MAX_PORTAL_SHARED_PADS = 10;
-
-export interface PortalSharedPadDefault {
-  title: string;
-  content: string;
-  updated_by_name: string | null;
-  updated_at: string | null;
 }
 
 class ApiClient {
@@ -931,12 +933,9 @@ class ApiClient {
     });
   }
 
-  async pingActivityHeartbeat(): Promise<void> {
-    try {
-      await this.client.post('/users/me/activity-heartbeat');
-    } catch {
-      // Non-blocking — don't interrupt the session if tracking fails.
-    }
+  async completeOnboardingForm(formId: 'cal_onboarding' | 'product_tour') {
+    const response = await this.client.post('/auth/me/onboarding-forms', { form_id: formId });
+    return response.data;
   }
 
   /** Refresh session (sliding window). Call when same tab is active to avoid re-login. */
@@ -963,9 +962,19 @@ class ApiClient {
     return response.data;
   }
 
-  async acceptInvite(body: { token: string; password?: string }) {
+  async acceptInvite(body: { token: string; password?: string; email?: string; org_name?: string }) {
     const response = await this.client.post('/auth/invite/accept', body);
     return response.data;
+  }
+
+  async startGoogleConnect() {
+    const response = await this.client.get('/auth/google/start', { params: { mode: 'connect' } });
+    return response.data as { authorization_url: string; mode: string };
+  }
+
+  async disconnectGoogle() {
+    const response = await this.client.post('/auth/google/disconnect');
+    return response.data as { ok: boolean; google_connected: boolean };
   }
 
   // User Settings
@@ -984,24 +993,6 @@ class ApiClient {
     ai_profile?: Record<string, unknown>;
   }) {
     const response = await this.client.put('/auth/me/settings', data);
-    return response.data;
-  }
-
-  /** Begin Google OAuth connect (authenticated). Returns authorization_url to navigate to. */
-  async startGoogleConnect(): Promise<{ authorization_url: string; mode: string }> {
-    const response = await this.client.get('/auth/google/start', {
-      params: { mode: 'connect' },
-    });
-    return response.data;
-  }
-
-  async disconnectGoogle(): Promise<{ ok: boolean; google_connected: boolean }> {
-    const response = await this.client.post('/auth/google/disconnect');
-    return response.data;
-  }
-
-  async getGoogleOAuthStatus(): Promise<{ configured: boolean }> {
-    const response = await this.client.get('/auth/google/status');
     return response.data;
   }
 
@@ -1063,7 +1054,6 @@ class ApiClient {
       top_contributors_30d: [],
       top_contributors_90d: [],
       cash_by_source: { stripe: zeroSource, whop: zeroSource, manual: zeroSource },
-      active_clients_count: 0,
     };
   }
 
@@ -1536,6 +1526,9 @@ class ApiClient {
     }, {
       timeout: 300000, // 5 minutes for initial sync
     });
+    cache.delete(CACHE_KEYS.STRIPE_STATUS);
+    cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
+    cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     return response.data;
   }
 
@@ -1570,6 +1563,193 @@ class ApiClient {
     return response.data;
   }
 
+  // Org notification settings (funnel lead digests, etc.)
+  async getOrgNotificationSettings(orgId: string) {
+    const response = await this.client.get(`/organizations/${orgId}/notification-settings`);
+    return response.data as {
+      funnel_leads: {
+        enabled: boolean;
+        window_minutes: number;
+        recipient_mode: 'admins' | 'custom';
+        recipients: string[];
+        include_returning_leads: boolean;
+      };
+    };
+  }
+
+  async updateOrgNotificationSettings(
+    orgId: string,
+    body: {
+      funnel_leads?: Partial<{
+        enabled: boolean;
+        window_minutes: number;
+        recipient_mode: 'admins' | 'custom';
+        recipients: string[];
+        include_returning_leads: boolean;
+      }>;
+    }
+  ) {
+    const response = await this.client.patch(`/organizations/${orgId}/notification-settings`, body);
+    return response.data as {
+      funnel_leads: {
+        enabled: boolean;
+        window_minutes: number;
+        recipient_mode: 'admins' | 'custom';
+        recipients: string[];
+        include_returning_leads: boolean;
+      };
+    };
+  }
+
+  async sendTestLeadDigest(orgId: string) {
+    const response = await this.client.post(`/organizations/${orgId}/notification-settings/test`);
+    return response.data as { success: boolean; message: string; recipients: string[]; failed: string[] };
+  }
+
+  async getOrgTimezone(orgId: string) {
+    const response = await this.client.get(`/organizations/${orgId}/timezone`);
+    return response.data as { timezone: string };
+  }
+
+  async setOrgTimezone(orgId: string, timezone: string) {
+    const response = await this.client.patch(`/organizations/${orgId}/timezone`, { timezone });
+    return response.data as { timezone: string };
+  }
+
+  // Instagram Performance Intel (Composio-backed)
+  async getInstagramStatus() {
+    const response = await this.client.get('/instagram/status');
+    return response.data as InstagramStatus;
+  }
+
+  async getInstagramPerformance(days = 90) {
+    const response = await this.client.get('/instagram/performance', { params: { days } });
+    return response.data as InstagramPerformance;
+  }
+
+  async postInstagramConnect() {
+    const response = await this.client.post('/instagram/connect');
+    return response.data as { redirect_url: string; connection_request_id?: string | null };
+  }
+
+  async postInstagramSync(full = false) {
+    const response = await this.client.post('/instagram/sync', null, { params: { full } });
+    return response.data as {
+      ok: boolean;
+      queued: boolean;
+      result?: Record<string, unknown>;
+      message?: string;
+      cooldown_seconds?: number;
+      last_sync_at?: string | null;
+    };
+  }
+
+  async deleteInstagramDisconnect(purge = true, clearComposio = false) {
+    const response = await this.client.delete('/instagram/disconnect', {
+      params: { purge, clear_composio: clearComposio },
+    });
+    return response.data;
+  }
+
+  async putInstagramComposioCredentials(body: { api_key: string; auth_config_id: string }) {
+    const response = await this.client.put('/instagram/composio-credentials', body);
+    return response.data as { ok: boolean; composio_configured: boolean; auth_config_id: string };
+  }
+
+  async deleteInstagramComposioCredentials() {
+    const response = await this.client.delete('/instagram/composio-credentials');
+    return response.data as { ok: boolean; composio_configured: boolean; deleted: boolean };
+  }
+
+  async getCloseSurveyEntryLink(regenerate = false) {
+    const response = await this.client.get('/close-survey/entry-link', { params: { regenerate } });
+    return response.data as CloseSurveyEntryLinkResponse;
+  }
+
+  // Public post-sales close survey (no auth — tokenized link)
+  async getCloseSurveyMeta(token: string) {
+    const response = await this.client.get(`/close-survey/public/${token}/meta`);
+    return response.data as CloseSurveyMetaResponse;
+  }
+
+  async createCloseSurveyClient(token: string, body: CloseSurveyCreateClientPayload) {
+    const response = await this.client.post(`/close-survey/public/${token}/clients`, body);
+    return response.data as CloseSurveyClientOption;
+  }
+
+  async submitCloseSurvey(token: string, body: CloseSurveySubmitPayload) {
+    const response = await this.client.post(`/close-survey/public/${token}/submit`, body);
+    return response.data as CloseSurveySubmitResponse;
+  }
+
+  // Portal shared pads (consulting-tier multi-tab live notepad) — org self-service,
+  // and the "AdminOrg" twins used when a system owner views a specific org's portal.
+  async listPortalSharedPads() {
+    const response = await this.client.get('/portal/shared-pads');
+    return response.data as PortalSharedPadSummary[];
+  }
+
+  async listAdminOrgPortalSharedPads(orgId: string) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pads`);
+    return response.data as PortalSharedPadSummary[];
+  }
+
+  async getPortalSharedPadById(padId: string, sinceRevision?: number) {
+    const response = await this.client.get(`/portal/shared-pads/${padId}`, {
+      params: sinceRevision != null ? { since_revision: sinceRevision } : undefined,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async getAdminOrgPortalSharedPadById(orgId: string, padId: string, sinceRevision?: number) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, {
+      params: sinceRevision != null ? { since_revision: sinceRevision } : undefined,
+    });
+    return response.data as PortalSharedPad;
+  }
+
+  async putPortalSharedPadById(padId: string, body: { content: string; base_revision?: number | null }) {
+    const response = await this.client.put(`/portal/shared-pads/${padId}`, body);
+    return response.data as PortalSharedPad;
+  }
+
+  async putAdminOrgPortalSharedPadById(
+    orgId: string,
+    padId: string,
+    body: { content: string; base_revision?: number | null }
+  ) {
+    const response = await this.client.put(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, body);
+    return response.data as PortalSharedPad;
+  }
+
+  async createPortalSharedPad(title?: string) {
+    const response = await this.client.post('/portal/shared-pads', { title });
+    return response.data as PortalSharedPad;
+  }
+
+  async createAdminOrgPortalSharedPad(orgId: string, title?: string) {
+    const response = await this.client.post(`/admin/organizations/${orgId}/portal-shared-pads`, { title });
+    return response.data as PortalSharedPad;
+  }
+
+  async renamePortalSharedPad(padId: string, title: string) {
+    const response = await this.client.patch(`/portal/shared-pads/${padId}`, { title });
+    return response.data as PortalSharedPad;
+  }
+
+  async renameAdminOrgPortalSharedPad(orgId: string, padId: string, title: string) {
+    const response = await this.client.patch(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, { title });
+    return response.data as PortalSharedPad;
+  }
+
+  async deletePortalSharedPad(padId: string) {
+    await this.client.delete(`/portal/shared-pads/${padId}`);
+  }
+
+  async deleteAdminOrgPortalSharedPad(orgId: string, padId: string) {
+    await this.client.delete(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`);
+  }
+
   async startBrevoOAuth() {
     const response = await this.client.post('/oauth/brevo/start');
     return response.data;
@@ -1585,6 +1765,51 @@ class ApiClient {
       api_key: apiKey
     });
     cache.delete(CACHE_KEYS.BREVO_STATUS);
+    return response.data;
+  }
+
+  // Discord
+  async startDiscordOAuth() {
+    const response = await this.client.post('/oauth/discord/start');
+    return response.data as { redirect_url: string };
+  }
+
+  async getDiscordStatus() {
+    const response = await this.client.get('/oauth/discord/status');
+    return response.data as import('@/types/integration').DiscordStatus;
+  }
+
+  async disconnectDiscord() {
+    await this.client.delete('/oauth/discord/disconnect');
+  }
+
+  async listDiscordChannels() {
+    const response = await this.client.get('/oauth/discord/channels');
+    return response.data as { guild_id: string; channels: import('@/types/integration').DiscordChannel[] };
+  }
+
+  async getDiscordChannelMappings() {
+    const response = await this.client.get('/oauth/discord/channel-mappings');
+    return response.data as {
+      event_types: import('@/types/integration').DiscordEventType[];
+      mappings: import('@/types/integration').DiscordChannelMapping[];
+    };
+  }
+
+  async setDiscordChannelMapping(eventType: string, channelId: string, channelName?: string) {
+    const response = await this.client.put(`/oauth/discord/channel-mappings/${eventType}`, {
+      channel_id: channelId,
+      channel_name: channelName,
+    });
+    return response.data;
+  }
+
+  async deleteDiscordChannelMapping(eventType: string) {
+    await this.client.delete(`/oauth/discord/channel-mappings/${eventType}`);
+  }
+
+  async sendDiscordTest(eventType: string) {
+    const response = await this.client.post(`/oauth/discord/test/${eventType}`);
     return response.data;
   }
 
@@ -1721,17 +1946,10 @@ class ApiClient {
     }
 
     const req = this.client
-      .get('/clients/terminal/monthly-trends', {
-        timeout: 60000,
-        // Bypass server in-process cache so sales-call toggles update the graph immediately.
-        params: forceRefresh ? { force_refresh: true } : undefined,
-      })
+      .get('/clients/terminal/monthly-trends', { timeout: 60000 })
       .then((response) => {
         const data = response.data as TerminalMonthlyTrendsPayload;
-        // Avoid writing a superseded response over a newer force-refresh.
-        if (!forceRefresh || terminalMonthlyTrendsInflight === req) {
-          cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
-        }
+        cache.set(CACHE_KEYS.TERMINAL_MONTHLY_TRENDS, data, TERMINAL_CACHE_TTL_MS);
         return data;
       })
       .finally(() => {
@@ -1881,22 +2099,9 @@ class ApiClient {
     return response.data;
   }
 
-  // Integrations (Stripe endpoints cached for fast dashboard tab switching)
-  async getStripeStatus(bypassCache?: boolean): Promise<StripeConnectionStatus> {
-    if (!bypassCache) {
-      const cached = cache.get<StripeConnectionStatus>(CACHE_KEYS.STRIPE_STATUS);
-      if (cached != null) return cached;
-    }
-    const response = await this.client.get('/integrations/stripe/status');
-    const data = response.data as StripeConnectionStatus;
-    if (!bypassCache) cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
-    return data;
-  }
-
-  /** Create or repair the per-org Stripe webhook for instant payment updates. */
-  async setupStripeWebhook(options?: { force?: boolean }) {
+  async setupStripeWebhook(opts?: { force?: boolean }) {
     const response = await this.client.post('/integrations/stripe/webhook/setup', null, {
-      params: { force: options?.force !== false },
+      params: { force: opts?.force ?? true },
     });
     cache.delete(CACHE_KEYS.STRIPE_STATUS);
     return response.data as {
@@ -1906,7 +2111,20 @@ class ApiClient {
       webhook_url?: string;
       skipped?: boolean;
       message?: string;
+      error?: string;
     };
+  }
+
+  // Integrations (Stripe endpoints cached for fast dashboard tab switching)
+  async getStripeStatus(bypassCache?: boolean) {
+    if (!bypassCache) {
+      const cached = cache.get<unknown>(CACHE_KEYS.STRIPE_STATUS);
+      if (cached != null) return cached;
+    }
+    const response = await this.client.get('/integrations/stripe/status');
+    const data = response.data;
+    if (!bypassCache) cache.set(CACHE_KEYS.STRIPE_STATUS, data, TERMINAL_CACHE_TTL_MS);
+    return data;
   }
 
   /** Lightweight: when Stripe data was last updated by webhook. Terminal uses this to refetch only when webhook fired. */
@@ -1965,6 +2183,13 @@ class ApiClient {
     cache.delete(CACHE_KEYS.WHOP_STATUS);
     cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
     cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
+    cache.deleteByPrefix('stripe_payments_');
+    return response.data;
+  }
+
+  async postWhopRepairWebhook() {
+    const response = await this.client.post('/integrations/whop/repair-webhook');
+    cache.delete(CACHE_KEYS.WHOP_STATUS);
     return response.data;
   }
 
@@ -1983,6 +2208,7 @@ class ApiClient {
     cache.deleteByPrefix(CACHE_KEYS.FINANCES_SUMMARY);
     cache.delete(CACHE_KEYS.TERMINAL_SUMMARY);
     cache.deleteByPrefix('whop_payments');
+    cache.deleteByPrefix('stripe_payments_');
     return response.data;
   }
 
@@ -2243,7 +2469,6 @@ class ApiClient {
     const response = await this.client.delete(`/integrations/stripe/payments/${paymentId}`, {
       params: { use_treasury: useTreasury }
     });
-    invalidateCachesAfterManualPayment();
     return response.data;
   }
 
@@ -2337,45 +2562,6 @@ class ApiClient {
 
   async updateMyOrganization(data: { name?: string }) {
     const response = await this.client.patch('/users/me/organization', data);
-    return response.data;
-  }
-
-  async getOrgNotificationSettings(orgId: string): Promise<{
-    funnel_leads: {
-      enabled: boolean;
-      window_minutes: number;
-      recipient_mode: 'admins' | 'custom';
-      recipients: string[];
-      include_returning_leads: boolean;
-    };
-  }> {
-    const response = await this.client.get(`/organizations/${orgId}/notification-settings`);
-    return response.data;
-  }
-
-  async updateOrgNotificationSettings(
-    orgId: string,
-    data: {
-      funnel_leads?: {
-        enabled?: boolean;
-        window_minutes?: number;
-        recipient_mode?: 'admins' | 'custom';
-        recipients?: string[];
-        include_returning_leads?: boolean;
-      };
-    }
-  ) {
-    const response = await this.client.patch(`/organizations/${orgId}/notification-settings`, data);
-    return response.data;
-  }
-
-  async sendTestLeadDigest(orgId: string): Promise<{
-    success: boolean;
-    message: string;
-    recipients: string[];
-    failed?: string[];
-  }> {
-    const response = await this.client.post(`/organizations/${orgId}/notification-settings/test`);
     return response.data;
   }
 
@@ -2476,15 +2662,7 @@ class ApiClient {
     return response.data;
   }
 
-  async updateOrganization(
-    orgId: string,
-    data: {
-      name?: string;
-      max_user_seats?: number | null;
-      consulting_tier?: 'pro_consulting' | 'core_consulting' | null | '';
-      booking_url?: string | null;
-    }
-  ) {
+  async updateOrganization(orgId: string, data: { name?: string; max_user_seats?: number | null }) {
     const response = await this.client.patch(`/admin/organizations/${orgId}`, data);
     return response.data;
   }
@@ -2494,11 +2672,14 @@ class ApiClient {
     return response.data;
   }
 
-  // Admin: Invite organization (email-based onboarding)
+  // Admin: mint an org signup link (recipient names the org + creates their account on accept)
   async inviteOrganization(data: {
-    name: string;
-    admin_email: string;
-    consulting_tier?: 'pro_consulting' | 'core_consulting' | null;
+    name?: string;
+    consulting_tier?: string;
+    multi_use?: boolean;
+    never_expires?: boolean;
+    expires_at?: string;
+    expires_in_days?: number;
   }) {
     const response = await this.client.post('/admin/organizations/invite', data);
     cache.delete(CACHE_KEYS.ADMIN_INVITATIONS);
@@ -2515,6 +2696,20 @@ class ApiClient {
     return data;
   }
 
+  async updateAdminInvitationExpiry(
+    invitationId: string,
+    body: { never_expires?: boolean; expires_at?: string; expires_in_days?: number }
+  ) {
+    const response = await this.client.patch(`/admin/organizations/invitations/${invitationId}`, body);
+    cache.delete(CACHE_KEYS.ADMIN_INVITATIONS);
+    return response.data;
+  }
+
+  async cancelAdminInvitation(invitationId: string) {
+    await this.client.delete(`/admin/organizations/invitations/${invitationId}`);
+    cache.delete(CACHE_KEYS.ADMIN_INVITATIONS);
+  }
+
   async getGlobalHealth(options?: { refresh?: boolean }) {
     if (!options?.refresh) {
       const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_HEALTH);
@@ -2528,21 +2723,6 @@ class ApiClient {
     return data;
   }
 
-  async getLlmUsageTimeseries(params?: {
-    days?: number;
-    scope?: 'mtd' | 'all';
-    org_id?: string;
-  }) {
-    const response = await this.client.get('/admin/llm-usage/timeseries', {
-      params: {
-        ...(params?.days != null ? { days: params.days } : {}),
-        ...(params?.scope ? { scope: params.scope } : {}),
-        ...(params?.org_id ? { org_id: params.org_id } : {}),
-      },
-    });
-    return response.data;
-  }
-
   async getGlobalSettings() {
     const cached = cache.get<unknown>(CACHE_KEYS.ADMIN_SETTINGS);
     if (cached != null) return cached;
@@ -2552,35 +2732,123 @@ class ApiClient {
     return data;
   }
 
-  async listOwnerNotices() {
-    const response = await this.client.get('/admin/notices');
-    return Array.isArray(response.data) ? response.data : [];
+  // Content Angle Map — omit orgId for the current user's own portal (self-service
+  // /portal/* routes); pass orgId only from the system-owner org dashboard, which
+  // uses the parallel require_admin-gated /admin/organizations/{orgId}/* routes.
+  async getContentAngleMap() {
+    const response = await this.client.get('/portal/content-angle-map');
+    return response.data as ContentAngleMap;
   }
 
-  async sendOwnerNotice(data: { title: string; body: string; org_ids?: string[] }) {
-    const response = await this.client.post('/admin/notices', data);
+  async getAdminContentAngleMap(orgId: string) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/content-angle-map`);
+    return response.data as ContentAngleMap;
+  }
+
+  async patchContentAngleMapAngle(body: { card: ContentAngleCard; id: string; text: string }) {
+    const response = await this.client.patch('/portal/content-angle-map/angles', body);
+    return response.data as ContentAngleMap;
+  }
+
+  async patchAdminContentAngleMapAngle(
+    orgId: string,
+    body: { card: ContentAngleCard; id: string; text: string }
+  ) {
+    const response = await this.client.patch(`/admin/organizations/${orgId}/content-angle-map/angles`, body);
+    return response.data as ContentAngleMap;
+  }
+
+  async deleteContentAngleMapAngle(body: { card: ContentAngleCard; id: string }) {
+    const response = await this.client.delete('/portal/content-angle-map/angles', { data: body });
+    return response.data as ContentAngleMap;
+  }
+
+  async deleteAdminContentAngleMapAngle(orgId: string, body: { card: ContentAngleCard; id: string }) {
+    const response = await this.client.delete(`/admin/organizations/${orgId}/content-angle-map/angles`, {
+      data: body,
+    });
+    return response.data as ContentAngleMap;
+  }
+
+  async putContentAngleMapPills(body: { stage: ContentAngleStage; pills: string[] }) {
+    const response = await this.client.put('/portal/content-angle-map/pills', body);
+    return response.data as ContentAngleMap;
+  }
+
+  async putAdminContentAngleMapPills(orgId: string, body: { stage: ContentAngleStage; pills: string[] }) {
+    const response = await this.client.put(`/admin/organizations/${orgId}/content-angle-map/pills`, body);
+    return response.data as ContentAngleMap;
+  }
+
+  async regenerateContentAngleMap(body: { card: ContentAngleCard; full?: boolean }) {
+    const response = await this.client.post('/portal/content-angle-map/regenerate', body);
+    return response.data as ContentAngleMap;
+  }
+
+  async regenerateAdminContentAngleMap(orgId: string, body: { card: ContentAngleCard; full?: boolean }) {
+    const response = await this.client.post(`/admin/organizations/${orgId}/content-angle-map/regenerate`, body);
+    return response.data as ContentAngleMap;
+  }
+
+  // Funnel Simulator — omit orgId for the current user's own portal (self-service
+  // /portal/* routes); pass orgId only from the system-owner org dashboard, which
+  // uses the parallel require_admin-gated /admin/organizations/{orgId}/* routes.
+  async listFunnelSimulatorScenarios(orgId?: string) {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.get(path);
+    return response.data as FunnelSimulatorScenario[];
+  }
+
+  async getFunnelSimulatorBaselines(params: {
+    days?: number;
+    mtd?: boolean;
+    funnel_id?: string | null;
+    orgId?: string;
+  }) {
+    const { orgId, ...query } = params;
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/baselines`
+      : '/portal/funnel-simulator/baselines';
+    const response = await this.client.get(path, { params: query });
+    return response.data as FunnelSimulatorBaselines;
+  }
+
+  async createFunnelSimulatorScenario(body: FunnelSimulatorScenarioWrite, orgId?: string) {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
+      : '/portal/funnel-simulator/scenarios';
+    const response = await this.client.post(path, body);
+    return response.data as FunnelSimulatorScenario;
+  }
+
+  async updateFunnelSimulatorScenario(
+    scenarioId: string,
+    body: Partial<FunnelSimulatorScenarioWrite>,
+    orgId?: string
+  ) {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${scenarioId}`
+      : `/portal/funnel-simulator/scenarios/${scenarioId}`;
+    const response = await this.client.patch(path, body);
+    return response.data as FunnelSimulatorScenario;
+  }
+
+  async deleteFunnelSimulatorScenario(scenarioId: string, orgId?: string) {
+    const path = orgId
+      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${scenarioId}`
+      : `/portal/funnel-simulator/scenarios/${scenarioId}`;
+    await this.client.delete(path);
+  }
+
+  async getLlmUsageTimeseries(params?: { days?: number; scope?: string; org_id?: string }) {
+    const response = await this.client.get('/admin/llm-usage/timeseries', { params });
     return response.data;
   }
 
-  async listPortalNotices() {
-    const response = await this.client.get('/portal/notices');
-    return Array.isArray(response.data) ? response.data : [];
-  }
-
-  async markPortalNoticeRead(noticeId: string) {
-    await this.client.post(`/portal/notices/${noticeId}/read`);
-  }
-
-  async getOrganizationDashboard(
-    orgId: string,
-    params?: { range?: number; scope?: 'mtd' | 'all' }
-  ) {
-    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`, {
-      params: {
-        ...(params?.range != null ? { range: params.range } : {}),
-        ...(params?.scope ? { scope: params.scope } : {}),
-      },
-    });
+  async getOrganizationDashboard(orgId: string, params?: { range?: number; scope?: string }) {
+    const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`, { params });
     return response.data;
   }
 
@@ -2785,72 +3053,6 @@ class ApiClient {
     return response.data as { completed_idea_ids: string[]; batch_id?: string; updated_at?: string };
   }
 
-  async getInstagramStatus(): Promise<InstagramStatus> {
-    const response = await this.client.get('/instagram/status', { timeout: 30000 });
-    return response.data;
-  }
-
-  async putInstagramComposioCredentials(body: {
-    api_key: string;
-    auth_config_id: string;
-  }): Promise<{ ok: boolean; composio_configured: boolean; auth_config_id?: string }> {
-    const response = await this.client.put('/instagram/composio-credentials', body, { timeout: 30000 });
-    return response.data;
-  }
-
-  async deleteInstagramComposioCredentials(): Promise<{
-    ok: boolean;
-    composio_configured: boolean;
-    deleted?: boolean;
-  }> {
-    const response = await this.client.delete('/instagram/composio-credentials', { timeout: 30000 });
-    return response.data;
-  }
-
-  async postInstagramConnect(): Promise<{ redirect_url: string; connection_request_id?: string | null }> {
-    const response = await this.client.post('/instagram/connect', null, { timeout: 60000 });
-    return response.data;
-  }
-
-  async postInstagramSync(full = false): Promise<{
-    ok: boolean;
-    queued?: boolean;
-    result: Record<string, unknown>;
-    message?: string;
-    cooldown_seconds?: number | null;
-    last_sync_at?: string | null;
-  }> {
-    const response = await this.client.post('/instagram/sync', null, {
-      params: { full },
-      timeout: 30000,
-    });
-    return response.data;
-  }
-
-  async getInstagramPerformance(days = 90): Promise<InstagramPerformance> {
-    const response = await this.client.get('/instagram/performance', {
-      params: { days },
-      timeout: 60000,
-    });
-    return response.data;
-  }
-
-  async deleteInstagramDisconnect(
-    purge = true,
-    clearComposio = false
-  ): Promise<{
-    ok: boolean;
-    connected: boolean;
-    composio_configured?: boolean;
-    composio_cleared?: boolean;
-  }> {
-    const response = await this.client.delete('/instagram/disconnect', {
-      params: { purge, clear_composio: clearComposio },
-      timeout: 60000,
-    });
-    return response.data;
-  }
-
   async postContentStudioTranscriptAnalyze(body: {
     transcript: string;
     purpose: 'TOF' | 'MOF' | 'BOF' | 'mixed';
@@ -2882,10 +3084,8 @@ class ApiClient {
     return response.data as { ok: boolean; id: string };
   }
 
-  /** Permanently delete a single call report. */
-  async deleteCallLibraryReport(reportId: string): Promise<{ ok: boolean; id: string }> {
-    const response = await this.client.delete(`/call-library/${reportId}`);
-    return response.data as { ok: boolean; id: string };
+  async deleteCallLibraryReport(reportId: string): Promise<void> {
+    await this.client.delete(`/call-library/${reportId}`);
   }
 
   /** Re-run LLM report for rows with failure_reason llm_failed (Refresh button also calls this). */
@@ -2950,16 +3150,31 @@ class ApiClient {
     return response.data as AutomationRule;
   }
 
+  async deleteAutomationRule(playbook: AutomationPlaybook): Promise<void> {
+    await this.client.delete(`/automations/rules/${playbook}`);
+  }
+
   async addAutomationFlowStep(
     flow: AutomationFlow,
-    body: AutomationFlowStepCreate
+    body: {
+      trigger_kind: AutomationTriggerKind;
+      node_kind?: AutomationNodeKind;
+      schedule_mode?: AutomationScheduleMode;
+      delay_seconds?: number;
+      subject_template?: string | null;
+      insert_before_playbook?: string | null;
+    }
   ): Promise<AutomationRule> {
     const response = await this.client.post(`/automations/flows/${flow}/steps`, body);
     return response.data as AutomationRule;
   }
 
-  async deleteAutomationRule(playbook: AutomationPlaybook): Promise<void> {
-    await this.client.delete(`/automations/rules/${playbook}`);
+  async testAutomationFlow(
+    flow: AutomationFlow,
+    body: { email: string; client_id?: string | null; trigger_kind?: AutomationTriggerKind }
+  ): Promise<AutomationFlowTestResponse> {
+    const response = await this.client.post(`/automations/flows/${flow}/test`, body);
+    return response.data as AutomationFlowTestResponse;
   }
 
   async listAutomationJobs(params?: {
@@ -2993,91 +3208,29 @@ class ApiClient {
     return response.data as AutomationPreviewResponse;
   }
 
-  async testAutomationFlow(
-    flow: AutomationFlow,
-    body: { email: string; client_id?: string | null; trigger_kind?: string | null }
-  ): Promise<AutomationFlowTestResponse> {
-    const response = await this.client.post(`/automations/flows/${flow}/test`, body, {
-      timeout: 120000,
-    });
-    return response.data as AutomationFlowTestResponse;
-  }
-
   // ----- Resources tab -------------------------------------------------------
 
-  async listDocs(): Promise<Array<{
-    resource_id: string;
-    category: string;
-    sop_category: string | null;
-    title: string;
-    description: string;
-    powered_by: string | null;
-    video_url: string | null;
-    video_urls?: string[];
-    is_custom: boolean;
-    is_builtin: boolean;
-    updated_at: string | null;
-    sort_order: number | null;
-  }>> {
+  async listDocs(): Promise<ResourceDocSummary[]> {
     const response = await this.client.get('/resources/docs');
-    return response.data as Array<{
-      resource_id: string;
-      category: string;
-      sop_category: string | null;
-      title: string;
-      description: string;
-      powered_by: string | null;
-      video_url: string | null;
-      is_custom: boolean;
-      is_builtin: boolean;
-      updated_at: string | null;
-      sort_order: number | null;
-    }>;
+    return response.data as ResourceDocSummary[];
   }
 
-  async getDoc(resourceId: string): Promise<{
-    resource_id: string;
-    category: string;
-    sop_category: string | null;
-    title: string;
-    description: string;
-    content: string;
-    powered_by: string | null;
-    video_url: string | null;
-    video_urls?: string[];
-    is_custom: boolean;
-    is_builtin: boolean;
-    updated_at: string | null;
-    sort_order: number | null;
-  }> {
+  async getDoc(resourceId: string): Promise<ResourceDoc> {
     const response = await this.client.get(`/resources/docs/${resourceId}`);
-    return response.data as {
-      resource_id: string;
-      category: string;
-      sop_category: string | null;
-      title: string;
-      description: string;
-      content: string;
-      powered_by: string | null;
-      video_url: string | null;
-      is_custom: boolean;
-      is_builtin: boolean;
-      updated_at: string | null;
-      sort_order: number | null;
-    };
+    return response.data as ResourceDoc;
   }
 
   async upsertDoc(
     resourceId: string,
     body: {
       category: string;
-      sop_category?: string | null;
       title: string;
       description: string;
       content: string;
       powered_by?: string | null;
+      sop_category?: string | null;
       video_url?: string | null;
-      video_urls?: string[];
+      video_urls?: string[] | null;
     }
   ): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.put(`/resources/docs/${resourceId}`, body);
@@ -3086,53 +3239,26 @@ class ApiClient {
 
   async createDoc(body: {
     category: string;
-    sop_category?: string | null;
     title: string;
     description: string;
     content: string;
     powered_by?: string | null;
+    sop_category?: string | null;
     video_url?: string | null;
-    video_urls?: string[];
+    video_urls?: string[] | null;
   }): Promise<{ resource_id: string; title: string; content: string }> {
     const response = await this.client.post('/resources/docs', body);
     return response.data as { resource_id: string; title: string; content: string };
   }
 
-  async reorderDocs(resourceIds: string[]): Promise<Array<{
-    resource_id: string;
-    category: string;
-    sop_category: string | null;
-    title: string;
-    description: string;
-    powered_by: string | null;
-    video_url: string | null;
-    video_urls?: string[];
-    is_custom: boolean;
-    is_builtin: boolean;
-    updated_at: string | null;
-    sort_order: number | null;
-  }>> {
-    const response = await this.client.post('/resources/docs/reorder', {
-      resource_ids: resourceIds,
-    });
-    return response.data as Array<{
-      resource_id: string;
-      category: string;
-      sop_category: string | null;
-      title: string;
-      description: string;
-      powered_by: string | null;
-      video_url: string | null;
-      is_custom: boolean;
-      is_builtin: boolean;
-      updated_at: string | null;
-      sort_order: number | null;
-    }>;
-  }
-
   async deleteDoc(resourceId: string): Promise<{ resource_id: string; deleted: boolean }> {
     const response = await this.client.delete(`/resources/docs/${resourceId}`);
     return response.data as { resource_id: string; deleted: boolean };
+  }
+
+  async reorderDocs(resourceIds: string[]): Promise<ResourceDocSummary[]> {
+    const response = await this.client.post('/resources/docs/reorder', { resource_ids: resourceIds });
+    return response.data as ResourceDocSummary[];
   }
 
   // ----- Org Resource Library ------------------------------------------------
@@ -3229,251 +3355,6 @@ class ApiClient {
     );
     cache.set(cacheKey, data, TERMINAL_CACHE_TTL_MS);
     return data;
-  }
-
-  // ----- Org Portal (consulting program) ------------------------------------
-
-  async getPortalTodos(): Promise<PortalTodo[]> {
-    const response = await this.client.get('/portal/todos');
-    return (response.data || []) as PortalTodo[];
-  }
-
-  async createPortalTodo(data: {
-    title: string;
-    description?: string;
-    due_date?: string;
-  }): Promise<PortalTodo> {
-    const response = await this.client.post('/portal/todos', data);
-    return response.data as PortalTodo;
-  }
-
-  async updatePortalTodo(
-    id: string,
-    data: {
-      title?: string;
-      description?: string;
-      completed?: boolean;
-      due_date?: string | null;
-    }
-  ): Promise<PortalTodo> {
-    const response = await this.client.patch(`/portal/todos/${id}`, data);
-    return response.data as PortalTodo;
-  }
-
-  async deletePortalTodo(id: string): Promise<void> {
-    await this.client.delete(`/portal/todos/${id}`);
-  }
-
-  // ----- Admin: org portal to-dos (cross-org) --------------------------------
-
-  async getAdminOrgPortalTodos(orgId: string): Promise<PortalTodo[]> {
-    const response = await this.client.get(`/admin/organizations/${orgId}/portal-todos`);
-    return (response.data || []) as PortalTodo[];
-  }
-
-  async createAdminOrgPortalTodo(
-    orgId: string,
-    data: { title: string; description?: string; due_date?: string }
-  ): Promise<PortalTodo> {
-    const response = await this.client.post(`/admin/organizations/${orgId}/portal-todos`, data);
-    return response.data as PortalTodo;
-  }
-
-  async updateAdminOrgPortalTodo(
-    orgId: string,
-    todoId: string,
-    data: {
-      title?: string;
-      description?: string;
-      completed?: boolean;
-      due_date?: string | null;
-    }
-  ): Promise<PortalTodo> {
-    const response = await this.client.patch(
-      `/admin/organizations/${orgId}/portal-todos/${todoId}`,
-      data
-    );
-    return response.data as PortalTodo;
-  }
-
-  async deleteAdminOrgPortalTodo(orgId: string, todoId: string): Promise<void> {
-    await this.client.delete(`/admin/organizations/${orgId}/portal-todos/${todoId}`);
-  }
-
-  // ----- Org Portal shared pads (multi-tab live notepad) ---------------------
-
-  async getPortalOrgInfo(): Promise<{ max_user_seats: number | null; total_users: number; funnel_count: number }> {
-    const response = await this.client.get('/portal/org-info', { timeout: 8000 });
-    return response.data;
-  }
-
-  async listPortalSharedPads(): Promise<PortalSharedPadSummary[]> {
-    const response = await this.client.get('/portal/shared-pads', { timeout: 8000 });
-    return (response.data || []) as PortalSharedPadSummary[];
-  }
-
-  async createPortalSharedPad(title?: string): Promise<PortalSharedPad> {
-    const response = await this.client.post(
-      '/portal/shared-pads',
-      title ? { title } : {},
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async getPortalSharedPadById(
-    padId: string,
-    sinceRevision?: number
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.get(`/portal/shared-pads/${padId}`, {
-      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
-      timeout: 8000,
-    });
-    return response.data as PortalSharedPad;
-  }
-
-  async putPortalSharedPadById(
-    padId: string,
-    data: { content: string; base_revision?: number }
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.put(`/portal/shared-pads/${padId}`, data, {
-      timeout: 8000,
-    });
-    return response.data as PortalSharedPad;
-  }
-
-  async renamePortalSharedPad(padId: string, title: string): Promise<PortalSharedPad> {
-    const response = await this.client.patch(
-      `/portal/shared-pads/${padId}`,
-      { title },
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async deletePortalSharedPad(padId: string): Promise<void> {
-    await this.client.delete(`/portal/shared-pads/${padId}`, { timeout: 8000 });
-  }
-
-  async listAdminOrgPortalSharedPads(orgId: string): Promise<PortalSharedPadSummary[]> {
-    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pads`, {
-      timeout: 8000,
-    });
-    return (response.data || []) as PortalSharedPadSummary[];
-  }
-
-  async createAdminOrgPortalSharedPad(orgId: string, title?: string): Promise<PortalSharedPad> {
-    const response = await this.client.post(
-      `/admin/organizations/${orgId}/portal-shared-pads`,
-      title ? { title } : {},
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async getAdminOrgPortalSharedPadById(
-    orgId: string,
-    padId: string,
-    sinceRevision?: number
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.get(
-      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
-      {
-        params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
-        timeout: 8000,
-      }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async putAdminOrgPortalSharedPadById(
-    orgId: string,
-    padId: string,
-    data: { content: string; base_revision?: number }
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.put(
-      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
-      data,
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async renameAdminOrgPortalSharedPad(
-    orgId: string,
-    padId: string,
-    title: string
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.patch(
-      `/admin/organizations/${orgId}/portal-shared-pads/${padId}`,
-      { title },
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
-  }
-
-  async deleteAdminOrgPortalSharedPad(orgId: string, padId: string): Promise<void> {
-    await this.client.delete(`/admin/organizations/${orgId}/portal-shared-pads/${padId}`, {
-      timeout: 8000,
-    });
-  }
-
-  async getPortalSharedPadDefault(): Promise<PortalSharedPadDefault> {
-    const response = await this.client.get('/admin/portal-shared-pad-default', { timeout: 8000 });
-    return response.data as PortalSharedPadDefault;
-  }
-
-  async putPortalSharedPadDefault(data: {
-    title: string;
-    content: string;
-  }): Promise<PortalSharedPadDefault> {
-    const response = await this.client.put('/admin/portal-shared-pad-default', data, {
-      timeout: 8000,
-    });
-    return response.data as PortalSharedPadDefault;
-  }
-
-  /** @deprecated Prefer getPortalSharedPadById */
-  async getPortalSharedPad(sinceRevision?: number): Promise<PortalSharedPad> {
-    const response = await this.client.get('/portal/shared-pad', {
-      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
-      timeout: 8000,
-    });
-    return response.data as PortalSharedPad;
-  }
-
-  /** @deprecated Prefer putPortalSharedPadById */
-  async putPortalSharedPad(data: {
-    content: string;
-    base_revision?: number;
-  }): Promise<PortalSharedPad> {
-    const response = await this.client.put('/portal/shared-pad', data, { timeout: 8000 });
-    return response.data as PortalSharedPad;
-  }
-
-  /** @deprecated Prefer getAdminOrgPortalSharedPadById */
-  async getAdminOrgPortalSharedPad(
-    orgId: string,
-    sinceRevision?: number
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.get(`/admin/organizations/${orgId}/portal-shared-pad`, {
-      params: sinceRevision != null && sinceRevision > 0 ? { since_revision: sinceRevision } : {},
-      timeout: 8000,
-    });
-    return response.data as PortalSharedPad;
-  }
-
-  /** @deprecated Prefer putAdminOrgPortalSharedPadById */
-  async putAdminOrgPortalSharedPad(
-    orgId: string,
-    data: { content: string; base_revision?: number }
-  ): Promise<PortalSharedPad> {
-    const response = await this.client.put(
-      `/admin/organizations/${orgId}/portal-shared-pad`,
-      data,
-      { timeout: 8000 }
-    );
-    return response.data as PortalSharedPad;
   }
 
   // ---------------------------------------------------------------------------
@@ -3578,7 +3459,6 @@ class ApiClient {
     return response.data;
   }
 
-
   async getKpiSnapshot(params?: {
     days?: number;
     start?: string;
@@ -3587,7 +3467,10 @@ class ApiClient {
     include_series?: boolean;
     sync?: boolean;
   }): Promise<import('@/types/kpi').KpiSnapshotResponse> {
-    const response = await this.client.get('/kpi/snapshot', { params: params || {} });
+    const response = await this.client.get('/kpi/snapshot', {
+      params: params || {},
+      timeout: params?.sync ? 60000 : 20000,
+    });
     return response.data;
   }
 
@@ -3646,115 +3529,6 @@ class ApiClient {
     const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data, {
       params: repUserId ? { rep_user_id: repUserId } : undefined,
     });
-    return response.data;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Funnel Simulator (consulting portal)
-  // ---------------------------------------------------------------------------
-
-  async getFunnelSimulatorBaselines(params?: {
-    days?: number;
-    mtd?: boolean;
-    funnel_id?: string | null;
-    orgId?: string;
-  }): Promise<import('@/types/funnelSimulator').FunnelSimulatorBaselines> {
-    const orgId = params?.orgId;
-    const path = orgId
-      ? `/admin/organizations/${orgId}/funnel-simulator/baselines`
-      : '/portal/funnel-simulator/baselines';
-    const response = await this.client.get(path, {
-      params: {
-        days: params?.mtd ? undefined : params?.days ?? 90,
-        mtd: params?.mtd ? true : undefined,
-        funnel_id: params?.funnel_id || undefined,
-      },
-      timeout: 20000,
-    });
-    return response.data;
-  }
-
-  async listFunnelSimulatorScenarios(
-    orgId?: string
-  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
-    const path = orgId
-      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
-      : '/portal/funnel-simulator/scenarios';
-    const response = await this.client.get(path, { timeout: 8000 });
-    return Array.isArray(response.data) ? response.data : [];
-  }
-
-  async listAdminOrgFunnelSimulatorScenarios(
-    orgId: string
-  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario[]> {
-    const response = await this.client.get(
-      `/admin/organizations/${orgId}/funnel-simulator/scenarios`,
-      { timeout: 8000 }
-    );
-    return Array.isArray(response.data) ? response.data : [];
-  }
-
-  async createFunnelSimulatorScenario(
-    data: import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite,
-    orgId?: string
-  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
-    const path = orgId
-      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios`
-      : '/portal/funnel-simulator/scenarios';
-    const response = await this.client.post(path, {
-      ...data,
-      lookback_days: String(data.lookback_days),
-    });
-    return response.data;
-  }
-
-  async updateFunnelSimulatorScenario(
-    id: string,
-    data: Partial<import('@/types/funnelSimulator').FunnelSimulatorScenarioWrite>,
-    orgId?: string
-  ): Promise<import('@/types/funnelSimulator').FunnelSimulatorScenario> {
-    const path = orgId
-      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
-      : `/portal/funnel-simulator/scenarios/${id}`;
-    const response = await this.client.patch(path, {
-      ...data,
-      lookback_days: data.lookback_days != null ? String(data.lookback_days) : undefined,
-    });
-    return response.data;
-  }
-
-  async deleteFunnelSimulatorScenario(id: string, orgId?: string): Promise<void> {
-    const path = orgId
-      ? `/admin/organizations/${orgId}/funnel-simulator/scenarios/${id}`
-      : `/portal/funnel-simulator/scenarios/${id}`;
-    await this.client.delete(path);
-  }
-
-  async getCloseSurveyEntryLink(regenerate = false): Promise<import('@/types/closeSurvey').CloseSurveyEntryLinkResponse> {
-    const response = await this.client.get('/close-survey/entry-link', {
-      params: regenerate ? { regenerate: true } : undefined,
-    });
-    return response.data;
-  }
-
-  async getCloseSurveyMeta(token: string): Promise<import('@/types/closeSurvey').CloseSurveyMetaResponse> {
-    const response = await this.client.get(`/close-survey/public/${token}/meta`);
-    return response.data;
-  }
-
-  async createCloseSurveyClient(
-    token: string,
-    data: import('@/types/closeSurvey').CloseSurveyCreateClientPayload
-  ): Promise<import('@/types/closeSurvey').CloseSurveyClientOption> {
-    const response = await this.client.post(`/close-survey/public/${token}/clients`, data);
-    return response.data;
-  }
-
-  async submitCloseSurvey(
-    token: string,
-    data: import('@/types/closeSurvey').CloseSurveySubmitPayload
-  ): Promise<import('@/types/closeSurvey').CloseSurveySubmitResponse> {
-    const response = await this.client.post(`/close-survey/public/${token}/submit`, data);
     return response.data;
   }
 }

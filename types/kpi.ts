@@ -154,6 +154,8 @@ export interface KpiEntryLinkResponse {
 export interface KpiAutopopulateStatusResponse {
   calendar_available: boolean;
   payments_available: boolean;
+  /** True once Instagram DM reads succeed, which makes new_conversations / respondents AUTO. */
+  instagram_dm_available?: boolean;
   autopopulated_columns: string[];
 }
 

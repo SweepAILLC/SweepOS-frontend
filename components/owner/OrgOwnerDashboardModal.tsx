@@ -17,6 +17,7 @@ import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { ApiCostsTrendChart } from '@/components/owner/ApiCostsTrendChart';
 import { CashAndLtvTrendChart } from '@/components/owner/OwnerHealthTrendCharts';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
+import ContentAngleMapView from '@/components/portal/ContentAngleMapView';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiRepPerformancePanel from '@/components/kpi/KpiRepPerformancePanel';
 import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
@@ -24,6 +25,7 @@ import OrgFunnelSimulatorSnapshots from '@/components/owner/OrgFunnelSimulatorSn
 import {
   type DashboardTimeRange,
   dashboardPeriodLabel,
+  formatProgramDateRange,
 } from '@/lib/dashboardTimeRange';
 import ShinyButton from '@/components/ui/ShinyButton';
 import ToggleSwitch from '@/components/ui/ToggleSwitch';
@@ -46,9 +48,13 @@ function formatPct(n: number | null | undefined) {
 function OrgPipelineDiagram({
   clientsByStatus,
   totalClients,
+  programStart,
+  programEnd,
 }: {
   clientsByStatus: Record<string, number>;
   totalClients: number;
+  programStart?: string | null;
+  programEnd?: string | null;
 }) {
   const gradientId = `orgPipeGrad-${useId().replace(/:/g, '')}`;
   const counts = useMemo(() => {
@@ -69,6 +75,7 @@ function OrgPipelineDiagram({
   });
   const pathD = buildPipelineFunnelPath(heights);
   const segmentWidth = 100 / PIPELINE_COLUMNS.length;
+  const programRange = formatProgramDateRange(programStart, programEnd);
 
   return (
     <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10">
@@ -76,7 +83,8 @@ function OrgPipelineDiagram({
         <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
           Pipeline
         </h3>
-        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums">
+        <span className="text-xs text-gray-500 dark:text-gray-400 tabular-nums text-right">
+          {programRange ? <span className="block">{programRange}</span> : null}
           {totalClients} clients
         </span>
       </div>
@@ -221,15 +229,16 @@ export type OrgOwnerDashboardModalProps = {
   // seats
   maxUserSeatsInput: string;
   setMaxUserSeatsInput: (v: string) => void;
-  savingSeats: boolean;
-  onSaveSeats: () => void;
-  // consulting
   consultingTierInput: '' | 'pro_consulting' | 'core_consulting';
   setConsultingTierInput: (v: '' | 'pro_consulting' | 'core_consulting') => void;
   bookingUrlInput: string;
   setBookingUrlInput: (v: string) => void;
-  savingConsulting: boolean;
-  onSaveConsulting: () => void;
+  programStartInput: string;
+  setProgramStartInput: (v: string) => void;
+  programEndInput: string;
+  setProgramEndInput: (v: string) => void;
+  savingOrgSettings: boolean;
+  onSaveOrgSettings: () => void;
   // funnels
   editingFunnel: string | null;
   setEditingFunnel: (id: string | null) => void;
@@ -266,14 +275,16 @@ export default function OrgOwnerDashboardModal({
   onTimeRangeChange,
   maxUserSeatsInput,
   setMaxUserSeatsInput,
-  savingSeats,
-  onSaveSeats,
   consultingTierInput,
   setConsultingTierInput,
   bookingUrlInput,
   setBookingUrlInput,
-  savingConsulting,
-  onSaveConsulting,
+  programStartInput,
+  setProgramStartInput,
+  programEndInput,
+  setProgramEndInput,
+  savingOrgSettings,
+  onSaveOrgSettings,
   editingFunnel,
   setEditingFunnel,
   funnelFormData,
@@ -375,13 +386,21 @@ export default function OrgOwnerDashboardModal({
             subtitle="Live notepad for this org's consulting portal — clients see updates as you type."
           />
 
+          <ContentAngleMapView
+            orgId={orgId}
+            organizationName={dashboardData.organization_name}
+          />
+
           {/* Seats & consulting + Tab permissions — side by side */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-4">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
                 Seats &amp; consulting
               </h3>
-              <div className="flex flex-wrap items-center gap-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">
+                  Seats
+                </label>
                 <input
                   type="number"
                   min={0}
@@ -390,9 +409,6 @@ export default function OrgOwnerDashboardModal({
                   onChange={(e) => setMaxUserSeatsInput(e.target.value)}
                   className="w-28 px-3 py-1.5 glass-input rounded-md text-sm"
                 />
-                <ShinyButton onClick={onSaveSeats} disabled={savingSeats} className="px-3 py-1.5 text-sm">
-                  {savingSeats ? 'Saving…' : 'Save seats'}
-                </ShinyButton>
               </div>
               <div className="flex items-center justify-between gap-3 py-1">
                 <div>
@@ -427,12 +443,41 @@ export default function OrgOwnerDashboardModal({
                   </p>
                 </div>
               ) : null}
+              <div className="pt-2 border-t border-gray-200/70 dark:border-white/10 space-y-2">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Program dates</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    Shown on this dashboard pipeline and the org Pipeline tab.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block text-xs text-gray-600 dark:text-gray-400">
+                    Start
+                    <input
+                      type="date"
+                      value={programStartInput}
+                      onChange={(e) => setProgramStartInput(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 glass-input rounded-md text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs text-gray-600 dark:text-gray-400">
+                    End
+                    <input
+                      type="date"
+                      value={programEndInput}
+                      min={programStartInput || undefined}
+                      onChange={(e) => setProgramEndInput(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 glass-input rounded-md text-sm"
+                    />
+                  </label>
+                </div>
+              </div>
               <ShinyButton
-                onClick={onSaveConsulting}
-                disabled={savingConsulting}
+                onClick={onSaveOrgSettings}
+                disabled={savingOrgSettings}
                 className="px-3 py-1.5 text-sm"
               >
-                {savingConsulting ? 'Saving…' : 'Save consulting'}
+                {savingOrgSettings ? 'Saving…' : 'Save'}
               </ShinyButton>
             </section>
 
@@ -571,6 +616,8 @@ export default function OrgOwnerDashboardModal({
           <OrgPipelineDiagram
             clientsByStatus={dashboardData.clients_by_status || {}}
             totalClients={dashboardData.total_clients}
+            programStart={dashboardData.program_start_date}
+            programEnd={dashboardData.program_end_date}
           />
 
           {/* Growth since platform onboarding — mirrors Owner Health */}

@@ -351,6 +351,8 @@ export default function ClientProfileRail({
                     {formatCurrency(payment.amount)}
                     {payment.type === 'manual_payment' ? (
                       <span className="ml-1 text-blue-600 dark:text-blue-400">(M)</span>
+                    ) : payment.type === 'whop' ? (
+                      <span className="ml-1 text-violet-600 dark:text-violet-400">(W)</span>
                     ) : null}
                   </span>
                   <span
@@ -367,6 +369,7 @@ export default function ClientProfileRail({
                   {payment.created_at ? formatDate(payment.created_at) : '—'}
                 </p>
                 {payment.type === 'manual_payment' ||
+                payment.type === 'whop' ||
                 payment.type === 'stripe_payment' ||
                 payment.type === 'treasury_transaction' ||
                 payment.type === 'charge' ||

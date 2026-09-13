@@ -39,7 +39,7 @@ import {
 /** Human-readable tab name for org tab permissions (internal keys stay snake_case). */
 function tabPermissionDisplayName(tab: string): string {
   if (tab === 'content_studio') return 'Marketing Intel';
-  if (tab === 'kpi_command_center') return 'KPI Command Center';
+  if (tab === 'kpi_command_center') return 'Sales KPIs';
   if (tab === 'call_library') return 'Call Library';
   return tab.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -68,15 +68,21 @@ export default function AdminPanel() {
   const [orgTabPermissions, setOrgTabPermissions] = useState<Array<{ tab_name: string; enabled: boolean }>>([]);
   const [loadingTabPermissions, setLoadingTabPermissions] = useState(false);
   const [showInviteOrg, setShowInviteOrg] = useState(false);
-  const [inviteOrgName, setInviteOrgName] = useState('');
-  const [inviteOrgAdminEmail, setInviteOrgAdminEmail] = useState('');
-  const [inviteOrgConsultingTier, setInviteOrgConsultingTier] = useState<'' | 'pro_consulting' | 'core_consulting'>('');
+  const [lastOrgInviteLink, setLastOrgInviteLink] = useState<string | null>(null);
+  const [inviteOrgMultiUse, setInviteOrgMultiUse] = useState(false);
+  const [inviteNeverExpires, setInviteNeverExpires] = useState(false);
+  const [inviteExpireDate, setInviteExpireDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 7);
+    return d.toISOString().slice(0, 10);
+  });
   const [pendingInvitations, setPendingInvitations] = useState<Invitation[]>([]);
   const [maxUserSeatsInput, setMaxUserSeatsInput] = useState('');
-  const [savingSeats, setSavingSeats] = useState(false);
   const [consultingTierInput, setConsultingTierInput] = useState<'' | 'pro_consulting' | 'core_consulting'>('');
   const [bookingUrlInput, setBookingUrlInput] = useState('');
-  const [savingConsulting, setSavingConsulting] = useState(false);
+  const [programStartInput, setProgramStartInput] = useState('');
+  const [programEndInput, setProgramEndInput] = useState('');
+  const [savingOrgSettings, setSavingOrgSettings] = useState(false);
   const [sopDrawerOpen, setSopDrawerOpen] = useState(false);
   const [orgSearch, setOrgSearch] = useState('');
   const [orgDashTimeRange, setOrgDashTimeRange] = useState<DashboardTimeRange>('mtd');
@@ -135,25 +141,28 @@ export default function AdminPanel() {
   };
 
   const handleInviteOrganization = async () => {
-    if (!inviteOrgName.trim() || !inviteOrgAdminEmail.trim()) {
-      setError('Organization name and admin email are required');
-      return;
-    }
     try {
-      await apiClient.inviteOrganization({
-        name: inviteOrgName.trim(),
-        admin_email: inviteOrgAdminEmail.trim().toLowerCase(),
-        consulting_tier: inviteOrgConsultingTier || null,
+      const res = await apiClient.inviteOrganization({
+        multi_use: inviteOrgMultiUse,
+        never_expires: inviteNeverExpires,
+        expires_at:
+          !inviteNeverExpires && inviteExpireDate
+            ? new Date(`${inviteExpireDate}T23:59:59`).toISOString()
+            : undefined,
       });
-      setInviteOrgName('');
-      setInviteOrgAdminEmail('');
-      setInviteOrgConsultingTier('');
-      setShowInviteOrg(false);
+      const link = res?.invitation?.invitation_link || null;
+      setLastOrgInviteLink(link);
       setError(null);
-      alert(`Invitation sent to ${inviteOrgAdminEmail.trim()}. They will receive an email to set up their account.`);
+      if (link) {
+        try {
+          await navigator.clipboard.writeText(link);
+        } catch {
+          /* ignore */
+        }
+      }
       loadData();
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to send invitation');
+      setError(err.response?.data?.detail || err.message || 'Failed to create invite link');
     }
   };
 
@@ -170,26 +179,73 @@ export default function AdminPanel() {
     }
   };
 
-  const handleSaveMaxUserSeats = async () => {
-    if (!viewingDashboard || !dashboardData) return;
+  const handleSaveOrgSettings = async () => {
+    if (!viewingDashboard) return;
     const raw = maxUserSeatsInput.trim();
     const parsed = raw === '' ? null : parseInt(raw, 10);
     if (parsed !== null && (Number.isNaN(parsed) || parsed < 0)) {
       setError('Max user seats must be a non-negative number or empty for unlimited');
       return;
     }
-    setSavingSeats(true);
+    if (programStartInput && programEndInput && programEndInput < programStartInput) {
+      setError('Program end date must be on or after start date');
+      return;
+    }
+    setSavingOrgSettings(true);
     setError(null);
-    const maxSeatsToSave: number | null = parsed;
     try {
-      await apiClient.updateOrganization(viewingDashboard, { max_user_seats: maxSeatsToSave });
-      const data = await apiClient.getOrganizationDashboard(viewingDashboard);
-      setDashboardData(data);
-      setMaxUserSeatsInput(data.max_user_seats != null ? String(data.max_user_seats) : '');
+      const payload: {
+        consulting_tier: '' | 'pro_consulting' | 'core_consulting';
+        booking_url: string;
+        program_start_date: string | null;
+        program_end_date: string | null;
+        max_user_seats?: number;
+      } = {
+        consulting_tier: consultingTierInput,
+        booking_url: bookingUrlInput.trim(),
+        program_start_date: programStartInput || null,
+        program_end_date: programEndInput || null,
+      };
+      if (parsed !== null) payload.max_user_seats = parsed;
+      const updated = (await apiClient.updateOrganization(viewingDashboard, payload)) as Organization;
+      setConsultingTierInput(
+        updated.consulting_tier === 'pro_consulting' || updated.consulting_tier === 'core_consulting'
+          ? updated.consulting_tier
+          : ''
+      );
+      setBookingUrlInput(updated.booking_url || '');
+      setMaxUserSeatsInput(updated.max_user_seats != null ? String(updated.max_user_seats) : '');
+      const nextStart = (updated.program_start_date || '').slice(0, 10);
+      const nextEnd = (updated.program_end_date || '').slice(0, 10);
+      setProgramStartInput(nextStart);
+      setProgramEndInput(nextEnd);
+      setOrganizations((prev) =>
+        prev.map((o) =>
+          o.id === viewingDashboard
+            ? {
+                ...o,
+                consulting_tier: updated.consulting_tier ?? null,
+                booking_url: updated.booking_url ?? null,
+                program_start_date: updated.program_start_date ?? null,
+                program_end_date: updated.program_end_date ?? null,
+              }
+            : o
+        )
+      );
+      setDashboardData((prev) =>
+        prev
+          ? {
+              ...prev,
+              max_user_seats: updated.max_user_seats ?? null,
+              program_start_date: updated.program_start_date ?? null,
+              program_end_date: updated.program_end_date ?? null,
+            }
+          : prev
+      );
     } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to update user seat limit');
+      setError(err.response?.data?.detail || err.message || 'Failed to save org settings');
     } finally {
-      setSavingSeats(false);
+      setSavingOrgSettings(false);
     }
   };
 
@@ -225,10 +281,14 @@ export default function AdminPanel() {
       const listed = organizations.find((o) => o.id === orgId);
       let tier = listed?.consulting_tier ?? null;
       let booking = listed?.booking_url ?? null;
+      let programStart = listed?.program_start_date ?? null;
+      let programEnd = listed?.program_end_date ?? null;
       try {
         const orgDetail = (await apiClient.getOrganization(orgId)) as Organization;
         tier = orgDetail.consulting_tier ?? tier ?? null;
         booking = orgDetail.booking_url ?? booking ?? null;
+        programStart = orgDetail.program_start_date ?? programStart ?? null;
+        programEnd = orgDetail.program_end_date ?? programEnd ?? null;
       } catch {
         /* keep list values */
       }
@@ -236,7 +296,9 @@ export default function AdminPanel() {
         tier === 'pro_consulting' || tier === 'core_consulting' ? tier : ''
       );
       setBookingUrlInput(booking || '');
-
+      setProgramStartInput((programStart || '').slice(0, 10));
+      setProgramEndInput((programEnd || '').slice(0, 10));
+      
       // Load tab permissions for this org
       await loadOrgTabPermissions(orgId);
     } catch (err: any) {
@@ -280,39 +342,6 @@ export default function AdminPanel() {
     setShowFunnelForm(false);
     setOrgDashTimeRange('mtd');
   }, []);
-
-  const handleSaveConsultingProgram = async () => {
-    if (!viewingDashboard) return;
-    setSavingConsulting(true);
-    setError(null);
-    try {
-      const updated = (await apiClient.updateOrganization(viewingDashboard, {
-        consulting_tier: consultingTierInput,
-        booking_url: bookingUrlInput.trim(),
-      })) as Organization;
-      setConsultingTierInput(
-        updated.consulting_tier === 'pro_consulting' || updated.consulting_tier === 'core_consulting'
-          ? updated.consulting_tier
-          : ''
-      );
-      setBookingUrlInput(updated.booking_url || '');
-      setOrganizations((prev) =>
-        prev.map((o) =>
-          o.id === viewingDashboard
-            ? {
-                ...o,
-                consulting_tier: updated.consulting_tier ?? null,
-                booking_url: updated.booking_url ?? null,
-              }
-            : o
-        )
-      );
-    } catch (err: any) {
-      setError(err.response?.data?.detail || err.message || 'Failed to update consulting program');
-    } finally {
-      setSavingConsulting(false);
-    }
-  };
 
   const loadOrgTabPermissions = async (orgId: string) => {
     try {
@@ -421,14 +450,16 @@ export default function AdminPanel() {
           onTimeRangeChange={handleOrgDashTimeRangeChange}
           maxUserSeatsInput={maxUserSeatsInput}
           setMaxUserSeatsInput={setMaxUserSeatsInput}
-          savingSeats={savingSeats}
-          onSaveSeats={handleSaveMaxUserSeats}
           consultingTierInput={consultingTierInput}
           setConsultingTierInput={setConsultingTierInput}
           bookingUrlInput={bookingUrlInput}
           setBookingUrlInput={setBookingUrlInput}
-          savingConsulting={savingConsulting}
-          onSaveConsulting={handleSaveConsultingProgram}
+          programStartInput={programStartInput}
+          setProgramStartInput={setProgramStartInput}
+          programEndInput={programEndInput}
+          setProgramEndInput={setProgramEndInput}
+          savingOrgSettings={savingOrgSettings}
+          onSaveOrgSettings={handleSaveOrgSettings}
           editingFunnel={editingFunnel}
           setEditingFunnel={setEditingFunnel}
           funnelFormData={funnelFormData}
@@ -490,49 +521,62 @@ export default function AdminPanel() {
 
           {showInviteOrg && (
             <div className="glass-card p-4">
-              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Invite Organization (email onboarding)</h3>
+              <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Invite Organization</h3>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Create a new organization and send an invitation email. The admin will set their own password via the link.
+                Signup link. They name their organization and sign in with Google or email — no setup from you.
               </p>
               <div className="space-y-3 max-w-md">
-                <input
-                  type="text"
-                  value={inviteOrgName}
-                  onChange={(e) => setInviteOrgName(e.target.value)}
-                  placeholder="Organization name"
-                  className="w-full px-3 py-2 glass-input rounded-md"
-                />
-                <input
-                  type="email"
-                  value={inviteOrgAdminEmail}
-                  onChange={(e) => setInviteOrgAdminEmail(e.target.value)}
-                  placeholder="Admin email address"
-                  className="w-full px-3 py-2 glass-input rounded-md"
-                />
-                <label className="block text-sm text-gray-600 dark:text-gray-400">
-                  Consulting tier
-                  <select
-                    value={inviteOrgConsultingTier}
-                    onChange={(e) =>
-                      setInviteOrgConsultingTier(e.target.value as '' | 'pro_consulting' | 'core_consulting')
-                    }
-                    className="mt-1 w-full px-3 py-2 glass-input rounded-md"
-                  >
-                    <option value="">Not a consulting org</option>
-                    <option value="core_consulting">Core consulting</option>
-                    <option value="pro_consulting">Pro consulting</option>
-                  </select>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={inviteOrgMultiUse}
+                    onChange={(e) => setInviteOrgMultiUse(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-violet-600"
+                  />
+                  Multi-use (no limit)
                 </label>
+                <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={inviteNeverExpires}
+                    onChange={(e) => setInviteNeverExpires(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-violet-600"
+                  />
+                  Never expires
+                </label>
+                {!inviteNeverExpires ? (
+                  <label className="block text-sm text-gray-600 dark:text-gray-400">
+                    Expires
+                    <input
+                      type="date"
+                      value={inviteExpireDate}
+                      onChange={(e) => setInviteExpireDate(e.target.value)}
+                      className="mt-1 w-full px-3 py-2 glass-input rounded-md"
+                    />
+                  </label>
+                ) : null}
+                {lastOrgInviteLink ? (
+                  <div className="space-y-1">
+                    <p className="text-xs text-gray-500">
+                      {inviteOrgMultiUse ? 'Multi-use' : 'Single-use'} accept link (copied if clipboard allowed):
+                    </p>
+                    <input
+                      readOnly
+                      value={lastOrgInviteLink}
+                      className="w-full px-3 py-2 glass-input rounded-md text-xs"
+                    />
+                  </div>
+                ) : null}
                 <div className="flex gap-2">
                   <button onClick={handleInviteOrganization} className="glass-button neon-glow px-4 py-2 rounded-md">
-                    Send Invitation
+                    Create signup link
                   </button>
                   <button
                     onClick={() => {
                       setShowInviteOrg(false);
-                      setInviteOrgName('');
-                      setInviteOrgAdminEmail('');
-                      setInviteOrgConsultingTier('');
+                      setLastOrgInviteLink(null);
+                      setInviteOrgMultiUse(false);
+                      setInviteNeverExpires(false);
                       setError(null);
                     }}
                     className="glass-button-secondary px-4 py-2 rounded-md hover:bg-white/20"
@@ -555,17 +599,94 @@ export default function AdminPanel() {
                       <th className="pb-2 pr-4">Type</th>
                       <th className="pb-2 pr-4">Organization</th>
                       <th className="pb-2">Expires</th>
+                      <th className="pb-2">Link</th>
+                      <th className="pb-2">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {pendingInvitations.map((inv) => (
                       <tr key={inv.id} className="border-b border-white/5">
-                        <td className="py-2 pr-4 text-gray-900 dark:text-gray-100">{inv.invitee_email}</td>
-                        <td className="py-2 pr-4 text-gray-600 dark:text-gray-400 capitalize">{inv.invitation_type.replace('_', ' ')}</td>
-                        <td className="py-2 pr-4 text-gray-600 dark:text-gray-400">
-                          {organizations.find((o) => o.id === inv.org_id)?.name || inv.org_id}
+                        <td className="py-2 pr-4 text-gray-900 dark:text-gray-100">{inv.invitee_email || 'Open account link'}</td>
+                        <td className="py-2 pr-4 text-gray-600 dark:text-gray-400 capitalize">
+                          {inv.multi_use ? 'Multi-use signup' : inv.invitation_type.replace('_', ' ')}
                         </td>
-                        <td className="py-2 text-gray-500 dark:text-gray-500">{new Date(inv.expires_at).toLocaleDateString()}</td>
+                        <td className="py-2 pr-4 text-gray-600 dark:text-gray-400">
+                          {inv.org_id
+                            ? organizations.find((o) => o.id === inv.org_id)?.name || inv.org_id
+                            : 'Named on signup'}
+                        </td>
+                        <td className="py-2 text-gray-500 dark:text-gray-500">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span>{inv.expires_at ? new Date(inv.expires_at).toLocaleDateString() : 'Never'}</span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                void (async () => {
+                                  try {
+                                    await apiClient.updateAdminInvitationExpiry(inv.id, { never_expires: true });
+                                    loadData();
+                                  } catch (err: any) {
+                                    setError(err.response?.data?.detail || 'Failed to update expiration');
+                                  }
+                                })()
+                              }
+                              className="text-xs text-violet-600 dark:text-violet-300 hover:underline"
+                            >
+                              Never
+                            </button>
+                            <input
+                              type="date"
+                              defaultValue={
+                                inv.expires_at ? new Date(inv.expires_at).toISOString().slice(0, 10) : ''
+                              }
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (!value) return;
+                                void (async () => {
+                                  try {
+                                    await apiClient.updateAdminInvitationExpiry(inv.id, {
+                                      expires_at: new Date(`${value}T23:59:59`).toISOString(),
+                                    });
+                                    loadData();
+                                  } catch (err: any) {
+                                    setError(err.response?.data?.detail || 'Failed to update expiration');
+                                  }
+                                })();
+                              }}
+                              className="glass-input rounded px-1.5 py-0.5 text-xs"
+                            />
+                          </div>
+                        </td>
+                        <td className="py-2">
+                          {inv.invitation_link ? (
+                            <button
+                              type="button"
+                              onClick={() => void navigator.clipboard.writeText(inv.invitation_link as string)}
+                              className="text-xs text-violet-600 dark:text-violet-300 hover:underline"
+                            >
+                              Copy
+                            </button>
+                          ) : null}
+                        </td>
+                        <td className="py-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!confirm('Cancel this invitation? The link will stop working.')) return;
+                              void (async () => {
+                                try {
+                                  await apiClient.cancelAdminInvitation(inv.id);
+                                  loadData();
+                                } catch (err: any) {
+                                  setError(err.response?.data?.detail || 'Failed to cancel invitation');
+                                }
+                              })();
+                            }}
+                            className="text-xs text-red-600 dark:text-red-300 hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -588,9 +709,9 @@ export default function AdminPanel() {
             }}
             onSaveEdit={handleUpdateOrg}
             onCancelEdit={() => {
-              setEditingOrg(null);
-              setEditOrgName('');
-            }}
+                              setEditingOrg(null);
+                              setEditOrgName('');
+                            }}
             onDelete={handleDeleteOrg}
           />
         </div>
@@ -856,44 +977,44 @@ export default function AdminPanel() {
                       </table>
                     </div>
                   )}
-                  {(health.llm_usage_last_30d.by_org?.length ?? 0) > 0 && (
-                    <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
-                      <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
-                        Top orgs by estimated cost
-                      </p>
-                      <table className="min-w-full text-sm">
-                        <thead>
-                          <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
-                            <th className="py-2 pr-4 font-medium">Organization</th>
-                            <th className="py-2 pr-4 font-medium">Calls</th>
-                            <th className="py-2 pr-4 font-medium">Tokens</th>
-                            <th className="py-2 font-medium">Est. cost</th>
-                          </tr>
-                        </thead>
-                        <tbody>
+                {(health.llm_usage_last_30d.by_org?.length ?? 0) > 0 && (
+                  <div className="glass-card p-4 rounded-lg border border-gray-200 dark:border-white/10 overflow-x-auto">
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-3">
+                      Top orgs by estimated cost
+                    </p>
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-white/10">
+                          <th className="py-2 pr-4 font-medium">Organization</th>
+                          <th className="py-2 pr-4 font-medium">Calls</th>
+                          <th className="py-2 pr-4 font-medium">Tokens</th>
+                          <th className="py-2 font-medium">Est. cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
                           {(health.llm_usage_last_30d.by_org ?? []).slice(0, 10).map((row) => (
-                            <tr
-                              key={row.org_id}
-                              className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
-                            >
-                              <td className="py-2 pr-4">{row.organization_name}</td>
-                              <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
+                          <tr
+                            key={row.org_id}
+                            className="border-b border-gray-100 dark:border-white/5 text-gray-800 dark:text-gray-200"
+                          >
+                            <td className="py-2 pr-4">{row.organization_name}</td>
+                            <td className="py-2 pr-4 tabular-nums">{row.calls.toLocaleString()}</td>
                               <td className="py-2 pr-4 tabular-nums">
                                 {row.total_tokens.toLocaleString()}
                               </td>
-                              <td className="py-2 tabular-nums">
+                            <td className="py-2 tabular-nums">
                                 $
                                 {row.estimated_cost_usd.toLocaleString(undefined, {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
                 </div>
               </div>
             ) : (
@@ -1030,7 +1151,7 @@ export default function AdminPanel() {
                   {(health.org_activity ?? []).filter((r) => r.active_seconds_7d > 0).length}
                 </p>
               </div>
-            </div>
+              </div>
             <div className="glass-card overflow-hidden rounded-lg border border-gray-200 dark:border-white/10">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
@@ -1129,7 +1250,7 @@ export default function AdminPanel() {
       )}
         </>
       )}
-      </div>
+            </div>
       <PortalSopDrawer
         isActive
         allowManage

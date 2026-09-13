@@ -41,7 +41,7 @@ export const TAB_DISPLAY_NAMES: Record<string, string> = {
   funnels: 'Funnels',
   content_studio: 'Marketing Intel',
   call_library: 'Call Library',
-  kpi_command_center: 'KPI Command Center',
+  kpi_command_center: 'Sales KPIs',
   resources: 'Resources',
   integrations: 'Integrations',
   owner: 'Owner',

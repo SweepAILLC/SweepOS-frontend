@@ -10,8 +10,11 @@ export interface Organization {
   funnel_count?: number;
   admin_email?: string;  // Only present when creating a new org
   admin_password?: string;  // Only present when creating a new org
+  max_user_seats?: number | null;
   consulting_tier?: ConsultingTier | null;
   booking_url?: string | null;
+  program_start_date?: string | null;
+  program_end_date?: string | null;
   cash_collected_30d_usd?: number;
   cash_collected_prev_30d_usd?: number;
   cash_collected_all_time_usd?: number;
@@ -171,18 +174,23 @@ export interface GlobalSettings {
 
 export interface Invitation {
   id: string;
-  org_id: string;
-  invitee_email: string;
+  org_id?: string | null;
+  invitee_email?: string | null;
   invitation_type: string;
   role: string;
-  expires_at: string;
+  expires_at?: string | null;
   used_at: string | null;
   created_at: string;
+  invitation_link?: string | null;
+  email_sent?: boolean | null;
+  multi_use?: boolean;
 }
 
 export interface OrganizationDashboardSummary {
   organization_id: string;
   organization_name: string;
+  program_start_date?: string | null;
+  program_end_date?: string | null;
   total_users: number;
   max_user_seats: number | null;
   total_clients: number;

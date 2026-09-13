@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useId, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from 'react';
 import {
   apiClient,
   type FathomStatusResponse,
@@ -9,10 +9,11 @@ import {
 } from '@/lib/api';
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
+import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
 import { isOrgAdminRole } from '@/lib/tabAccess';
 import { formatApiError } from '@/lib/apiError';
-import type { BrevoStatus, CalComStatus, CalendlyStatus } from '@/types/integration';
+import type { BrevoStatus, CalComStatus, CalendlyStatus, DiscordStatus } from '@/types/integration';
 
 type IntegrationModal =
   | 'brevo'
@@ -23,6 +24,7 @@ type IntegrationModal =
   | 'whop'
   | 'claude'
   | 'instagram'
+  | 'discord'
   | null;
 
 const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
@@ -72,6 +74,20 @@ function InstagramTileMark() {
     >
       <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
         <path d="M12 7.2A4.8 4.8 0 1 0 12 16.8 4.8 4.8 0 0 0 12 7.2Zm0 7.9a3.1 3.1 0 1 1 0-6.2 3.1 3.1 0 0 1 0 6.2Zm5.3-8.1a1.12 1.12 0 1 1-2.24 0 1.12 1.12 0 0 1 2.24 0ZM21.5 7.5c-.05-1.14-.25-1.92-.53-2.6a5.24 5.24 0 0 0-1.2-1.9 5.24 5.24 0 0 0-1.9-1.2c-.68-.28-1.46-.48-2.6-.53C14.13 1.2 13.77 1.2 12 1.2s-2.13 0-2.87.07c-1.14.05-1.92.25-2.6.53a5.24 5.24 0 0 0-1.9 1.2 5.24 5.24 0 0 0-1.2 1.9c-.28.68-.48 1.46-.53 2.6C2.83 8.24 2.83 8.6 2.83 10.37v3.26c0 1.77 0 2.13.07 2.87.05 1.14.25 1.92.53 2.6a5.24 5.24 0 0 0 1.2 1.9 5.24 5.24 0 0 0 1.9 1.2c.68.28 1.46.48 2.6.53.74.07 1.1.07 2.87.07s2.13 0 2.87-.07c1.14-.05 1.92-.25 2.6-.53a5.24 5.24 0 0 0 1.9-1.2 5.24 5.24 0 0 0 1.2-1.9c.28-.68.48-1.46.53-2.6.07-.74.07-1.1.07-2.87V10.37c0-1.77 0-2.13-.07-2.87Zm-1.7 6.3c0 1.73-.01 1.94-.07 2.63-.06 1.04-.22 1.6-.37 1.98-.19.5-.42.85-.8 1.23-.38.38-.73.61-1.23.8-.38.15-.94.31-1.98.37-.69.06-.9.07-2.63.07s-1.94-.01-2.63-.07c-1.04-.06-1.6-.22-1.98-.37a3.32 3.32 0 0 1-1.23-.8 3.32 3.32 0 0 1-.8-1.23c-.15-.38-.31-.94-.37-1.98-.06-.69-.07-.9-.07-2.63V10.2c0-1.73.01-1.94.07-2.63.06-1.04.22-1.6.37-1.98.19-.5.42-.85.8-1.23.38-.38.73-.61 1.23-.8.38-.15.94-.31 1.98-.37.69-.06.9-.07 2.63-.07s1.94.01 2.63.07c1.04.06 1.6.22 1.98.37.5.19.85.42 1.23.8.38.38.61.73.8 1.23.15.38.31.94.37 1.98.06.69.07.9.07 2.63v3.6Z" />
+      </svg>
+    </div>
+  );
+}
+
+function DiscordTileMark() {
+  return (
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
+      style={{ background: '#5865F2' }}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
+        <path d="M20.317 4.37a19.79 19.79 0 00-4.885-1.515.074.074 0 00-.079.037c-.21.375-.444.865-.608 1.25a18.27 18.27 0 00-5.487 0 12.64 12.64 0 00-.617-1.25.077.077 0 00-.079-.037A19.736 19.736 0 002.163 4.37a.07.07 0 00-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 00.031.057 19.9 19.9 0 005.993 3.03.078.078 0 00.084-.028 14.09 14.09 0 001.226-1.994.076.076 0 00-.041-.106 13.107 13.107 0 01-1.872-.892.077.077 0 01-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 01.077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 01.078.009c.12.099.246.198.373.292a.077.077 0 01-.006.128 12.3 12.3 0 01-1.873.892.077.077 0 00-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 00.084.028 19.84 19.84 0 006.002-3.03.077.077 0 00.032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 00-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.334-.956 2.419-2.157 2.419zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.419 0 1.334-.946 2.419-2.157 2.419z" />
       </svg>
     </div>
   );
@@ -182,7 +198,7 @@ function StripeWebhookStatusRow({
     label = 'Instant webhooks active — new payments sync automatically';
   } else if (status?.connected) {
     dotClass = 'bg-amber-500';
-    label = 'Webhook not registered — payments may lag until Sync or Repair';
+    label = 'Keys saved. Instant webhook skipped in local unless public HTTPS + ALLOW_STRIPE_WEBHOOK_REGISTER. Use Sync.';
   }
 
   return (
@@ -211,13 +227,18 @@ export default function IntegrationsPanel() {
   const [canManageIntegrations, setCanManageIntegrations] = useState(false);
   const [modal, setModal] = useState<IntegrationModal>(null);
   const [brevoSummary, setBrevoSummary] = useState<BrevoStatus | null>(null);
+  const [discordSummary, setDiscordSummary] = useState<DiscordStatus | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeStatus, setStripeStatus] = useState<StripeConnectionStatus | null>(null);
   const [stripeWebhookRepairing, setStripeWebhookRepairing] = useState(false);
   const [calcomSummary, setCalcomSummary] = useState<CalComStatus | null>(null);
   const [calendlySummary, setCalendlySummary] = useState<CalendlyStatus | null>(null);
-  const [whopSummary, setWhopSummary] = useState<{ connected: boolean; company_id?: string | null } | null>(null);
+  const [whopSummary, setWhopSummary] = useState<{
+    connected: boolean;
+    company_id?: string | null;
+    webhook_active?: boolean;
+  } | null>(null);
   const [fathomStatus, setFathomStatus] = useState<FathomStatusResponse | null>(null);
   const [fathomWebhookRegistering, setFathomWebhookRegistering] = useState(false);
 
@@ -252,6 +273,15 @@ export default function IntegrationsPanel() {
     }
   }, []);
 
+  const refreshDiscordSummary = useCallback(async () => {
+    try {
+      const data = await apiClient.getDiscordStatus();
+      setDiscordSummary(data);
+    } catch {
+      setDiscordSummary(null);
+    }
+  }, []);
+
   const refreshIntegrationSummaries = useCallback(async () => {
     try {
       const [stripeSt, calcom, calendly, whop, ig] = await Promise.all([
@@ -262,13 +292,21 @@ export default function IntegrationsPanel() {
         apiClient.getInstagramStatus().catch(() => null),
       ]);
       const s = stripeSt as StripeConnectionStatus | null;
-      setStripeStatus(s);
-      setStripeConnected(s?.connected === true);
-      setStripeAccountId(typeof s?.account_id === 'string' ? s.account_id : null);
+      if (s) {
+        setStripeStatus(s);
+        setStripeConnected(s.connected === true);
+        setStripeAccountId(typeof s.account_id === 'string' ? s.account_id : null);
+      }
       setCalcomSummary(calcom);
       setCalendlySummary(calendly);
-      const w = whop as { connected?: boolean; company_id?: string | null } | null;
-      setWhopSummary(w ? { connected: !!w.connected, company_id: w.company_id } : { connected: false });
+      const w = whop as { connected?: boolean; company_id?: string | null; webhook_active?: boolean } | null;
+      if (w) {
+        setWhopSummary({
+          connected: !!w.connected,
+          company_id: w.company_id,
+          webhook_active: !!w.webhook_active,
+        });
+      }
       setInstagramStatus(ig);
     } catch {
       setStripeConnected(false);
@@ -284,11 +322,12 @@ export default function IntegrationsPanel() {
     try {
       setLoading(true);
       setError(null);
-      const [settings, user, brevo, fStatus] = await Promise.all([
+      const [settings, user, brevo, fStatus, discord] = await Promise.all([
         apiClient.getUserSettings(),
         apiClient.getCurrentUser(),
         apiClient.getBrevoStatus().catch(() => null),
         apiClient.getFathomStatus().catch(() => null),
+        apiClient.getDiscordStatus().catch(() => null),
       ]);
       {
         const loadedKey = typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '';
@@ -297,6 +336,7 @@ export default function IntegrationsPanel() {
       }
       setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
       setBrevoSummary(brevo);
+      setDiscordSummary(discord);
       setFathomStatus(fStatus);
       await refreshIntegrationSummaries();
     } catch (err: unknown) {
@@ -328,6 +368,51 @@ export default function IntegrationsPanel() {
     return () => window.removeEventListener('keydown', onKey);
   }, [modal]);
 
+  const finishConnect = useCallback(
+    (message: string, apply: () => void, refresh?: () => void | Promise<void>) => {
+      apply();
+      setModal(null);
+      setError(null);
+      setSuccess(message);
+      if (refresh) void refresh();
+    },
+    []
+  );
+
+  const consumedOauthReturnRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || consumedOauthReturnRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('brevo_connected') === 'true') {
+      consumedOauthReturnRef.current = true;
+      finishConnect('Brevo connected.', () => {
+        setBrevoSummary((s) => ({ ...(s || { connected: true }), connected: true }));
+      }, refreshBrevoSummary);
+    }
+    if (params.get('discord_connected') === 'true') {
+      consumedOauthReturnRef.current = true;
+      finishConnect('Discord connected.', () => {
+        setDiscordSummary((s) => ({
+          ...(s || {
+            connected: true,
+            bot_configured: true,
+            oauth_configured: true,
+          }),
+          connected: true,
+        }));
+      }, refreshDiscordSummary);
+    }
+    if (params.get('instagram') === 'connected') {
+      consumedOauthReturnRef.current = true;
+      finishConnect('Instagram connected.', () => {
+        setInstagramStatus((s) =>
+          s ? { ...s, connected: true } : ({ connected: true } as InstagramStatus)
+        );
+      }, refreshIntegrationSummaries);
+    }
+  }, [finishConnect, refreshBrevoSummary, refreshDiscordSummary, refreshIntegrationSummaries]);
+
   const refreshFathomStatus = useCallback(async () => {
     try {
       const status = await apiClient.getFathomStatus();
@@ -356,7 +441,7 @@ export default function IntegrationsPanel() {
 
     // Nothing to do: key unchanged and webhook already registered.
     if (!keyChanged && webhookActive) {
-      setSuccess('Fathom is already connected. No changes needed.');
+      finishConnect('Fathom is already connected.', () => {});
       return;
     }
 
@@ -373,15 +458,19 @@ export default function IntegrationsPanel() {
       const setup = await apiClient.setupFathomWebhook({ force: keyChanged });
       const status = await refreshFathomStatus();
       if (status?.webhook_active) {
-        setSuccess(
+        finishConnect(
           (status.total_calls ?? 0) > 0
             ? 'Fathom webhook registered. New calls will sync automatically.'
-            : 'Fathom webhook registered. Use Sync Fathom now to import past meetings.'
+            : 'Fathom webhook registered. Use Sync Fathom now to import past meetings.',
+          () => setFathomStatus(status)
         );
       } else if (setup?.registration_skipped && setup?.reason === 'non_public_destination') {
-        setSuccess(
+        finishConnect(
           setup.message ||
-            'Fathom API key saved. Webhook registration is skipped in local dev unless BACKEND_PUBLIC_URL is a public HTTPS URL.'
+            'Fathom API key saved. Webhook registration is skipped in local dev unless BACKEND_PUBLIC_URL is a public HTTPS URL.',
+          () => {
+            if (status) setFathomStatus({ ...status, configured: true });
+          }
         );
       } else {
         setError('Webhook registration did not complete. Verify your API key and try Save again.');
@@ -420,13 +509,19 @@ export default function IntegrationsPanel() {
       setStripeApiKey('');
       if (result?.success) {
         const base = `Stripe connected${result.account_id ? ` (${result.account_id})` : ''}.`;
-        setSuccess(
+        finishConnect(
           result.webhook_active
             ? `${base} Instant webhooks are active.`
-            : `${base} Webhooks need repair for instant updates.`
+            : `${base} Webhooks need repair for instant updates.`,
+          () => {
+            setStripeConnected(true);
+            if (result.account_id) setStripeAccountId(result.account_id);
+          },
+          refreshIntegrationSummaries
         );
+      } else {
+        await refreshIntegrationSummaries();
       }
-      await refreshIntegrationSummaries();
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } }; message?: string };
       setStripeErr(ax?.response?.data?.detail || ax?.message || 'Stripe connect failed.');
@@ -501,14 +596,19 @@ export default function IntegrationsPanel() {
     try {
       await apiClient.connectCalComWithApiKey(calcomKey.trim());
       setCalcomKey('');
-      setSuccess('Cal.com connected. Pulling bookings…');
-      await refreshIntegrationSummaries();
-      try {
-        await apiClient.syncCheckIns({ applyPipelineRules: false });
-        setSuccess('Cal.com connected. Bookings will stay in sync automatically.');
-      } catch {
-        setSuccess('Cal.com connected. Open Terminal to finish the first booking sync.');
-      }
+      finishConnect(
+        'Cal.com connected. Pulling bookings…',
+        () => setCalcomSummary((s) => ({ ...(s || { connected: true }), connected: true })),
+        async () => {
+          await refreshIntegrationSummaries();
+          try {
+            await apiClient.syncCheckIns({ applyPipelineRules: false });
+            setSuccess('Cal.com connected. Bookings will stay in sync automatically.');
+          } catch {
+            setSuccess('Cal.com connected. Open Terminal to finish the first booking sync.');
+          }
+        }
+      );
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } } };
       setCalcomErr(ax?.response?.data?.detail || 'Cal.com connect failed.');
@@ -546,14 +646,19 @@ export default function IntegrationsPanel() {
     try {
       await apiClient.connectCalendlyWithApiKey(calendlyKey.trim());
       setCalendlyKey('');
-      setSuccess('Calendly connected. Pulling bookings…');
-      await refreshIntegrationSummaries();
-      try {
-        await apiClient.syncCheckIns({ applyPipelineRules: false });
-        setSuccess('Calendly connected. Bookings will stay in sync automatically.');
-      } catch {
-        setSuccess('Calendly connected. Open Terminal to finish the first booking sync.');
-      }
+      finishConnect(
+        'Calendly connected. Pulling bookings…',
+        () => setCalendlySummary((s) => ({ ...(s || { connected: true }), connected: true })),
+        async () => {
+          await refreshIntegrationSummaries();
+          try {
+            await apiClient.syncCheckIns({ applyPipelineRules: false });
+            setSuccess('Calendly connected. Bookings will stay in sync automatically.');
+          } catch {
+            setSuccess('Calendly connected. Open Terminal to finish the first booking sync.');
+          }
+        }
+      );
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: string } } };
       setCalendlyErr(ax?.response?.data?.detail || 'Calendly connect failed.');
@@ -585,10 +690,20 @@ export default function IntegrationsPanel() {
     setWhopBusy(true);
     setWhopErr(null);
     try {
-      await apiClient.postWhopConnect({ api_key: whopKey.trim(), company_id: whopCompanyId.trim() });
+      const out = await apiClient.postWhopConnect({ api_key: whopKey.trim(), company_id: whopCompanyId.trim() });
+      const companyId = whopCompanyId.trim();
       setWhopKey('');
-      setSuccess('Whop connected.');
-      await refreshIntegrationSummaries();
+      setWhopCompanyId('');
+      finishConnect(
+        out?.message || 'Whop connected.',
+        () =>
+          setWhopSummary({
+            connected: true,
+            company_id: companyId,
+            webhook_active: !!out?.webhook_active,
+          }),
+        refreshIntegrationSummaries
+      );
     } catch (e: unknown) {
       const ax = e as { response?: { data?: { detail?: unknown } } };
       const d = ax?.response?.data?.detail;
@@ -634,18 +749,23 @@ export default function IntegrationsPanel() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 dark:border-gray-100" />
-          <p className="mt-3 text-gray-600 dark:text-gray-400">Loading integrations…</p>
-        </div>
-      </div>
-    );
-  }
+  const handleWhopRepairWebhook = async () => {
+    setWhopBusy(true);
+    setWhopErr(null);
+    try {
+      const out = await apiClient.postWhopRepairWebhook();
+      setSuccess(out?.message || 'Whop webhook repaired.');
+      await refreshIntegrationSummaries();
+    } catch (e: unknown) {
+      const ax = e as { response?: { data?: { detail?: string } } };
+      setWhopErr(ax?.response?.data?.detail || 'Webhook repair failed.');
+    } finally {
+      setWhopBusy(false);
+    }
+  };
 
   const brevoConnected = brevoSummary?.connected === true;
+  const discordConnected = discordSummary?.connected === true;
   const fathomConfigured = fathomApiKey.trim().length > 0 || fathomStatus?.configured === true;
   const fathomWebhookActive =
     !fathomWebhookRegistering &&
@@ -668,6 +788,10 @@ export default function IntegrationsPanel() {
         </p>
       </div>
 
+      {loading && (
+        <p className="text-xs text-gray-500 dark:text-gray-400">Loading connection status…</p>
+      )}
+
       {error && (
         <div className="rounded-xl border-2 border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-100">
           {error}
@@ -679,8 +803,8 @@ export default function IntegrationsPanel() {
         </div>
       )}
 
-      <div className="grid w-full grid-cols-2 gap-3 sm:gap-3 md:grid-cols-4 md:gap-4">
-        <button type="button" onClick={() => setModal('brevo')} className={tileBtn}>
+      <div className="grid w-full grid-cols-2 gap-3 sm:gap-3 md:grid-cols-4 md:gap-4" data-tour="integration-grid">
+        <button type="button" onClick={() => setModal('brevo')} className={tileBtn} data-tour="integration-brevo">
           <div className="flex h-full min-h-0 flex-col">
             <BrandTileImage src="/brevo.png" alt="Brevo" />
             <div className="mt-2 min-w-0 flex-1">
@@ -697,7 +821,7 @@ export default function IntegrationsPanel() {
           </div>
         </button>
 
-        <button type="button" onClick={() => setModal('fathom')} className={tileBtn}>
+        <button type="button" onClick={() => setModal('fathom')} className={tileBtn} data-tour="integration-fathom">
           <div className="flex h-full min-h-0 flex-col">
             <BrandTileImage src="/fathom.png" alt="Fathom" />
             <div className="mt-2 min-w-0 flex-1">
@@ -726,7 +850,7 @@ export default function IntegrationsPanel() {
           </div>
         </button>
 
-        <button type="button" onClick={() => setModal('stripe')} className={tileBtn}>
+        <button type="button" onClick={() => setModal('stripe')} className={tileBtn} data-tour="integration-stripe">
           <div className="flex h-full min-h-0 flex-col">
             <BrandTileImage src="/stripe.png" alt="Stripe" />
             <div className="mt-2 min-w-0 flex-1">
@@ -735,23 +859,17 @@ export default function IntegrationsPanel() {
             </div>
             <p
               className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
-                stripeConnected && (stripeStatus?.webhook_active || stripeStatus?.webhook_status === 'active')
+                stripeConnected
                   ? 'text-emerald-700 dark:text-emerald-400'
-                  : stripeConnected
-                    ? 'text-amber-700 dark:text-amber-400'
-                    : 'text-zinc-500 dark:text-zinc-400'
+                  : 'text-zinc-500 dark:text-zinc-400'
               }`}
             >
-              {stripeConnected
-                ? stripeStatus?.webhook_active || stripeStatus?.webhook_status === 'active'
-                  ? 'Connected'
-                  : 'Webhook needed'
-                : 'Not connected'}
+              {stripeConnected ? 'Connected' : 'Not connected'}
             </p>
           </div>
         </button>
 
-        <button type="button" onClick={() => setModal('calcom')} className={tileBtn}>
+        <button type="button" onClick={() => setModal('calcom')} className={tileBtn} data-tour="integration-calcom">
           <div className="flex h-full min-h-0 flex-col">
             <BrandTileImage src="/calcom.jpg" alt="Cal.com" />
             <div className="mt-2 min-w-0 flex-1">
@@ -835,7 +953,49 @@ export default function IntegrationsPanel() {
             </p>
           </div>
         </button>
+
+        <button type="button" onClick={() => setModal('discord')} className={tileBtn} data-tour="integration-discord">
+          <div className="flex h-full min-h-0 flex-col">
+            <DiscordTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Discord</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Notifications &amp; forms
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                discordConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {discordConnected ? 'Connected' : 'Not connected'}
+            </p>
+          </div>
+        </button>
       </div>
+
+      {modal === 'discord' && (
+        <SquareModalShell title="Discord" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <DiscordIntegrationCard
+              canManage={canManageIntegrations}
+              embedded
+              onConnectionChange={refreshDiscordSummary}
+              onConnected={() =>
+                finishConnect(
+                  'Discord connected.',
+                  () =>
+                    setDiscordSummary((s) => ({
+                      ...(s || { connected: true, bot_configured: true, oauth_configured: true }),
+                      connected: true,
+                    })),
+                  refreshDiscordSummary
+                )
+              }
+            />
+          </div>
+        </SquareModalShell>
+      )}
 
       {modal === 'brevo' && (
         <SquareModalShell title="Brevo" onClose={() => setModal(null)}>
@@ -866,6 +1026,13 @@ export default function IntegrationsPanel() {
               canManage={canManageIntegrations}
               embedded
               onConnectionChange={refreshBrevoSummary}
+              onConnected={() =>
+                finishConnect(
+                  'Brevo connected.',
+                  () => setBrevoSummary((s) => ({ ...(s || { connected: true }), connected: true })),
+                  refreshBrevoSummary
+                )
+              }
             />
           </div>
         </SquareModalShell>
@@ -1247,7 +1414,7 @@ export default function IntegrationsPanel() {
                   while logged into the Whop account that owns your products.
                 </>,
                 <>
-                  Create or copy a <strong>Company API key</strong> with permission to read payments (and related data your admin expects). Paste that key into the first field below.
+                  Create or copy a <strong>Company API key</strong> with permission to read payments and <strong>developer:manage_webhook</strong> so Sweep can register a payment webhook. Paste that key into the first field below.
                 </>,
                 <>
                   Find your <strong>Company ID</strong> in the same dashboard—it looks like <code className="rounded bg-zinc-200 px-1 text-xs text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">biz_xxxxxxxx</code>. Copy it exactly into the second field.
@@ -1256,7 +1423,7 @@ export default function IntegrationsPanel() {
               ]}
             />
             <p className={mutedClass}>
-              Company API key and company ID (<code className="rounded bg-zinc-200 px-1 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">biz_…</code>) for Finances and revenue views.
+              Company API key and company ID (<code className="rounded bg-zinc-200 px-1 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100">biz_…</code>) for Finances, Terminal, and automatic payment webhooks.
             </p>
             {whopConnected ? (
               <div className="space-y-2 rounded-lg border-2 border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-600 dark:bg-zinc-900">
@@ -1264,8 +1431,21 @@ export default function IntegrationsPanel() {
                 {whopSummary?.company_id ? (
                   <p className={`${mutedClass} font-mono`}>{whopSummary.company_id}</p>
                 ) : null}
+                <p className={mutedClass}>
+                  {whopSummary?.webhook_active
+                    ? 'Payment webhook active — new charges appear in Terminal without Sync.'
+                    : 'Keys saved. Instant webhook skipped in local unless public HTTPS + ALLOW_WHOP_WEBHOOK_REGISTER. Use Sync as fallback.'}
+                </p>
                 {canManageIntegrations ? (
                   <div className="flex flex-col gap-2">
+                    <button
+                      type="button"
+                      disabled={whopBusy}
+                      onClick={() => void handleWhopRepairWebhook()}
+                      className="rounded-lg border-2 border-zinc-300 bg-white px-3 py-2 text-sm font-semibold text-zinc-900 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100"
+                    >
+                      {whopBusy ? 'Working…' : 'Repair webhook'}
+                    </button>
                     <button
                       type="button"
                       disabled={whopBusy}
@@ -1454,10 +1634,11 @@ export default function IntegrationsPanel() {
                 </>,
                 <>
                   Choose <strong>Composio managed</strong> / default OAuth (do <em>not</em> enter your own Meta Client ID —
-                  that would require a Meta developer app). Click <strong>Create</strong>. On the config detail page,
-                  copy the <strong>Auth Config ID</strong> — it looks like <strong>ac_xxxxxxxx</strong> (often shown near
-                  the top or next to a copy icon). That is what Sweep needs below — not a connection id (<strong>ca_</strong>
-                  ) and not your Instagram username.
+                  that would require a Meta developer app). Click <strong>Create</strong>. Enable{' '}
+                  <strong>instagram_business_manage_messages</strong> on the config (Instagram Login messaging —
+                  not <strong>instagram_manage_messages</strong>, which is Facebook Login and will not appear). Copy
+                  the <strong>Auth Config ID</strong> — it looks like <strong>ac_xxxxxxxx</strong>. That is what Sweep
+                  needs below — not a connection id (<strong>ca_</strong>) and not your Instagram username.
                 </>,
                 <>
                   Paste the API key and <strong>ac_…</strong> id below → <strong>Save credentials</strong> →{' '}

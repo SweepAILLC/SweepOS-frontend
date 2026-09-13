@@ -44,7 +44,7 @@ export interface ClientPayment {
   receipt_url: string | null;
   subscription_id: string | null;
   invoice_id?: string | null;
-  type?: string | null;  // 'stripe_payment', 'treasury_transaction', 'manual_payment'
+  type?: string | null;  // 'stripe_payment', 'treasury_transaction', 'manual_payment', 'whop'
   description?: string | null;  // For manual payments
   payment_method?: string | null;  // For manual payments
 }

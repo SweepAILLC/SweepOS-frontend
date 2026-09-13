@@ -8,7 +8,8 @@ import { useLoading } from '@/contexts/LoadingContext';
 import UsersPanel from '@/components/UsersPanel';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import NotificationSettingsCard from '@/components/ui/NotificationSettingsCard';
-import { startOnboardingTour } from '@/lib/onboardingTour';
+import OrgTimezoneCard from '@/components/ui/OrgTimezoneCard';
+import { startOnboardingTour, subscribeSettingsTourSection } from '@/lib/onboardingTour';
 
 type SettingsSection =
   | 'appearance'
@@ -39,6 +40,7 @@ interface SettingsPanelProps {
   isOwner?: boolean;
   consultingTier?: string | null;
   isSystemOwner?: boolean;
+  userRole?: string;
   onNavigateToTab?: (tab: import('@/lib/tabs').TabId) => void;
 }
 
@@ -46,6 +48,7 @@ export default function SettingsPanel({
   isOwner = false,
   consultingTier = null,
   isSystemOwner = false,
+  userRole: userRoleProp,
   onNavigateToTab,
 }: SettingsPanelProps = {}) {
   const router = useRouter();
@@ -58,7 +61,7 @@ export default function SettingsPanel({
   const [section, setSection] = useState<SettingsSection>('appearance');
   const [organizations, setOrganizations] = useState<OrgOption[]>([]);
   const [currentOrgId, setCurrentOrgId] = useState<string | null>(null);
-  const [currentUserRole, setCurrentUserRole] = useState<string>('member');
+  const [currentUserRole, setCurrentUserRole] = useState<string>(userRoleProp || 'member');
   const [switchingOrgId, setSwitchingOrgId] = useState<string | null>(null);
   const [leavingOrgId, setLeavingOrgId] = useState<string | null>(null);
 
@@ -165,7 +168,30 @@ export default function SettingsPanel({
     }
   }, [router.isReady, router.query.tab, router.query.section, router.query.google, router.query.google_error]);
 
-  const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner';
+  const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner' || isOwner;
+
+  const goToSection = (id: SettingsSection) => {
+    setSection(id);
+    if (id === 'integrations') {
+      void router.replace(
+        { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
+        undefined,
+        { shallow: true }
+      );
+    } else if (router.query.section) {
+      void router.replace({ pathname: '/', query: { tab: 'settings' } }, undefined, {
+        shallow: true,
+      });
+    }
+  };
+
+  useEffect(() => {
+    return subscribeSettingsTourSection((next) => {
+      goToSection(next as SettingsSection);
+    });
+    // goToSection closes over router; resubscribe when query.section changes is enough
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.query.section]);
 
   useEffect(() => {
     if (
@@ -314,44 +340,19 @@ export default function SettingsPanel({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
-          <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 dark:border-gray-100" />
-          <p className="mt-3 text-gray-600 dark:text-gray-400">Loading settings...</p>
-        </div>
-      </div>
-    );
-  }
-
   const visibleSidebarItems = SIDEBAR_ITEMS.filter(
     (item) => !item.adminOnly || isAdminOrOwner
   );
 
-  return (
-    <div className="flex flex-col sm:flex-row gap-6 min-h-0 min-w-0">
-      {/* Sidebar */}
+  const sidebar = (
       <aside className="flex-shrink-0 w-full sm:w-56 lg:w-64">
         <nav className="glass-card p-2 space-y-0.5">
           {visibleSidebarItems.map((item) => (
             <button
               key={item.id}
               type="button"
-              onClick={() => {
-                setSection(item.id);
-                if (item.id === 'integrations') {
-                  void router.replace(
-                    { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
-                    undefined,
-                    { shallow: true }
-                  );
-                } else if (router.query.section) {
-                  void router.replace({ pathname: '/', query: { tab: 'settings' } }, undefined, {
-                    shallow: true,
-                  });
-                }
-              }}
+              data-tour={`settings-nav-${item.id}`}
+              onClick={() => goToSection(item.id)}
               className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
                 section === item.id
                   ? 'bg-white/20 dark:bg-white/10 text-gray-900 dark:text-gray-100'
@@ -372,6 +373,31 @@ export default function SettingsPanel({
           </div>
         </nav>
       </aside>
+  );
+
+  if (loading) {
+    return (
+      <div className="flex flex-col sm:flex-row gap-6 min-h-0 min-w-0">
+        {sidebar}
+        <div className="flex-1 min-w-0">
+          {section === 'integrations' && isAdminOrOwner ? (
+            <IntegrationsPanel />
+          ) : (
+            <div className="flex items-center justify-center min-h-[400px]">
+              <div className="text-center">
+                <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900 dark:border-gray-100" />
+                <p className="mt-3 text-gray-600 dark:text-gray-400">Loading settings...</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col sm:flex-row gap-6 min-h-0 min-w-0">
+      {sidebar}
 
       {/* Content */}
       <div className="flex-1 min-w-0">
@@ -630,7 +656,10 @@ export default function SettingsPanel({
           )}
 
           {section === 'notifications' && isAdminOrOwner && currentOrgId && (
-            <NotificationSettingsCard orgId={currentOrgId} />
+            <div className="space-y-6">
+              <NotificationSettingsCard orgId={currentOrgId} />
+              <OrgTimezoneCard orgId={currentOrgId} />
+            </div>
           )}
 
           {section === 'privacy' && (

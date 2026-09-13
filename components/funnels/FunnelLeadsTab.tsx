@@ -49,13 +49,56 @@ function formatAnswerValue(value: unknown): string {
   }
 }
 
-function formatAnswers(answers?: Record<string, unknown> | null): string {
-  if (!answers || typeof answers !== 'object') return '—';
-  const entries = Object.entries(answers).filter(
-    ([k, v]) => k && v != null && String(v).trim() !== ''
+function answerEntries(
+  answers?: Record<string, unknown> | null
+): Array<[string, string]> {
+  if (!answers || typeof answers !== 'object') return [];
+  return Object.entries(answers)
+    .filter(([k, v]) => k && v != null && String(v).trim() !== '')
+    .map(([k, v]) => [String(k), formatAnswerValue(v)]);
+}
+
+function AnswersCell({ answers }: { answers?: Record<string, unknown> | null }) {
+  const [expanded, setExpanded] = useState(false);
+  const entries = answerEntries(answers);
+  if (entries.length === 0) {
+    return <span>—</span>;
+  }
+  const compact = entries.map(([k, v]) => `${k}: ${v}`).join(' · ');
+  const canExpand = entries.length > 1 || compact.length > 80;
+
+  return (
+    <div className={expanded ? 'max-w-xl' : 'max-w-md'}>
+      {expanded ? (
+        <dl className="space-y-1.5 max-h-96 overflow-y-auto pr-1">
+          {entries.map(([k, v]) => (
+            <div key={k}>
+              <dt className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {k}
+              </dt>
+              <dd className="text-sm text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words">
+                {v}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      ) : (
+        <span className="line-clamp-3 break-words" title={compact}>
+          {compact}
+        </span>
+      )}
+      {canExpand && (
+        <button
+          type="button"
+          onClick={() => setExpanded((open) => !open)}
+          aria-expanded={expanded}
+          className="mt-1 block text-[11px] text-violet-600 dark:text-violet-400 hover:underline"
+        >
+          {expanded ? 'Show less' : 'Show more'}
+        </button>
+      )}
+    </div>
   );
-  if (entries.length === 0) return '—';
-  return entries.map(([k, v]) => `${k}: ${formatAnswerValue(v)}`).join(' · ');
 }
 
 export default function FunnelLeadsTab({ funnelId }: FunnelLeadsTabProps) {
@@ -229,10 +272,8 @@ export default function FunnelLeadsTab({ funnelId }: FunnelLeadsTabProps) {
                   <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
                     {formatCapturedAt(lead.captured_at)}
                   </td>
-                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300 max-w-md">
-                    <span className="line-clamp-3" title={formatAnswers(lead.answers)}>
-                      {formatAnswers(lead.answers)}
-                    </span>
+                  <td className="px-4 py-3 text-gray-700 dark:text-gray-300 align-top">
+                    <AnswersCell answers={lead.answers} />
                   </td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     <button

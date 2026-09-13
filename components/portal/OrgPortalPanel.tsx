@@ -137,7 +137,7 @@ export default function OrgPortalPanel({
         </div>
 
         <div className="pr-2">
-          <PortalToolsSection isActive={isActive} />
+          <PortalToolsSection isActive={isActive} organizationName={organizationName} />
         </div>
       </div>
 

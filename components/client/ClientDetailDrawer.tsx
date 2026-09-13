@@ -761,11 +761,14 @@ export default function ClientDetailDrawer({
                             onAddManualPayment={() => setShowManualPaymentForm(true)}
                             onDeletePayment={async (payment) => {
                               const isManual = payment.type === 'manual_payment';
+                              const isWhop = payment.type === 'whop';
                               if (
                                 !confirm(
                                   isManual
                                     ? 'Delete this manual payment?'
-                                    : 'Remove this Stripe payment from Sweep? Use this for refunds or incorrect imports. Stripe itself is unchanged.'
+                                    : isWhop
+                                      ? 'Remove this Whop payment from Sweep? Whop itself is unchanged.'
+                                      : 'Remove this Stripe payment from Sweep? Use this for refunds or incorrect imports. Stripe itself is unchanged.'
                                 )
                               ) {
                                 return;

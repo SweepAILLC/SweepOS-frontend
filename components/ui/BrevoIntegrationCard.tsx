@@ -10,6 +10,7 @@ interface BrevoIntegrationCardProps {
   embedded?: boolean;
   /** Called after status refresh (connect / disconnect / load) so parent can update grid badges. */
   onConnectionChange?: () => void;
+  onConnected?: () => void;
 }
 
 /**
@@ -20,6 +21,7 @@ export default function BrevoIntegrationCard({
   canManage,
   embedded = false,
   onConnectionChange,
+  onConnected,
 }: BrevoIntegrationCardProps) {
   const [status, setStatus] = useState<BrevoStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -49,6 +51,7 @@ export default function BrevoIntegrationCard({
   useEffect(() => {
     const params = new URLSearchParams(typeof window !== 'undefined' ? window.location.search : '');
     if (params.get('brevo_connected') === 'true') {
+      onConnected?.();
       setTimeout(() => {
         void loadStatus();
         window.history.replaceState({}, '', window.location.pathname);
@@ -69,6 +72,7 @@ export default function BrevoIntegrationCard({
     try {
       await apiClient.connectBrevoWithApiKey(apiKey.trim());
       setApiKey('');
+      onConnected?.();
       await loadStatus();
     } catch (error: unknown) {
       const err = error as { response?: { data?: { detail?: string } }; message?: string };

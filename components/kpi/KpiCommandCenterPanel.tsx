@@ -335,7 +335,7 @@ export default function KpiCommandCenterPanel() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            KPI Command Center
+            Sales KPIs
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Daily business tracker with calendar view and automated bottleneck detection.

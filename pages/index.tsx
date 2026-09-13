@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import Navbar, { type TabId } from '@/components/ui/Navbar';
@@ -31,7 +32,7 @@ import {
 } from '@/lib/tabAccess';
 import { useLoading } from '@/contexts/LoadingContext';
 import { clearSessionCaches } from '@/lib/cache';
-import { hasSeenOnboardingTour, markOnboardingTourSeen, startOnboardingTour } from '@/lib/onboardingTour';
+import { startOnboardingTour } from '@/lib/onboardingTour';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -89,6 +90,8 @@ export default function Dashboard() {
   const [consultingTier, setConsultingTier] = useState<ConsultingTier | null>(null);
   const [bookingUrl, setBookingUrl] = useState<string | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [onboardingCallBooked, setOnboardingCallBooked] = useState(true);
+  const [onboardingTourComplete, setOnboardingTourComplete] = useState(true);
 
   // Read tab from localStorage only after mount. Loading shell is shown until auth
   // finishes, so useEffect is enough and avoids SSR useLayoutEffect hydration warnings.
@@ -147,6 +150,12 @@ export default function Dashboard() {
         if (!isMounted) return;
 
         if (user.id) setCurrentUserId(String(user.id));
+        const uOnboard = user as {
+          onboarding_call_booked?: boolean;
+          onboarding_tour_completed?: boolean;
+        };
+        setOnboardingCallBooked(uOnboard.onboarding_call_booked !== false);
+        setOnboardingTourComplete(uOnboard.onboarding_tour_completed !== false);
         const userIsOwner = String(user.role || '').toLowerCase().trim() === 'owner';
         setIsOwner(userIsOwner);
         setIsSystemOwner(Boolean((user as { is_system_owner?: boolean }).is_system_owner));
@@ -338,11 +347,10 @@ export default function Dashboard() {
       }
       if (tab === 'brevo' || tab === 'integrations') {
         setActiveTab('settings');
-        router.replace(
-          { pathname: '/', query: { tab: 'settings', section: 'integrations' } },
-          undefined,
-          { shallow: true }
-        );
+        const nextQuery: Record<string, string> = { tab: 'settings', section: 'integrations' };
+        if (router.query.instagram === 'connected') nextQuery.instagram = 'connected';
+        if (router.query.instagram === 'error') nextQuery.instagram = 'error';
+        router.replace({ pathname: '/', query: nextQuery }, undefined, { shallow: true });
         return;
       }
       if (VALID_TAB_IDS.includes(tab as TabId)) {
@@ -407,32 +415,42 @@ export default function Dashboard() {
 
   // Shared by the Navbar's own clicks and the onboarding tour, so the tour opens
   // the real tab content behind each step instead of just pointing at the button.
+  // Never early-return on `activeTab` — the tour captures this callback once, so a
+  // stale `activeTab === 'settings'` would skip re-opening Settings after other tabs.
   const handleTabChange = (tab: TabId) => {
-    if (tab === activeTab) return;
-    setActiveTab(tab);
-    // Drop deep-link leftovers immediately so sticky ?tab=/&view=/&sub= can't snap back.
-    if (router.query.tab || router.query.view || router.query.funnelId || router.query.sub) {
-      lastConsumedDeepLinkRef.current = null;
-      void router.replace('/', undefined, { shallow: true });
+    if (tab === 'settings') {
+      flushSync(() => setActiveTab('settings'));
+    } else {
+      setActiveTab(tab);
+      if (router.query.tab || router.query.view || router.query.funnelId || router.query.sub) {
+        lastConsumedDeepLinkRef.current = null;
+        void router.replace('/', undefined, { shallow: true });
+      }
     }
   };
+  const handleTabChangeRef = useRef(handleTabChange);
+  handleTabChangeRef.current = handleTabChange;
 
-  // First-run product tour — once per user (localStorage), after the shell (and
-  // nav buttons the tour targets) has painted. Never blocks or delays the app.
+  // First-run product tour — once per org-user (DB flag), after gated forms + call booking.
   const tourStartedRef = useRef(false);
   useEffect(() => {
-    if (loading || !currentUserId || tourStartedRef.current) return;
-    if (hasSeenOnboardingTour(currentUserId)) return;
+    if (loading || !currentUserId || !onboardingCallBooked || onboardingTourComplete) return;
+    if (tourStartedRef.current) return;
     tourStartedRef.current = true;
     const timer = setTimeout(() => {
       startOnboardingTour(
         { isOwner, userRole, consultingTier, isSystemOwner },
-        { onDone: () => markOnboardingTourSeen(currentUserId), onNavigateToTab: handleTabChange }
+        {
+          onDone: () => {
+            void apiClient.completeOnboardingForm('product_tour').catch(() => {});
+          },
+          onNavigateToTab: (tab) => handleTabChangeRef.current(tab),
+        }
       );
     }, 400);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, currentUserId, isOwner, userRole, consultingTier, isSystemOwner]);
+  }, [loading, currentUserId, onboardingCallBooked, onboardingTourComplete, isOwner, userRole, consultingTier, isSystemOwner]);
 
   // Integrations live under Settings → Integrations.
   useEffect(() => {
@@ -658,6 +676,7 @@ export default function Dashboard() {
               <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">Settings</h2>
               <SettingsPanel
                 isOwner={isOwner}
+                userRole={userRole}
                 consultingTier={consultingTier}
                 isSystemOwner={isSystemOwner}
                 onNavigateToTab={handleTabChange}

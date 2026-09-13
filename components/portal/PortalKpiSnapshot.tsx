@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { apiClient } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import { formatKpiValue, kpiTierBadgeClass } from '@/lib/kpiBenchmarks';
 import type { KpiSnapshotCard, KpiSnapshotResponse, KpiTier } from '@/types/kpi';
 
@@ -43,6 +44,8 @@ type Props = {
   rangeEnd?: string;
   /** Custom controls rendered where the day-range toggle usually sits. */
   rangeControls?: ReactNode;
+  /** Refresh live calendar sales-call fields before building the snapshot. */
+  syncLive?: boolean;
 };
 
 export default function PortalKpiSnapshot({
@@ -53,6 +56,7 @@ export default function PortalKpiSnapshot({
   rangeStart,
   rangeEnd,
   rangeControls,
+  syncLive = false,
 }: Props) {
   const controlled = Boolean(rangeStart && rangeEnd);
   const [range, setRange] = useState<Range>(30);
@@ -75,20 +79,21 @@ export default function PortalKpiSnapshot({
               end: rangeEnd,
               include_flags: showFlags,
               include_series: true,
+              sync: syncLive || undefined,
             }
-          : { days: range, include_flags: showFlags, include_series: true };
+          : { days: range, include_flags: showFlags, include_series: true, sync: syncLive || undefined };
       const data = orgId
         ? await apiClient.getAdminKpiSnapshot(orgId, params)
         : await apiClient.getKpiSnapshot(params);
       setSnapshot(data);
       hasPainted.current = true;
-    } catch {
-      setError('Could not load KPI snapshot.');
+    } catch (err) {
+      setError(formatApiError(err, 'Could not load KPI snapshot.'));
     } finally {
       setLoading(false);
       setUpdating(false);
     }
-  }, [isActive, orgId, showFlags, controlled, rangeStart, rangeEnd, range]);
+  }, [isActive, orgId, showFlags, controlled, rangeStart, rangeEnd, range, syncLive]);
 
   useEffect(() => {
     void load();
@@ -102,7 +107,8 @@ export default function PortalKpiSnapshot({
       e.total_conversations ??
       e.outreach_sent ??
       0,
-    Booked: e.calls_booked ?? 0,
+    'Sales booked': e.calls_booked ?? 0,
+    'Sales taken': e.calls_taken ?? 0,
     Closes: e.closes ?? 0,
   }));
   const topFlags = showFlags ? (snapshot?.flags || []).slice(0, 3) : [];
@@ -125,7 +131,7 @@ export default function PortalKpiSnapshot({
             KPI Snapshot
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Logged activity from the KPI tracker — conversations through closes.
+            Logged activity from the KPI tracker — conversations through closes. Call counts are sales calls only.
           </p>
         </div>
         {rangeControls ? (
@@ -218,7 +224,7 @@ export default function PortalKpiSnapshot({
 
           <div>
             <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-3 uppercase tracking-wide">
-              Daily Activity — Conversations / Booked / Closes
+              Daily Activity — Conversations / Sales booked / Sales taken / Closes
             </p>
             <ResponsiveContainer width="100%" height={180}>
               <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
@@ -248,7 +254,8 @@ export default function PortalKpiSnapshot({
                   }}
                 />
                 <Bar dataKey="Conversations" fill="#818cf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                <Bar dataKey="Booked" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="Sales booked" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="Sales taken" fill="#38bdf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Closes" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={28} />
               </BarChart>
             </ResponsiveContainer>

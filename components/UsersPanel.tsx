@@ -43,7 +43,6 @@ export default function UsersPanel() {
     password: '',
     role: 'member' as 'owner' | 'admin' | 'member'
   });
-  const [newUserCredentials, setNewUserCredentials] = useState<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
     loadCurrentUser();
@@ -109,49 +108,13 @@ export default function UsersPanel() {
     }
   };
 
-  const handleCreateUser = async () => {
-    if (!formData.email.trim()) return;
-
-    // Prevent admins from creating owner users
-    if (currentUserRole !== 'owner' && formData.role === 'owner') {
-      setError('Only owners can assign the owner role');
-      return;
-    }
-
-    try {
-      const data: any = {
-        email: formData.email,
-        role: formData.role
-      };
-      
-      if (formData.password) {
-        data.password = formData.password;
-      }
-
-      const newUser = await apiClient.createUser(data);
-      setNewUserCredentials({
-        email: newUser.email,
-        password: newUser.password || formData.password
-      });
-      setShowCreateForm(false);
-      setFormData({ email: '', password: '', role: 'member' });
-      await loadUsers();
-    } catch (err: any) {
-      let errorMessage = 'Failed to create user';
-      if (err.response?.data?.detail) {
-        const detail = err.response.data.detail;
-        if (Array.isArray(detail)) {
-          errorMessage = detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ');
-        } else if (typeof detail === 'string') {
-          errorMessage = detail;
-        } else {
-          errorMessage = JSON.stringify(detail);
-        }
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      setError(errorMessage);
-    }
+  const openInviteForm = () => {
+    setShowInviteUserForm(true);
+    setShowCreateForm(false);
+    setEditingUser(null);
+    setInviteUserEmail('');
+    setInviteUserRole('member');
+    setError(null);
   };
 
   const handleUpdateUser = async (userId: string) => {
@@ -307,30 +270,9 @@ export default function UsersPanel() {
     <div className="space-y-6">
       <div className="flex flex-wrap justify-between items-center gap-2">
         <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Team Members</h2>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setShowInviteUserForm(true);
-              setInviteUserEmail('');
-              setInviteUserRole('member');
-              setError(null);
-            }}
-            className="px-4 py-2 rounded-md border border-white/20 bg-white/5 hover:bg-white/10 text-gray-900 dark:text-gray-100 text-sm font-medium transition-colors"
-          >
-            Invite User
-          </button>
-          <ShinyButton
-            onClick={() => {
-              setShowCreateForm(true);
-              setEditingUser(null);
-              setFormData({ email: '', password: '', role: 'member' });
-              setNewUserCredentials(null);
-            }}
-          >
-            + Add Team Member
-          </ShinyButton>
-        </div>
+        <ShinyButton onClick={openInviteForm}>
+          + Add Team Member
+        </ShinyButton>
       </div>
 
       {(currentUserRole === 'admin' || currentUserRole === 'owner') && (
@@ -351,7 +293,7 @@ export default function UsersPanel() {
 
       {showInviteUserForm && (
         <div className="glass-card p-6">
-          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Invite User</h3>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">Add Team Member</h3>
           <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
             They will receive an email to join this organization. New users set their password via the link.
           </p>
@@ -449,27 +391,10 @@ export default function UsersPanel() {
         </div>
       )}
 
-      {newUserCredentials && (
-        <div className="glass-card p-4 border-green-400/40">
-          <p className="text-green-800 dark:text-green-200 font-medium mb-2">User created successfully!</p>
-          <div className="text-sm text-green-700 dark:text-green-200 space-y-1">
-            <p><strong>Email:</strong> {newUserCredentials.email}</p>
-            <p><strong>Password:</strong> {newUserCredentials.password}</p>
-            <p className="text-xs mt-2 digitized-text">Please share these credentials securely with the user.</p>
-          </div>
-          <button
-            onClick={() => setNewUserCredentials(null)}
-            className="mt-2 text-sm text-green-600 dark:text-green-300 hover:text-green-800 underline"
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
-
-      {showCreateForm && (
+      {showCreateForm && editingUser && (
         <div className="glass-card p-6">
           <h3 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">
-            {editingUser ? 'Edit User' : 'Add Team Member'}
+            Edit User
           </h3>
           <div className="space-y-4">
             <div>
@@ -485,14 +410,14 @@ export default function UsersPanel() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Password {editingUser ? '(leave blank to keep current)' : '(auto-generated if blank)'}
+                Password (leave blank to keep current)
               </label>
               <input
                 type="password"
                 value={formData.password}
                 onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                 className="w-full px-3 py-2 glass-input rounded-md"
-                placeholder={editingUser ? 'Leave blank to keep current' : 'Auto-generated if blank'}
+                placeholder="Leave blank to keep current"
               />
             </div>
             <div>
@@ -514,27 +439,17 @@ export default function UsersPanel() {
               )}
             </div>
             <div className="flex space-x-2">
-              {editingUser ? (
-                <button
-                  onClick={() => handleUpdateUser(editingUser)}
-                  className="glass-button neon-glow px-4 py-2 rounded-md"
-                >
-                  Update
-                </button>
-              ) : (
-                <button
-                  onClick={handleCreateUser}
-                  className="glass-button neon-glow px-4 py-2 rounded-md"
-                >
-                  Create
-                </button>
-              )}
+              <button
+                onClick={() => handleUpdateUser(editingUser)}
+                className="glass-button neon-glow px-4 py-2 rounded-md"
+              >
+                Update
+              </button>
               <button
                 onClick={() => {
                   setShowCreateForm(false);
                   setEditingUser(null);
                   setFormData({ email: '', password: '', role: 'member' });
-                  setNewUserCredentials(null);
                 }}
                 className="glass-button-secondary px-4 py-2 rounded-md hover:bg-white/20"
               >
@@ -567,7 +482,7 @@ export default function UsersPanel() {
             {users.length === 0 ? (
               <tr>
                 <td colSpan={4} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">
-                  No users yet. Add a team member to get started.
+                  No users yet. Invite a teammate to get started.
                 </td>
               </tr>
             ) : (
@@ -597,6 +512,7 @@ export default function UsersPanel() {
                           onClick={() => {
                             setEditingUser(user.id);
                             setShowCreateForm(true);
+                            setShowInviteUserForm(false);
                             const userRole = (user.role as 'owner' | 'admin' | 'member') || 'member';
                             setFormData({ email: user.email, password: '', role: userRole });
                           }}

@@ -87,6 +87,7 @@ body {
      highlighted step is the point). */
   .sweep-onboarding-popover.driver-popover {
     @apply rounded-xl shadow-xl;
+    z-index: 1000002;
   }
   .dark .sweep-onboarding-popover.driver-popover {
     background-color: theme('colors.gray.800');
@@ -502,5 +503,26 @@ body {
 .shared-pad-editor p.is-editor-empty:first-child::before {
   @apply text-gray-400 dark:text-gray-500 pointer-events-none float-left h-0;
   content: attr(data-placeholder);
+}
+
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #content-angle-map-print,
+  #content-angle-map-print * {
+    visibility: visible !important;
+  }
+  #content-angle-map-print {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    background: #fff;
+    color: #16161a;
+    padding: 0.4in 0.5in;
+  }
+  .cam-no-print {
+    display: none !important;
+  }
 }
 

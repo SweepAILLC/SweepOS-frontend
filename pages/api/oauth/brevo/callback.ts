@@ -4,7 +4,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
  * Next.js API route handler for Brevo OAuth callback
  * 
  * This route proxies the OAuth callback to the backend API.
- * Brevo redirects to: http://localhost:3002/api/oauth/brevo/callback
+ * Brevo redirects to: http://localhost:3003/api/oauth/brevo/callback
  * This handler forwards the request to: http://localhost:8000/oauth/brevo/callback
  * 
  * The backend then processes the OAuth callback and redirects to the frontend dashboard.
@@ -18,8 +18,12 @@ export default async function handler(
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  // Get the backend API URL
-  const backendUrl = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
+  // Server-side fetch inside this container: NEXT_PUBLIC_API_BASE_URL is the
+  // browser-facing URL (localhost:8000, reachable via the published port) and
+  // would resolve to this frontend container itself when fetched from here.
+  // INTERNAL_API_BASE_URL points at the backend over the docker network instead.
+  const backendUrl =
+    process.env.INTERNAL_API_BASE_URL || process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
   
   // Forward all query parameters to the backend
   const queryParams = new URLSearchParams(req.query as Record<string, string>).toString();
@@ -59,7 +63,7 @@ export default async function handler(
     console.error('[BREVO CALLBACK] Response body:', data);
     
     // Redirect to frontend with error
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3002';
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3003';
     return res.redirect(
       302,
       `${frontendUrl}/?brevo_error=unexpected_response&error_description=${encodeURIComponent(`Backend returned status ${response.status}`)}&tab=settings&section=integrations`
@@ -68,7 +72,7 @@ export default async function handler(
     console.error('[BREVO CALLBACK] Error proxying Brevo OAuth callback:', error);
     
     // Redirect to frontend with error
-    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3002';
+    const frontendUrl = process.env.NEXT_PUBLIC_FRONTEND_URL || 'http://localhost:3003';
     return res.redirect(
       302,
       `${frontendUrl}/?brevo_error=proxy_error&error_description=${encodeURIComponent(error.message || 'Failed to process OAuth callback')}&tab=settings&section=integrations`
