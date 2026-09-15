@@ -275,6 +275,23 @@ export default function PerformanceTab() {
         </section>
       )}
 
+      {connected && status?.needs_reconnect ? (
+        <section className="glass-card rounded-xl p-5 space-y-3 border border-amber-400/40">
+          <h3 className="text-base font-semibold text-amber-900 dark:text-amber-100">Instagram session expired</h3>
+          <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">
+            Meta invalidated this login. Numbers below are last-known cache, not live. Reconnect to resume API and MCP sync.
+          </p>
+          <button
+            type="button"
+            onClick={() => void handleConnect()}
+            disabled={busy === 'connect'}
+            className="glass-button px-4 py-2 text-sm font-semibold rounded-lg disabled:opacity-50"
+          >
+            {busy === 'connect' ? 'Redirecting…' : 'Reconnect Instagram'}
+          </button>
+        </section>
+      ) : null}
+
       {connected && (
         <>
           <section className="flex flex-wrap items-end justify-between gap-3">

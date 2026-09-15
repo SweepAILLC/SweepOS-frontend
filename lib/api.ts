@@ -167,6 +167,7 @@ export interface InstagramStatus {
   followers_count?: number | null;
   capabilities?: { insights?: boolean; reason?: string | null; [key: string]: unknown };
   last_sync_at?: string | null;
+  needs_reconnect?: boolean;
   message?: string | null;
 }
 
@@ -229,6 +230,7 @@ export interface InstagramPerformance {
   capabilities?: { insights?: boolean; reason?: string | null; [key: string]: unknown };
   unsettled_post_count: number;
   last_synced_at?: string | null;
+  needs_reconnect?: boolean;
   usage?: string | null;
   username?: string | null;
 }

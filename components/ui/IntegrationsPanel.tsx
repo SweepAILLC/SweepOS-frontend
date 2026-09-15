@@ -1773,10 +1773,26 @@ export default function IntegrationsPanel() {
             </div>
 
             {instagramConnected ? (
-              <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/80 px-4 py-3 dark:border-emerald-800 dark:bg-emerald-950/40 space-y-2">
-                <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100">
-                  Instagram connected{instagramStatus?.username ? ` · @${instagramStatus.username}` : ''}
+              <div className={`rounded-xl border-2 px-4 py-3 space-y-2 ${
+                instagramStatus?.needs_reconnect
+                  ? 'border-amber-300 bg-amber-50/80 dark:border-amber-800 dark:bg-amber-950/40'
+                  : 'border-emerald-300 bg-emerald-50/80 dark:border-emerald-800 dark:bg-emerald-950/40'
+              }`}>
+                <p className={`text-sm font-semibold ${
+                  instagramStatus?.needs_reconnect
+                    ? 'text-amber-900 dark:text-amber-100'
+                    : 'text-emerald-900 dark:text-emerald-100'
+                }`}>
+                  {instagramStatus?.needs_reconnect
+                    ? `Instagram session expired${instagramStatus?.username ? ` · @${instagramStatus.username}` : ''}`
+                    : `Instagram connected${instagramStatus?.username ? ` · @${instagramStatus.username}` : ''}`}
                 </p>
+                {instagramStatus?.needs_reconnect ? (
+                  <p className="text-xs text-amber-800 dark:text-amber-200">
+                    Meta invalidated this login (password change or session rotation). Reconnect to
+                    resume API and MCP sync. Cached posts stay until then.
+                  </p>
+                ) : null}
                 {instagramStatus?.followers_count != null ? (
                   <p className={mutedClass}>{instagramStatus.followers_count.toLocaleString()} followers</p>
                 ) : null}
@@ -1811,6 +1827,24 @@ export default function IntegrationsPanel() {
                     }}
                   >
                     {instagramBusy ? 'Working…' : 'Sync now'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || instagramBusy}
+                    className="glass-button rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50"
+                    onClick={async () => {
+                      setInstagramBusy(true);
+                      setError(null);
+                      try {
+                        const { redirect_url } = await apiClient.postInstagramConnect();
+                        window.location.href = redirect_url;
+                      } catch (e) {
+                        setError(formatApiError(e, 'Reconnect failed'));
+                        setInstagramBusy(false);
+                      }
+                    }}
+                  >
+                    {instagramBusy ? 'Redirecting…' : 'Reconnect Instagram'}
                   </button>
                   <button
                     type="button"
