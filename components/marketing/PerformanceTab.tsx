@@ -74,7 +74,6 @@ function PostMediaCard({
           <img
             src={post.thumbnail_url!}
             alt=""
-            referrerPolicy="no-referrer"
             loading="lazy"
             decoding="async"
             onError={() => setImgFailed(true)}
