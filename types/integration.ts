@@ -440,3 +440,18 @@ export interface DiscordStatus {
   bot_configured: boolean;
   oauth_configured: boolean;
 }
+
+export interface GhlStatus {
+  connected: boolean;
+  location_id?: string | null;
+  last_sync_at?: string | null;
+  needs_reconnect?: boolean;
+  message?: string | null;
+}
+
+export interface GhlCalendar {
+  id: string;
+  name: string | null;
+  enabled: boolean;
+  is_sales_call: boolean;
+}

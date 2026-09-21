@@ -9,6 +9,7 @@ import { useLoading } from '@/contexts/LoadingContext';
 
 interface StripeDashboardPanelProps {
   userRole?: string; // 'owner' | 'admin' | 'member'
+  isSystemOwner?: boolean;
 }
 
 /** Prefer saved client name; otherwise transaction email; avoid showing "Unknown" when email exists. */
@@ -25,7 +26,10 @@ function stripeCustomerSecondaryEmail(p: { client_name?: string; client_email?: 
   return em;
 }
 
-export default function StripeDashboardPanel({ userRole = 'member' }: StripeDashboardPanelProps) {
+export default function StripeDashboardPanel({
+  userRole = 'member',
+  isSystemOwner = false,
+}: StripeDashboardPanelProps) {
   const { setLoading: setGlobalLoading } = useLoading();
   const [summary, setSummary] = useState<StripeSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,7 +42,8 @@ export default function StripeDashboardPanel({ userRole = 'member' }: StripeDash
   const roleLower = String(userRole || 'member').toLowerCase().trim();
   // Explicitly check - only admin and owner can manage, members cannot
   // If role is member or anything other than admin/owner, cannot manage
-  const canManageIntegrations = roleLower === 'admin' || roleLower === 'owner';
+  const canManageIntegrations =
+    roleLower === 'admin' || roleLower === 'owner' || isSystemOwner;
   const [revenueTimeline, setRevenueTimeline] = useState<RevenueTimeline | null>(null);
   const [churnData, setChurnData] = useState<ChurnData | null>(null);
   const [mrrTrend, setMrrTrend] = useState<MRRTrend | null>(null);

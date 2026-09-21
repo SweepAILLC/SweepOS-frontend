@@ -169,6 +169,7 @@ export default function SettingsPanel({
   }, [router.isReady, router.query.tab, router.query.section, router.query.google, router.query.google_error]);
 
   const isAdminOrOwner = currentUserRole === 'admin' || currentUserRole === 'owner' || isOwner;
+  const canSeeIntegrations = isAdminOrOwner || isSystemOwner;
 
   const goToSection = (id: SettingsSection) => {
     setSection(id);
@@ -196,12 +197,12 @@ export default function SettingsPanel({
   useEffect(() => {
     if (
       !loading &&
-      (section === 'integrations' || section === 'notifications') &&
-      !isAdminOrOwner
+      ((section === 'integrations' && !canSeeIntegrations) ||
+        (section === 'notifications' && !isAdminOrOwner))
     ) {
       setSection('appearance');
     }
-  }, [loading, section, isAdminOrOwner]);
+  }, [loading, section, isAdminOrOwner, canSeeIntegrations]);
 
   const handleConnectGoogle = async () => {
     try {
@@ -340,9 +341,10 @@ export default function SettingsPanel({
     }
   };
 
-  const visibleSidebarItems = SIDEBAR_ITEMS.filter(
-    (item) => !item.adminOnly || isAdminOrOwner
-  );
+  const visibleSidebarItems = SIDEBAR_ITEMS.filter((item) => {
+    if (item.id === 'integrations') return canSeeIntegrations;
+    return !item.adminOnly || isAdminOrOwner;
+  });
 
   const sidebar = (
       <aside className="flex-shrink-0 w-full sm:w-56 lg:w-64">
@@ -380,7 +382,7 @@ export default function SettingsPanel({
       <div className="flex flex-col sm:flex-row gap-6 min-h-0 min-w-0">
         {sidebar}
         <div className="flex-1 min-w-0">
-          {section === 'integrations' && isAdminOrOwner ? (
+          {section === 'integrations' && canSeeIntegrations ? (
             <IntegrationsPanel />
           ) : (
             <div className="flex items-center justify-center min-h-[400px]">
@@ -401,7 +403,7 @@ export default function SettingsPanel({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        {section === 'integrations' && isAdminOrOwner ? (
+        {section === 'integrations' && canSeeIntegrations ? (
           <IntegrationsPanel />
         ) : (
         <div className="glass-card p-6">

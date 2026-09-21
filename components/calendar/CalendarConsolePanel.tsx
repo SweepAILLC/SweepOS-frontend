@@ -55,9 +55,13 @@ function orgIdFromAccessToken(): string {
 
 interface CalendarConsolePanelProps {
   userRole?: string; // 'owner' | 'admin' | 'member'
+  isSystemOwner?: boolean;
 }
 
-export default function CalendarConsolePanel({ userRole = 'member' }: CalendarConsolePanelProps) {
+export default function CalendarConsolePanel({
+  userRole = 'member',
+  isSystemOwner = false,
+}: CalendarConsolePanelProps) {
   const { setLoading: setGlobalLoading } = useLoading();
   // Status for both providers
   const [calcomStatus, setCalcomStatus] = useState<CalComStatus | null>(null);
@@ -69,7 +73,8 @@ export default function CalendarConsolePanel({ userRole = 'member' }: CalendarCo
   const roleLower = String(userRole || 'member').toLowerCase().trim();
   // Explicitly check - only admin and owner can manage, members cannot
   // If role is member or anything other than admin/owner, cannot manage
-  const canManageIntegrations = roleLower === 'admin' || roleLower === 'owner';
+  const canManageIntegrations =
+    roleLower === 'admin' || roleLower === 'owner' || isSystemOwner;
   
   // Connection state
   const [connecting, setConnecting] = useState(false);

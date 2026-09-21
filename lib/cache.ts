@@ -107,6 +107,7 @@ export const CACHE_KEYS = {
   FUNNELS: 'funnels',
   BREVO_STATUS: 'brevo_status',
   CALCOM_STATUS: 'calcom_status',
+  GHL_STATUS: 'ghl_status',
   STRIPE_FAILED_PAYMENTS: 'stripe_failed_payments',
   STRIPE_STATUS: 'stripe_status',
   FINANCES_SUMMARY: 'finances_summary',

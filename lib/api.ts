@@ -1815,6 +1815,59 @@ class ApiClient {
     return response.data;
   }
 
+  // GHL (GoHighLevel) — private integration token, not OAuth
+  async connectGhl(apiKey: string, locationId: string) {
+    const response = await this.client.post('/integrations/ghl/connect', {
+      api_key: apiKey,
+      location_id: locationId,
+    });
+    cache.delete(CACHE_KEYS.GHL_STATUS);
+    dispatchCalendarIntegrationChanged();
+    return response.data as import('@/types/integration').GhlStatus;
+  }
+
+  async getGhlStatus() {
+    const response = await this.client.get('/integrations/ghl/status');
+    return response.data as import('@/types/integration').GhlStatus;
+  }
+
+  async disconnectGhl() {
+    await this.client.delete('/integrations/ghl/disconnect');
+    cache.delete(CACHE_KEYS.GHL_STATUS);
+    dispatchCalendarIntegrationChanged();
+  }
+
+  async listGhlCalendars() {
+    const response = await this.client.get('/integrations/ghl/calendars');
+    return response.data as { calendars: import('@/types/integration').GhlCalendar[] };
+  }
+
+  async setGhlCalendarSyncSetting(
+    calendarId: string,
+    calendarName: string | null,
+    enabled: boolean,
+    isSalesCall: boolean
+  ) {
+    const response = await this.client.put('/integrations/ghl/calendars/sync-settings', {
+      calendar_id: calendarId,
+      calendar_name: calendarName,
+      enabled,
+      is_sales_call: isSalesCall,
+    });
+    dispatchCalendarIntegrationChanged();
+    return response.data;
+  }
+
+  async deleteGhlCalendarSyncSetting(calendarId: string) {
+    await this.client.delete(`/integrations/ghl/calendars/sync-settings/${calendarId}`);
+    dispatchCalendarIntegrationChanged();
+  }
+
+  async syncGhlContacts() {
+    const response = await this.client.post('/integrations/ghl/contacts/sync');
+    return response.data as { started: boolean; message?: string };
+  }
+
   // Cal.com
   async connectCalComWithApiKey(apiKey: string) {
     const response = await this.client.post('/oauth/calcom/connect-direct', {

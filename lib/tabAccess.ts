@@ -52,6 +52,16 @@ export function isOrgAdminRole(userRole: string): boolean {
   return roleLower === 'admin' || roleLower === 'owner';
 }
 
+/** Connect/edit org integrations: org admin/owner, or system owner on an org they belong to. */
+export function canManageOrgIntegrations(
+  userRole: string,
+  opts?: { isAdmin?: boolean; isSystemOwner?: boolean },
+): boolean {
+  if (opts?.isSystemOwner) return true;
+  if (opts?.isAdmin) return true;
+  return isOrgAdminRole(userRole);
+}
+
 /**
  * Whether a tab should appear in the nav.
  * Org tab-permission toggles do NOT hide tabs — they only lock content.

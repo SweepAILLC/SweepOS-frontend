@@ -10,10 +10,11 @@ import {
 import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
+import GhlIntegrationCard from '@/components/ui/GhlIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
-import { isOrgAdminRole } from '@/lib/tabAccess';
+import { canManageOrgIntegrations } from '@/lib/tabAccess';
 import { formatApiError } from '@/lib/apiError';
-import type { BrevoStatus, CalComStatus, CalendlyStatus, DiscordStatus } from '@/types/integration';
+import type { BrevoStatus, CalComStatus, CalendlyStatus, DiscordStatus, GhlStatus } from '@/types/integration';
 
 type IntegrationModal =
   | 'brevo'
@@ -25,6 +26,7 @@ type IntegrationModal =
   | 'claude'
   | 'instagram'
   | 'discord'
+  | 'ghl'
   | null;
 
 const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
@@ -228,6 +230,7 @@ export default function IntegrationsPanel() {
   const [modal, setModal] = useState<IntegrationModal>(null);
   const [brevoSummary, setBrevoSummary] = useState<BrevoStatus | null>(null);
   const [discordSummary, setDiscordSummary] = useState<DiscordStatus | null>(null);
+  const [ghlSummary, setGhlSummary] = useState<GhlStatus | null>(null);
   const [stripeConnected, setStripeConnected] = useState(false);
   const [stripeAccountId, setStripeAccountId] = useState<string | null>(null);
   const [stripeStatus, setStripeStatus] = useState<StripeConnectionStatus | null>(null);
@@ -282,6 +285,15 @@ export default function IntegrationsPanel() {
     }
   }, []);
 
+  const refreshGhlSummary = useCallback(async () => {
+    try {
+      const data = await apiClient.getGhlStatus();
+      setGhlSummary(data);
+    } catch {
+      setGhlSummary(null);
+    }
+  }, []);
+
   const refreshIntegrationSummaries = useCallback(async () => {
     try {
       const [stripeSt, calcom, calendly, whop, ig] = await Promise.all([
@@ -322,21 +334,28 @@ export default function IntegrationsPanel() {
     try {
       setLoading(true);
       setError(null);
-      const [settings, user, brevo, fStatus, discord] = await Promise.all([
+      const [settings, user, brevo, fStatus, discord, ghl] = await Promise.all([
         apiClient.getUserSettings(),
         apiClient.getCurrentUser(),
         apiClient.getBrevoStatus().catch(() => null),
         apiClient.getFathomStatus().catch(() => null),
         apiClient.getDiscordStatus().catch(() => null),
+        apiClient.getGhlStatus().catch(() => null),
       ]);
       {
         const loadedKey = typeof settings?.fathom_api_key === 'string' ? settings.fathom_api_key : '';
         setFathomApiKey(loadedKey);
         setInitialFathomKey(loadedKey);
       }
-      setCanManageIntegrations(isOrgAdminRole(user?.role) || user?.is_admin === true);
+      setCanManageIntegrations(
+        canManageOrgIntegrations(user?.role, {
+          isAdmin: user?.is_admin === true,
+          isSystemOwner: user?.is_system_owner === true,
+        }),
+      );
       setBrevoSummary(brevo);
       setDiscordSummary(discord);
+      setGhlSummary(ghl);
       setFathomStatus(fStatus);
       await refreshIntegrationSummaries();
     } catch (err: unknown) {
@@ -766,6 +785,7 @@ export default function IntegrationsPanel() {
 
   const brevoConnected = brevoSummary?.connected === true;
   const discordConnected = discordSummary?.connected === true;
+  const ghlConnected = ghlSummary?.connected === true;
   const fathomConfigured = fathomApiKey.trim().length > 0 || fathomStatus?.configured === true;
   const fathomWebhookActive =
     !fathomWebhookRegistering &&
@@ -972,6 +992,25 @@ export default function IntegrationsPanel() {
             </p>
           </div>
         </button>
+
+        <button type="button" onClick={() => setModal('ghl')} className={tileBtn} data-tour="integration-ghl">
+          <div className="flex h-full min-h-0 flex-col">
+            <BrandTileImage src="/ghl.svg" alt="GHL" />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">GHL</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Contacts &amp; calendar sync
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                ghlConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {ghlConnected ? 'Connected' : 'Not connected'}
+            </p>
+          </div>
+        </button>
       </div>
 
       {modal === 'discord' && (
@@ -993,6 +1032,14 @@ export default function IntegrationsPanel() {
                 )
               }
             />
+          </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'ghl' && (
+        <SquareModalShell title="GHL" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <GhlIntegrationCard canManage={canManageIntegrations} embedded onConnectionChange={refreshGhlSummary} />
           </div>
         </SquareModalShell>
       )}
