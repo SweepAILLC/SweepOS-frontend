@@ -122,7 +122,7 @@ export default function ContentStudioPanel() {
       setConceptRegenPending(Boolean(res.bundle_regenerating));
       setReanalyzeMessage(
         res.bundle_regenerating
-          ? 'Fathom synced — regenerating TOF/MOF/BOF concepts from call evidence and Instagram top posts.'
+          ? 'Regenerating TOF/MOF/BOF concepts from call evidence and Instagram top posts.'
           : 'Re-analyze complete.'
       );
       await loadBootstrap();

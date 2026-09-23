@@ -137,24 +137,6 @@ export interface FathomWebhookSetupResponse {
   error?: string;
 }
 
-/** Response from POST /integrations/fathom/sync */
-export interface FathomSyncResponse {
-  skipped?: boolean;
-  reason?: string;
-  started?: boolean;
-  background?: boolean;
-  message?: string;
-  ingested?: number;
-  processed?: number;
-  meetings_seen?: number;
-  ingested_unlinked?: number;
-  relinked_to_clients?: number;
-  ingest_errors?: number;
-  skipped_no_client_match?: number;
-  call_insights_queued?: number;
-  pending_insight_record_ids?: string[];
-}
-
 // --- Instagram Performance Intel (Composio-backed) ---
 
 export interface InstagramStatus {
@@ -1380,17 +1362,6 @@ class ApiClient {
     // LLM call can exceed default 10s; avoid false "failed" in dev.
     const response = await this.client.post(`/clients/${clientId}/call-insights/refresh`, undefined, {
       timeout: 120000,
-    });
-    return response.data;
-  }
-
-  /**
-   * Pull recent meetings from Fathom (matches clients by invitee email → ingests summaries/transcripts).
-   * Uses the organization Fathom API key (Integrations tab) or FATHOM_API_KEY env.
-   */
-  async syncFathomMeetings(): Promise<FathomSyncResponse> {
-    const response = await this.client.post('/integrations/fathom/sync', null, {
-      timeout: 30000,
     });
     return response.data;
   }

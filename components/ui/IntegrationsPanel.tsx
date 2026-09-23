@@ -7,7 +7,6 @@ import {
   type InstagramStatus,
   type StripeConnectionStatus,
 } from '@/lib/api';
-import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
 import GhlIntegrationCard from '@/components/ui/GhlIntegrationCard';
@@ -1139,7 +1138,6 @@ export default function IntegrationsPanel() {
               {(fathomStatus?.configured || fathomWebhookRegistering) && (
                 <FathomWebhookStatusRow status={fathomStatus} registering={fathomWebhookRegistering} />
               )}
-              <FathomSyncSection variant="modal" />
               {canManageIntegrations && (
                 <button
                   type="submit"

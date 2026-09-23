@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { apiClient, CallLibraryItem } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import { useLoading } from '@/contexts/LoadingContext';
@@ -133,7 +133,7 @@ function ClosedDealBadge({
       : 'text-xs px-2 py-0.5';
   return (
     <span
-      title={label === 'Closed' ? 'Sale closed on this call (amount not stated)' : `Sale closed on this call: ${label}`}
+      title={label === 'Closed' ? 'Cash collected on this call (amount not stated)' : `Cash collected on this call: ${label}`}
       className={[
         'inline-flex items-center gap-1 rounded-full font-semibold tabular-nums',
         'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-500/30',
@@ -154,7 +154,7 @@ function callLibraryStatusMessage(
 ): string {
   if (status === 'complete') return '';
   if (failureReason === 'orphan_fathom_record') {
-    return 'Source call is no longer in your Fathom data. Run Sync Fathom to re-import, or remove this row.';
+    return 'Source call is no longer in your Fathom data. Remove this row.';
   }
   if (failureReason === 'no_content') {
     return 'No transcript or summary was available for this call.';
@@ -202,7 +202,6 @@ export default function CallLibraryPanel() {
   });
 
   const selectedItem = selectedId ? itemsSorted.find((i) => i.id === selectedId) : itemsSorted[0];
-  const itemIdSet = useMemo(() => new Set((data?.items ?? []).map((i) => i.id)), [data?.items]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -242,10 +241,9 @@ export default function CallLibraryPanel() {
     setRefreshNote(null);
     setRefreshError(null);
     try {
-      // Refresh syncs new Fathom metadata, then re-queues a bounded batch of
-      // failed / genuinely-stuck reports so recovery visibly progresses.
-      const beforeIds = new Set(itemIdSet);
-      const syncRes = await apiClient.syncFathomMeetings();
+      // New calls arrive via the Fathom webhook (already polled in the background
+      // below); refresh just re-queues a bounded batch of failed / genuinely-stuck
+      // reports so recovery visibly progresses, then reloads the list.
       let requeued = 0;
       try {
         const r = await apiClient.retryCallLibraryStuckPending();
@@ -255,55 +253,19 @@ export default function CallLibraryPanel() {
       }
       await load();
 
-      // User-facing result summary.
-      const skipped = Boolean((syncRes as { skipped?: boolean }).skipped);
-      if (skipped) {
-        const reason = String((syncRes as { reason?: string }).reason || 'Sync skipped');
-        const note = requeued > 0 ? ` Re-queued ${requeued} for analysis.` : '';
-        setRefreshNote(`Sync skipped: ${reason}.${note}`);
-        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
-        return;
-      }
-
-      const ingested = Number((syncRes as { ingested?: number }).ingested ?? 0);
-      const seen = Number((syncRes as { meetings_seen?: number }).meetings_seen ?? 0);
-      const skippedNoClient = Number((syncRes as { skipped_no_client_match?: number }).skipped_no_client_match ?? 0);
-
-      if (!ingested) {
-        const parts: string[] = [];
-        if (seen > 0 && skippedNoClient > 0) {
-          parts.push(
-            'No new client-matched calls found (meetings were seen, but none matched existing client emails).'
-          );
-        } else {
-          parts.push('No new calls available.');
-        }
-        if (requeued > 0) parts.push(`Re-queued ${requeued} for analysis.`);
-        setRefreshNote(parts.join(' '));
-        setPostSyncPollUntilMs(requeued > 0 ? Date.now() + 90_000 : null);
-        return;
-      }
-
-      // New Fathom rows ingested — background report generation runs on the worker.
-      const afterIds = new Set((data?.items ?? []).map((i) => i.id));
-      const newAppeared = Array.from(afterIds).some((id) => !beforeIds.has(id));
-      if (newAppeared) {
-        setRefreshNote(`Found ${ingested} new call${ingested === 1 ? '' : 's'}.`);
-        setPostSyncPollUntilMs(Date.now() + 45_000);
+      if (requeued > 0) {
+        setRefreshNote(`Re-queued ${requeued} for analysis.`);
+        setPostSyncPollUntilMs(Date.now() + 90_000);
       } else {
-        setRefreshNote(
-          `Found ${ingested} new call${ingested === 1 ? '' : 's'} — analyzing in the background…`
-        );
-        setPostSyncPollUntilMs(Date.now() + 45_000);
+        setRefreshNote('Up to date.');
+        setPostSyncPollUntilMs(null);
       }
     } catch (e: unknown) {
-      setRefreshError(
-        formatApiError(e, 'Could not refresh Call Library. Check your connection, confirm Fathom is connected, and try again.')
-      );
+      setRefreshError(formatApiError(e, 'Could not refresh Call Library. Try again.'));
     } finally {
       setRefreshing(false);
     }
-  }, [itemIdSet, load, data?.items]);
+  }, [load]);
 
   useEffect(() => {
     void load();
@@ -703,16 +665,6 @@ export default function CallLibraryPanel() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {selectedItem.share_url ? (
-                        <a
-                          href={selectedItem.share_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                        >
-                          Open share link
-                        </a>
-                      ) : null}
                       {selectedItem.video_url ? (
                         <a
                           href={selectedItem.video_url}
@@ -776,45 +728,6 @@ export default function CallLibraryPanel() {
                     </div>
                   ) : selectedItem.report && isGlanceCallLibraryItem(selectedItem) ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
-                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
-                        <section>
-                          <div className="flex items-center justify-between gap-3">
-                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
-                            <div className="flex items-center gap-2">
-                              {selectedItem.share_url ? (
-                                <a
-                                  href={selectedItem.share_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open share link
-                                </a>
-                              ) : null}
-                              {selectedItem.video_url ? (
-                                <a
-                                  href={selectedItem.video_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open video
-                                </a>
-                              ) : selectedItem.recording_url ? (
-                                <a
-                                  href={selectedItem.recording_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open recording
-                                </a>
-                              ) : null}
-                            </div>
-                          </div>
-                        </section>
-                      ) : null}
-
                       {(() => {
                         const ai = glanceAiSummary(selectedItem.report);
                         if (!ai) return null;
@@ -843,49 +756,6 @@ export default function CallLibraryPanel() {
                     </div>
                   ) : selectedItem.report ? (
                     <div className="px-4 py-5 space-y-6 text-sm text-gray-700 dark:text-gray-300 bg-white/20 dark:bg-gray-900/30">
-                      {selectedItem.video_url || selectedItem.share_url || selectedItem.recording_url ? (
-                        <section>
-                          <div className="flex items-center justify-between gap-3">
-                            <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500">Recording</h4>
-                            <div className="flex items-center gap-2">
-                              {selectedItem.share_url ? (
-                                <a
-                                  href={selectedItem.share_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open share link
-                                </a>
-                              ) : null}
-                              {selectedItem.video_url ? (
-                                <a
-                                  href={selectedItem.video_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open video
-                                </a>
-                              ) : selectedItem.recording_url ? (
-                                <a
-                                  href={selectedItem.recording_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-xs glass-button-secondary px-3 py-1.5 rounded-md"
-                                >
-                                  Open recording
-                                </a>
-                              ) : null}
-                            </div>
-                          </div>
-
-                          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                            Use these links to view the recording (some providers block embedding inside other apps).
-                          </p>
-                        </section>
-                      ) : null}
-
                       <section>
                         <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">Call context</h4>
                         <p className="leading-relaxed">
@@ -897,7 +767,7 @@ export default function CallLibraryPanel() {
                         <section className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3">
                           <div className="flex items-center justify-between gap-3">
                             <h4 className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                              Deal closed on this call
+                              Cash collected on this call
                             </h4>
                             <ClosedDealBadge item={selectedItem} size="sm" />
                           </div>
@@ -1251,32 +1121,6 @@ export default function CallLibraryPanel() {
                             : null}
                         </ul>
                       </section>
-
-                      {selectedItem.report.customer_response && typeof selectedItem.report.customer_response === 'object' ? (
-                        <section>
-                          <h4 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                            Customer response
-                          </h4>
-                          <p className="leading-relaxed mb-2">
-                            {String(
-                              (selectedItem.report.customer_response as { emotional_tone?: string }).emotional_tone || ''
-                            )}
-                          </p>
-                          {Array.isArray(
-                            (selectedItem.report.customer_response as { questions_asked?: string[] }).questions_asked
-                          ) &&
-                          (selectedItem.report.customer_response as { questions_asked: string[] }).questions_asked
-                            .length ? (
-                            <ul className="list-disc list-inside text-xs space-y-1">
-                              {(selectedItem.report.customer_response as { questions_asked: string[] }).questions_asked.map(
-                                (q, i) => (
-                                  <li key={i}>{q}</li>
-                                )
-                              )}
-                            </ul>
-                          ) : null}
-                        </section>
-                      ) : null}
 
                       {typeof selectedItem.report.overall_impression === 'string' && selectedItem.report.overall_impression ? (
                         <section>

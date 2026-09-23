@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import Link from 'next/link';
 import { apiClient } from '@/lib/api';
-import FathomSyncSection from '@/components/ui/FathomSyncSection';
 import { useTheme } from '@/contexts/ThemeContext';
 
 interface OrgOption {
@@ -300,7 +299,6 @@ export default function UserSettingsModal({ isOpen, onClose }: UserSettingsModal
                         </Link>{' '}
                         tab (admins/owners).
                       </p>
-                      <FathomSyncSection variant="modal" />
                     </div>
                   )}
                 </div>
