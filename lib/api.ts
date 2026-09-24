@@ -1198,13 +1198,15 @@ class ApiClient {
     paymentDate?: string,
     description?: string,
     paymentMethod?: string,
-    receiptUrl?: string
+    receiptUrl?: string,
+    revenue?: number
   ) {
     const params: any = { amount };
     if (paymentDate) params.payment_date = paymentDate;
     if (description) params.description = description;
     if (paymentMethod) params.payment_method = paymentMethod;
     if (receiptUrl) params.receipt_url = receiptUrl;
+    if (revenue != null && Number.isFinite(revenue)) params.revenue = revenue;
     const response = await this.client.post(`/clients/${clientId}/manual-payment`, null, { params });
     cache.deleteByPrefix(`client_payments_${clientId}_`);
     invalidateCachesAfterManualPayment();
@@ -1218,13 +1220,15 @@ class ApiClient {
     paymentDate?: string,
     description?: string,
     paymentMethod?: string,
-    receiptUrl?: string
+    receiptUrl?: string,
+    revenue?: number
   ) {
     const params: Record<string, string | number> = { amount };
     if (paymentDate) params.payment_date = paymentDate;
     if (description !== undefined) params.description = description;
     if (paymentMethod !== undefined) params.payment_method = paymentMethod;
     if (receiptUrl !== undefined) params.receipt_url = receiptUrl;
+    if (revenue != null && Number.isFinite(revenue)) params.revenue = revenue;
     const response = await this.client.patch(
       `/clients/${clientId}/manual-payment/${paymentId}`,
       null,

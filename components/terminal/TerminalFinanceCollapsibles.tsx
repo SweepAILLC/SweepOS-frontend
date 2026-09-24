@@ -171,6 +171,7 @@ export default function TerminalFinanceCollapsibles({
   const [manualPaymentForm, setManualPaymentForm] = useState({
     clientId: '',
     amount: '',
+    revenue: '',
     payment_date: new Date().toISOString().split('T')[0],
     description: '',
     payment_method: '',
@@ -400,8 +401,13 @@ export default function TerminalFinanceCollapsibles({
       return;
     }
     const amount = parseFloat(manualPaymentForm.amount);
+    const revenue = parseFloat(manualPaymentForm.revenue);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setManualPaymentError('Enter a valid amount.');
+      setManualPaymentError('Enter cash collected.');
+      return;
+    }
+    if (!Number.isFinite(revenue) || revenue < 0) {
+      setManualPaymentError('Enter deal revenue.');
       return;
     }
     setManualPaymentError(null);
@@ -418,11 +424,13 @@ export default function TerminalFinanceCollapsibles({
         paymentDateISO,
         manualPaymentForm.description || undefined,
         manualPaymentForm.payment_method || undefined,
-        manualPaymentForm.receipt_url || undefined
+        manualPaymentForm.receipt_url || undefined,
+        revenue
       );
       setManualPaymentForm({
         clientId: '',
         amount: '',
+        revenue: '',
         payment_date: new Date().toISOString().split('T')[0],
         description: '',
         payment_method: '',
@@ -632,7 +640,7 @@ export default function TerminalFinanceCollapsibles({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Amount ($)
+                      Cash collected ($)
                     </label>
                     <input
                       type="number"
@@ -640,7 +648,29 @@ export default function TerminalFinanceCollapsibles({
                       min="0.01"
                       required
                       value={manualPaymentForm.amount}
-                      onChange={(e) => setManualPaymentForm((f) => ({ ...f, amount: e.target.value }))}
+                      onChange={(e) => {
+                        const amount = e.target.value;
+                        setManualPaymentForm((f) => ({
+                          ...f,
+                          amount,
+                          revenue: f.revenue === '' || f.revenue === f.amount ? amount : f.revenue,
+                        }));
+                      }}
+                      className="w-full rounded-md glass-input sm:text-sm"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Revenue ($)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      required
+                      value={manualPaymentForm.revenue}
+                      onChange={(e) => setManualPaymentForm((f) => ({ ...f, revenue: e.target.value }))}
                       className="w-full rounded-md glass-input sm:text-sm"
                       placeholder="0.00"
                     />

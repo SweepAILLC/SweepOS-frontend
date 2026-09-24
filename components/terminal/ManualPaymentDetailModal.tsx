@@ -14,8 +14,11 @@ function paymentDateInputFromUnix(ts: number): string {
 }
 
 function formStateFromPayment(payment: Payment) {
+  const cash = ((payment.amount_cents || 0) / 100).toFixed(2);
+  const revCents = payment.revenue_cents ?? payment.amount_cents ?? 0;
   return {
-    amount: ((payment.amount_cents || 0) / 100).toFixed(2),
+    amount: cash,
+    revenue: (revCents / 100).toFixed(2),
     payment_date: payment.created_at
       ? paymentDateInputFromUnix(payment.created_at)
       : new Date().toISOString().split('T')[0],
@@ -72,8 +75,13 @@ export default function ManualPaymentDetailModal({
       return;
     }
     const amount = parseFloat(form.amount);
+    const revenue = parseFloat(form.revenue);
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError('Enter a valid amount.');
+      setError('Enter cash collected.');
+      return;
+    }
+    if (!Number.isFinite(revenue) || revenue < 0) {
+      setError('Enter deal revenue.');
       return;
     }
     setError(null);
@@ -91,7 +99,8 @@ export default function ManualPaymentDetailModal({
         paymentDateISO,
         form.description,
         form.payment_method,
-        form.receipt_url
+        form.receipt_url,
+        revenue
       );
       await onSaved();
       onClose();
@@ -157,7 +166,7 @@ export default function ManualPaymentDetailModal({
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         <div className={isInline ? 'grid grid-cols-1 sm:grid-cols-2 gap-3' : undefined}>
           <div>
-            <label className={labelClass}>Amount ($)</label>
+            <label className={labelClass}>Cash collected ($)</label>
             <input
               type="number"
               step="0.01"
@@ -165,6 +174,18 @@ export default function ManualPaymentDetailModal({
               required
               value={form.amount}
               onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+              className="w-full rounded-md glass-input sm:text-sm"
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Revenue ($)</label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              value={form.revenue}
+              onChange={(e) => setForm((f) => ({ ...f, revenue: e.target.value }))}
               className="w-full rounded-md glass-input sm:text-sm"
             />
           </div>

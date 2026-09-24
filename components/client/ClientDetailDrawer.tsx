@@ -67,6 +67,7 @@ export default function ClientDetailDrawer({
   const [showManualPaymentForm, setShowManualPaymentForm] = useState(false);
   const [manualPaymentForm, setManualPaymentForm] = useState({
     amount: '',
+    revenue: '',
     payment_date: new Date().toISOString().split('T')[0],
     description: '',
     payment_method: '',
@@ -842,10 +843,12 @@ export default function ClientDetailDrawer({
                                   manualPaymentForm.description || undefined,
                                   manualPaymentForm.payment_method || undefined,
                                   manualPaymentForm.receipt_url || undefined,
+                                  parseFloat(manualPaymentForm.revenue),
                                 );
                                 setShowManualPaymentForm(false);
                                 setManualPaymentForm({
                                   amount: '',
+                                  revenue: '',
                                   payment_date: new Date().toISOString().split('T')[0],
                                   description: '',
                                   payment_method: '',
@@ -866,7 +869,7 @@ export default function ClientDetailDrawer({
                             <div className="space-y-4">
                               <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                                  Amount ($)
+                                  Cash collected ($)
                                 </label>
                                 <input
                                   type="number"
@@ -874,8 +877,30 @@ export default function ClientDetailDrawer({
                                   min="0.01"
                                   required
                                   value={manualPaymentForm.amount}
+                                  onChange={(e) => {
+                                    const amount = e.target.value;
+                                    setManualPaymentForm((f) => ({
+                                      ...f,
+                                      amount,
+                                      revenue: f.revenue === '' || f.revenue === f.amount ? amount : f.revenue,
+                                    }));
+                                  }}
+                                  className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                                  placeholder="0.00"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                  Revenue ($)
+                                </label>
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  required
+                                  value={manualPaymentForm.revenue}
                                   onChange={(e) =>
-                                    setManualPaymentForm({ ...manualPaymentForm, amount: e.target.value })
+                                    setManualPaymentForm({ ...manualPaymentForm, revenue: e.target.value })
                                   }
                                   className="w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                                   placeholder="0.00"

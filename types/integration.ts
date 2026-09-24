@@ -236,7 +236,8 @@ export interface CalendlyEventTypesResponse {
 export interface Payment {
   id: string;
   stripe_id?: string | null;
-  amount_cents: number; // Amount in cents
+  amount_cents: number; // Cash collected in cents
+  revenue_cents?: number | null;
   currency?: string;
   status: string;
   created_at: number; // Unix timestamp

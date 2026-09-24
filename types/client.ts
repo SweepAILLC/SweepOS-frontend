@@ -38,6 +38,8 @@ export interface ClientPayment {
   stripe_id: string | null;  // null for manual payments
   amount_cents: number;
   amount: number;
+  revenue_cents?: number | null;
+  revenue?: number | null;
   currency: string;
   status: string;
   created_at: string | null;

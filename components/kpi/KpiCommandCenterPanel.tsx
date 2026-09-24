@@ -86,7 +86,6 @@ export default function KpiCommandCenterPanel() {
   const [flagsLoading, setFlagsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [dataView, setDataView] = useState<'calendar' | 'grid'>('calendar');
   const [colorMetric, setColorMetric] = useState('overall');
   const loadGen = React.useRef(0);
   const hasLoadedOnce = React.useRef(false);
@@ -113,10 +112,8 @@ export default function KpiCommandCenterPanel() {
     const v = router.query.view;
     if (v === 'settings' || v === 'calendar' || v === 'by-rep') {
       setView(v);
-      if (v === 'calendar') setDataView('calendar');
     } else if (v === 'grid') {
       setView('calendar');
-      setDataView('grid');
     }
   }, [router.isReady, router.query.view]);
 
@@ -338,7 +335,7 @@ export default function KpiCommandCenterPanel() {
             Sales KPIs
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Daily business tracker with calendar view and automated bottleneck detection.
+            Calendar plus this month's grid. Two-month compare stays on the calendar.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -402,54 +399,29 @@ export default function KpiCommandCenterPanel() {
         {view === 'calendar' && (
           <>
             <span className="hidden sm:block w-px self-stretch bg-white/10 mx-1" aria-hidden />
-            <div className="flex rounded-lg border border-white/10 overflow-hidden">
-              {(
-                [
-                  ['calendar', 'Calendar'],
-                  ['grid', 'Grid'],
-                ] as const
-              ).map(([id, label]) => (
-                <button
-                  key={id}
-                  type="button"
-                  onClick={() => setDataView(id)}
-                  className={`px-3 py-1 text-xs font-medium ${
-                    dataView === id
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-white/5 text-gray-700 dark:text-gray-200 hover:bg-white/10'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            {dataView === 'calendar' && (
-              <>
-                <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  Color by
-                  <select
-                    className="rounded-lg solid-input px-2 py-1 text-xs"
-                    value={colorMetric}
-                    onChange={(e) => setColorMetric(e.target.value)}
-                  >
-                    {COLOR_METRICS.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={compareMonths}
-                    onChange={(e) => onCompareChange(e.target.checked)}
-                    className="rounded"
-                  />
-                  Two-month compare
-                </label>
-              </>
-            )}
+            <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+              Color by
+              <select
+                className="rounded-lg solid-input px-2 py-1 text-xs"
+                value={colorMetric}
+                onChange={(e) => setColorMetric(e.target.value)}
+              >
+                {COLOR_METRICS.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={compareMonths}
+                onChange={(e) => onCompareChange(e.target.checked)}
+                className="rounded"
+              />
+              Two-month compare
+            </label>
           </>
         )}
 
@@ -496,37 +468,39 @@ export default function KpiCommandCenterPanel() {
       ) : (
         <div className="flex flex-col lg:flex-row gap-4 items-start">
           <div className="flex-1 min-w-0 space-y-4 w-full">
-            {view === 'calendar' && dataView === 'calendar' && (
-              <KpiCalendar
-                entries={entries}
-                thresholds={thresholds}
-                loading={loading}
-                refreshing={refreshing || softUpdating}
-                onUpsertEntry={upsertEntry}
-                year={visibleMonth.year}
-                month={visibleMonth.month}
-                compareMonths={compareMonths}
-                onVisibleRangeChange={onCalendarVisibleRangeChange}
-                colorMetric={colorMetric}
-              />
-            )}
-
-            {view === 'calendar' && dataView === 'grid' && (
-              <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 overflow-x-auto">
-                <KpiGrid
+            {view === 'calendar' && (
+              <>
+                <KpiCalendar
                   entries={entries}
-                  rollups={rollups}
                   thresholds={thresholds}
-                  autoPopulatedColumns={autopopStatus.autopopulated_columns}
                   loading={loading}
                   refreshing={refreshing || softUpdating}
-                  onEntriesChange={(next) => {
-                    setEntries(next);
-                  }}
-                  rangeStart={rangeStart}
-                  rangeEnd={rangeEnd}
+                  onUpsertEntry={upsertEntry}
+                  year={visibleMonth.year}
+                  month={visibleMonth.month}
+                  compareMonths={compareMonths}
+                  onVisibleRangeChange={onCalendarVisibleRangeChange}
+                  colorMetric={colorMetric}
                 />
-              </div>
+                <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 overflow-x-auto">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {monthTitle(visibleMonth.year, visibleMonth.month)} grid
+                  </div>
+                  <KpiGrid
+                    entries={entries}
+                    rollups={rollups}
+                    thresholds={thresholds}
+                    autoPopulatedColumns={autopopStatus.autopopulated_columns}
+                    loading={loading}
+                    refreshing={refreshing || softUpdating}
+                    onEntriesChange={(next) => {
+                      setEntries(next);
+                    }}
+                    rangeStart={applyMonthRange(visibleMonth.year, visibleMonth.month, false).start}
+                    rangeEnd={applyMonthRange(visibleMonth.year, visibleMonth.month, false).end}
+                  />
+                </div>
+              </>
             )}
 
             {view === 'by-rep' && (
