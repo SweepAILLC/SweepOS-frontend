@@ -335,7 +335,7 @@ export default function KpiCommandCenterPanel() {
             Sales KPIs
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Calendar plus this month's grid. Two-month compare stays on the calendar.
+            Calendar plus this month&apos;s grid. Two-month compare stays on the calendar.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
