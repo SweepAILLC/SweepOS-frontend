@@ -58,27 +58,6 @@ export default function FunnelOverviewTab({ funnel, onReload }: FunnelOverviewTa
         </div>
       </div>
 
-      {/* Steps Preview */}
-      {funnel.steps && funnel.steps.length > 0 && (
-        <div className="glass-card p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Funnel Steps</h3>
-          <div className="space-y-2">
-            {funnel.steps.map((step, index) => (
-              <div key={step.id} className="flex items-center space-x-4 p-3 glass-panel rounded">
-                <span className="text-sm font-semibold text-gray-600 dark:text-gray-400 w-8 digitized-text">
-                  {step.step_order}
-                </span>
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900 dark:text-gray-100">
-                    {step.label || step.event_name}
-                  </p>
-                  <p className="text-sm text-gray-500 dark:text-gray-100">{step.event_name}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

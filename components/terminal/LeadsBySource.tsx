@@ -8,6 +8,8 @@ import {
   PremiumContentGate,
   PremiumReveal,
 } from '@/components/ui/PremiumMotion';
+import { useOptionalDateRange } from '@/contexts/DateRangeContext';
+import { rangeTitle } from '@/lib/dateRange';
 
 interface LeadSource {
   source: string;
@@ -26,8 +28,17 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
   const hasCalledOnLoadComplete = useRef(false);
 
   const initialLoadDone = useRef(false);
+  // Page date range (Terminal); outside a provider this falls back to the last 30 days.
+  const dateRange = useOptionalDateRange();
+  const win = dateRange ? dateRange.params : null;
+  const winKey = win ? `${win.start ?? ''}~${win.end}` : '';
+  const winRef = useRef(win);
+  winRef.current = win;
+  const cacheKeyRef = useRef('');
+  cacheKeyRef.current = `${CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE}:${winKey}`;
 
   useEffect(() => {
+    initialLoadDone.current = false;
     const run = () => void loadLeadSources(false, true);
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       const id = window.requestIdleCallback(run, { timeout: 2500 });
@@ -35,7 +46,8 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     }
     const t = setTimeout(run, 400);
     return () => clearTimeout(t);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when the page range changes
+  }, [winKey]);
 
   // Live polling: avoid forceRefresh — same N×analytics pattern as BookingRateByFunnel.
   useEffect(() => {
@@ -55,7 +67,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
       if (showLoading || !initialLoadDone.current) setLoading(true);
 
       if (!forceRefresh) {
-        const cached = cache.get<LeadSource[]>(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE);
+        const cached = cache.get<LeadSource[]>(cacheKeyRef.current);
         if (cached?.length) {
           setLeadSources(cached);
           initialLoadDone.current = true;
@@ -73,7 +85,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
 
       const analyticsResults = await Promise.allSettled(
         funnels.map((funnel: { id: string }) =>
-          apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh)
+          apiClient.getFunnelAnalytics(funnel.id, 30, forceRefresh, winRef.current ?? undefined)
         )
       );
 
@@ -128,7 +140,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
         .slice(0, 10);
 
       setLeadSources(sources);
-      cache.set(CACHE_KEYS.TERMINAL_LEADS_BY_SOURCE, sources, TERMINAL_CACHE_TTL_MS);
+      cache.set(cacheKeyRef.current, sources, TERMINAL_CACHE_TTL_MS);
       initialLoadDone.current = true;
     } catch (error) {
       console.error('Failed to load lead sources:', error);
@@ -163,7 +175,7 @@ export default function LeadsBySource({ onLoadComplete }: LeadsBySourceProps = {
     <div className="glass-card p-4 sm:p-6 min-w-0 max-w-full overflow-hidden">
       <h3 className="text-base sm:text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
         Leads by Source
-        <span className="text-xs sm:text-sm font-normal text-gray-500 dark:text-gray-400 ml-1 sm:ml-2">(Last 30d)</span>
+        <span className="text-xs sm:text-sm font-normal text-gray-500 dark:text-gray-400 ml-1 sm:ml-2">({dateRange ? rangeTitle(dateRange.range) : 'Last 30d'})</span>
       </h3>
 
       <PremiumContentGate

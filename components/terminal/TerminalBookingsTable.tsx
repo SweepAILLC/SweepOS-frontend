@@ -7,6 +7,8 @@ import EventDetailsModal from '@/components/calendar/EventDetailsModal';
 import CalendarStatusBadge from '@/components/calendar/CalendarStatusBadge';
 import CalendarEventTypeNodes from '@/components/calendar/CalendarEventTypeNodes';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
+import { useOptionalDateRange } from '@/contexts/DateRangeContext';
+import { todayIn } from '@/lib/dateRange';
 import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
 import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
 import type { Client } from '@/types/client';
@@ -80,8 +82,18 @@ export default function TerminalBookingsTable() {
     }
   };
 
+  // Past bookings follow the page date range (by meeting day in the org timezone);
+  // upcoming is always what's next, so it isn't date-filtered.
+  const dateRange = useOptionalDateRange();
+  const pastInRange = dateRange
+    ? syncedPast.filter((b) => {
+        if (!b.start_time) return false;
+        const day = todayIn(dateRange.timezone, new Date(b.start_time));
+        return (dateRange.range.start == null || day >= dateRange.range.start) && day <= dateRange.range.end;
+      })
+    : syncedPast;
   const filteredBookings =
-    bookingsTab === 'upcoming' ? syncedUpcoming : syncedPast.slice(0, PAST_BOOKINGS_LIMIT);
+    bookingsTab === 'upcoming' ? syncedUpcoming : pastInRange.slice(0, PAST_BOOKINGS_LIMIT);
 
   if (statusLoading && !connectedProvider) {
     return (
@@ -165,6 +177,11 @@ export default function TerminalBookingsTable() {
               {tab === 'upcoming' ? 'Upcoming' : 'Past'}
             </button>
           ))}
+          {bookingsTab === 'upcoming' && dateRange ? (
+            <span className="ml-auto self-center text-[11px] text-gray-500 dark:text-gray-400" title="Upcoming bookings aren't filtered by the date range">
+              Next up · not date-filtered
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -173,7 +190,7 @@ export default function TerminalBookingsTable() {
         <TableSkeletonPremium rows={5} columns={6} />
       ) : filteredBookings.length === 0 ? (
         <p className="text-sm text-gray-500 py-8 text-center premium-reveal">
-          No {bookingsTab} bookings found
+          {bookingsTab === 'past' && dateRange ? 'No past bookings in this date range' : `No ${bookingsTab} bookings found`}
         </p>
       ) : (
         <PremiumReveal className="overflow-x-auto">

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { formatRange, formatYmd } from '@/lib/dateRange';
 import {
   Bar,
   BarChart,
@@ -17,7 +18,7 @@ type Range = 7 | 30 | 90;
 
 /** Activity metrics shown as cards — excludes cash which owner dashboard already surfaces. */
 const CARD_KEYS = new Set([
-  'total_conversations',
+  'total_leads',
   'calls_booked',
   'calls_taken',
   'closes',
@@ -103,10 +104,7 @@ export default function PortalKpiSnapshot({
   const hasData = (snapshot?.days_with_data || 0) > 0;
   const chartData = (snapshot?.series || []).map((e) => ({
     date: shortDate(e.date),
-    Conversations:
-      e.total_conversations ??
-      e.outreach_sent ??
-      0,
+    Leads: e.total_leads ?? 0,
     'Sales booked': e.calls_booked ?? 0,
     'Sales taken': e.calls_taken ?? 0,
     Closes: e.closes ?? 0,
@@ -131,14 +129,18 @@ export default function PortalKpiSnapshot({
             KPI Snapshot
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-            Logged activity from the KPI tracker — conversations through closes. Call counts are sales calls only.
+            Leads through closes. Every new conversation counts as a lead, plus inbound ICP leads and paid funnel opt-ins. Call counts are sales calls only.
           </p>
         </div>
         {rangeControls ? (
           <div className="flex flex-wrap items-center gap-2 text-xs">{rangeControls}</div>
         ) : controlled ? (
           <span className="text-[11px] text-gray-500 dark:text-gray-400 tabular-nums">
-            {rangeStart} → {rangeEnd}
+            {rangeStart && rangeEnd
+              ? rangeStart <= '2000-01-01'
+                ? `All time through ${formatYmd(rangeEnd)}`
+                : formatRange(rangeStart, rangeEnd)
+              : null}
           </span>
         ) : (
           <div className="flex gap-1">
@@ -186,6 +188,15 @@ export default function PortalKpiSnapshot({
                   <span className="text-xl font-bold text-gray-900 dark:text-gray-100 tabular-nums leading-none">
                     {value}
                   </span>
+                  {card.breakdown ? (
+                    <span
+                      className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug"
+                      title="Each new conversation counts as a lead, plus inbound ICP leads and paid funnel opt-ins"
+                    >
+                      {Math.round(card.breakdown.conversations ?? 0)} convos · {Math.round(card.breakdown.inbound ?? 0)} inbound ·{' '}
+                      {Math.round(card.breakdown.paid ?? 0)} paid
+                    </span>
+                  ) : null}
                   {tier ? (
                     <span
                       className={`self-start text-[10px] font-semibold px-1.5 py-0.5 rounded-full capitalize ${kpiTierBadgeClass(tier)}`}
@@ -253,7 +264,7 @@ export default function PortalKpiSnapshot({
                     color: '#e5e7eb',
                   }}
                 />
-                <Bar dataKey="Conversations" fill="#818cf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
+                <Bar dataKey="Leads" fill="#818cf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Sales booked" fill="#34d399" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Sales taken" fill="#38bdf8" radius={[3, 3, 0, 0]} maxBarSize={28} />
                 <Bar dataKey="Closes" fill="#f59e0b" radius={[3, 3, 0, 0]} maxBarSize={28} />

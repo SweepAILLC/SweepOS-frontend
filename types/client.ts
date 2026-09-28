@@ -8,6 +8,8 @@ export interface Client {
   phone?: string;
   instagram?: string;
   lifecycle_state: 'cold_lead' | 'nurturing' | 'qualified' | 'booked' | 'active' | 'offboarding' | 'dead';
+  source_channel?: 'organic' | 'paid' | null;
+  source_funnel_id?: string | null;
   last_activity_at?: string;
   stripe_customer_id?: string;
   estimated_mrr: number;
@@ -80,3 +82,14 @@ export interface ClientHealthScoreResponse {
   source_reason?: string | null;
 }
 
+
+/** GET /clients/grid-details — per-client extras for the pipeline Grid view. */
+export type ClientBookingStatus = 'booked' | 'not_yet' | 'closed' | 'canceled' | 'no_show';
+
+export interface ClientGridDetail {
+  client_id: string;
+  utm?: Partial<Record<'source' | 'medium' | 'campaign' | 'term' | 'content', string>> | null;
+  answers: Record<string, unknown>;
+  booking_status: ClientBookingStatus;
+  booking_at?: string | null;
+}

@@ -56,14 +56,21 @@ export function formatFollowUpDueLabel(dueMs: number): string {
 }
 
 /**
- * Elapsed fraction from anchor (last_activity_at or created_at) toward due date.
+ * Elapsed fraction from anchor (latest of last_activity_at / meta.follow_up_anchor_at, else created_at) toward due date.
  * Due = client.meta.follow_up_due_at when set, else anchor + 14 days.
  */
 export function computeLeadFollowUpBar(client: Client): LeadFollowUpBar | null {
   const anchorStr = client.last_activity_at || client.created_at || client.updated_at;
   if (!anchorStr) return null;
-  const anchor = new Date(anchorStr).getTime();
+  let anchor = new Date(anchorStr).getTime();
   if (Number.isNaN(anchor)) return null;
+  // Backend resets the timer on automated moves (qualified → nurturing) via
+  // meta.follow_up_anchor_at without faking last_activity_at.
+  const rawMetaAnchor =
+    client.meta && typeof client.meta.follow_up_anchor_at === 'string'
+      ? new Date(client.meta.follow_up_anchor_at as string).getTime()
+      : NaN;
+  if (!Number.isNaN(rawMetaAnchor) && rawMetaAnchor > anchor) anchor = rawMetaAnchor;
 
   const rawMetaDue =
     client.meta && typeof client.meta.follow_up_due_at === 'string'

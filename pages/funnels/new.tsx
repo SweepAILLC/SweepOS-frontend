@@ -58,16 +58,16 @@ export default function NewFunnelPage() {
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}
-            className="text-gray-600 hover:text-gray-900 mb-4"
+            className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white mb-4"
           >
             ← Back to Funnels
           </button>
-          <h1 className="text-3xl font-bold text-gray-900">Create New Funnel</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Create New Funnel</h1>
         </div>
 
         <form onSubmit={handleSubmit} className="glass-card p-6 space-y-6">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Funnel Name *
             </label>
             <input
@@ -76,12 +76,12 @@ export default function NewFunnelPage() {
               onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               required
               placeholder="e.g., Onboarding Funnel, Sales Funnel"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 solid-input rounded-md"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Domain (optional)
             </label>
             <input
@@ -89,15 +89,15 @@ export default function NewFunnelPage() {
               value={formData.domain}
               onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
               placeholder="e.g., example.com"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 solid-input rounded-md"
             />
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Used to automatically match events to this funnel based on URL
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Slug (optional)
             </label>
             <input
@@ -105,21 +105,21 @@ export default function NewFunnelPage() {
               value={formData.slug}
               onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
               placeholder="e.g., onboarding"
-              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 solid-input rounded-md"
             />
-            <p className="mt-1 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Unique identifier for URL matching
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Environment (optional)
             </label>
             <select
               value={formData.env}
               onChange={(e) => setFormData({ ...formData, env: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md"
+              className="w-full px-3 py-2 solid-input rounded-md"
             >
               <option value="">Select environment</option>
               <option value="production">Production</option>
@@ -138,7 +138,7 @@ export default function NewFunnelPage() {
             <button
               type="button"
               onClick={() => router.push('/')}
-              className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300"
+              className="bg-gray-200 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-300 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
             >
               Cancel
             </button>

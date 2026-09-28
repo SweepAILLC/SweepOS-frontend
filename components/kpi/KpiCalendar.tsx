@@ -9,6 +9,7 @@ import {
   tierForMetric,
 } from '@/lib/kpiBenchmarks';
 import KpiRevenueContributorsModal from './KpiRevenueContributorsModal';
+import { monthsInRange } from '@/lib/dateRange';
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -145,6 +146,8 @@ function monthLabel(year: number, month: number): string {
 interface MonthGridProps {
   year: number;
   month: number;
+  /** Date-range filter: days outside [start, end] are dimmed and not clickable. */
+  inRange?: (ymd: string) => boolean;
   entryByDate: Map<string, KpiDailyEntry>;
   thresholds: Record<string, MetricThreshold>;
   colorMetric: string;
@@ -160,6 +163,7 @@ function MonthGrid({
   colorMetric,
   selectedDate,
   onSelect,
+  inRange,
 }: MonthGridProps) {
   const days = useMemo(() => getDaysInMonth(year, month), [year, month]);
   const today = toYmd(new Date());
@@ -212,6 +216,18 @@ function MonthGrid({
             return <div key={`e-${idx}`} className="min-h-[4.5rem]" />;
           }
           const ymd = toYmd(date);
+          if (inRange && !inRange(ymd)) {
+            return (
+              <div
+                key={ymd}
+                aria-hidden
+                title="Outside the selected date range"
+                className="min-h-[4.5rem] rounded-lg border border-dashed border-white/5 px-1 py-1 opacity-30"
+              >
+                <span className="text-[11px] text-gray-500 dark:text-gray-500 leading-none">{date.getDate()}</span>
+              </div>
+            );
+          }
           const entry = entryByDate.get(ymd);
           const hasInput = entry ? entryHasInput(entry) : false;
           const tier = tierForDay(ymd);
@@ -290,6 +306,16 @@ interface Props {
    * `entries` itself is pre-filtered and re-attributing per-cell would be confusing.
    */
   hideRepPicker?: boolean;
+  /**
+   * Entry-form fields to hide (e.g. the Funnels Organic calendar drops offers_made
+   * and inboxes_checked). Hidden fields keep their stored value on save.
+   */
+  hiddenFields?: string[];
+  /**
+   * Page date range (Funnels → Organic): show every month the range touches, with
+   * out-of-range days dimmed. Replaces year/month/compare; the parent loads the range.
+   */
+  range?: { start: string | null; end: string } | null;
 }
 
 export default function KpiCalendar({
@@ -304,7 +330,10 @@ export default function KpiCalendar({
   onVisibleRangeChange,
   hideRepPicker = false,
   colorMetric = 'overall',
+  hiddenFields,
+  range = null,
 }: Props) {
+  const hidden = useMemo(() => new Set(hiddenFields ?? []), [hiddenFields]);
   const compare = compareMonths;
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
@@ -322,12 +351,12 @@ export default function KpiCalendar({
 
   // Load visible month(s) for color-by tiers — debounce is handled in the parent.
   useEffect(() => {
-    if (!onVisibleRangeChange) return;
+    if (!onVisibleRangeChange || range) return;
     const startMonth = compare ? prevMonth : { year, month };
     const start = toYmd(new Date(startMonth.year, startMonth.month, 1));
     const end = toYmd(new Date(year, month + 1, 0));
     onVisibleRangeChange(start, end);
-  }, [year, month, compare, prevMonth, onVisibleRangeChange]);
+  }, [year, month, compare, prevMonth, onVisibleRangeChange, range]);
 
   const selected = selectedDate ? entryByDate.get(selectedDate) : undefined;
   const [form, setForm] = useState<KpiEntryUpdatePayload>({});
@@ -369,21 +398,30 @@ export default function KpiCalendar({
     // `selected` is the org-aggregate row; a specific rep's own values aren't
     // fetched here, so pre-fill only for the aggregate (no rep chosen).
     const e = modalRepId ? undefined : selected;
+    // One daily ledger: activity fields on the org day are totals (org + team EODs);
+    // prefill only the org-only part so saving never writes team numbers into the org row.
+    const team = (e?.team_eod_totals ?? {}) as Record<string, number>;
+    const orgOnly = (key: string, v: number | null | undefined): number | null => {
+      if (v == null) return null;
+      const t = team[key] ?? 0;
+      const rest = Math.max(0, v - t);
+      return t > 0 && rest === 0 ? null : rest;
+    };
     setForm({
       total_followers: e?.total_followers ?? null,
       content_posted: e?.content_posted ?? null,
       best_content_type: e?.best_content_type ?? null,
-      inboxes_checked: e?.inboxes_checked ?? null,
-      outreach_sent: e?.outreach_sent ?? null,
-      respondents: e?.respondents ?? null,
-      inbound_icp_leads: e?.inbound_icp_leads ?? null,
-      followups_sent: e?.followups_sent ?? null,
-      new_conversations: e?.new_conversations ?? null,
-      conversations_nurtured: e?.conversations_nurtured ?? null,
-      calls_pitched: e?.calls_pitched ?? null,
-      inbound_bookings: e?.inbound_bookings ?? null,
-      outbound_bookings: e?.outbound_bookings ?? null,
-      offers_made: e?.offers_made ?? null,
+      inboxes_checked: orgOnly('inboxes_checked', e?.inboxes_checked),
+      outreach_sent: orgOnly('outreach_sent', e?.outreach_sent),
+      respondents: orgOnly('respondents', e?.respondents),
+      inbound_icp_leads: orgOnly('inbound_icp_leads', e?.inbound_icp_leads),
+      followups_sent: orgOnly('followups_sent', e?.followups_sent),
+      new_conversations: orgOnly('new_conversations', e?.new_conversations),
+      conversations_nurtured: orgOnly('conversations_nurtured', e?.conversations_nurtured),
+      calls_pitched: orgOnly('calls_pitched', e?.calls_pitched),
+      inbound_bookings: orgOnly('inbound_bookings', e?.inbound_bookings),
+      outbound_bookings: orgOnly('outbound_bookings', e?.outbound_bookings),
+      offers_made: orgOnly('offers_made', e?.offers_made),
       revenue: e?.revenue ?? null,
       setter_context: e?.setter_context ?? null,
     });
@@ -423,6 +461,23 @@ export default function KpiCalendar({
           {loading && entries.length === 0 ? 'Loading…' : 'Updating…'}
         </div>
       )}
+      {range ? (
+        <div className={`grid gap-4 ${monthsInRange(range.start ?? range.end, range.end).length > 1 ? 'xl:grid-cols-2' : ''}`}>
+          {monthsInRange(range.start ?? range.end, range.end).map((m) => (
+            <MonthGrid
+              key={`${m.year}-${m.month}`}
+              year={m.year}
+              month={m.month}
+              entryByDate={entryByDate}
+              thresholds={thresholds}
+              colorMetric={colorMetric}
+              selectedDate={selectedDate}
+              onSelect={openEditForDate}
+              inRange={(ymd) => (range.start == null || ymd >= range.start) && ymd <= range.end}
+            />
+          ))}
+        </div>
+      ) : (
       <div className={`flex flex-col ${compare ? 'lg:flex-row' : ''} gap-4`}>
         {compare && (
           <MonthGrid
@@ -445,6 +500,7 @@ export default function KpiCalendar({
           onSelect={openEditForDate}
         />
       </div>
+      )}
 
       {editOpen && selectedDate && (
         <div className="fixed inset-y-0 right-0 left-0 lg:left-[var(--app-sidebar-width,14rem)] z-50 flex items-center justify-center p-4">
@@ -492,6 +548,15 @@ export default function KpiCalendar({
               </label>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              {!modalRepId && selected?.team_eod_totals && Object.keys(selected.team_eod_totals).length ? (
+                <div className="col-span-full rounded-md border border-indigo-400/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-800 dark:text-indigo-200">
+                  Team EODs add{' '}
+                  {Object.entries(selected.team_eod_totals)
+                    .map(([k, v]) => `${k.replace(/_/g, ' ')} +${v}`)
+                    .join(', ')}{' '}
+                  to this day. The fields below are the org-only part.
+                </div>
+              ) : null}
               <label className="text-gray-600 dark:text-gray-300">
                 Followers
                 <input
@@ -527,15 +592,17 @@ export default function KpiCalendar({
                   className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
-              <label className="text-gray-600 dark:text-gray-300">
-                Inboxes checked
-                <input
-                  type="number"
-                  value={(form.inboxes_checked as number | null) ?? ''}
-                  onChange={(e) => setNum('inboxes_checked', e.target.value)}
-                  className="mt-1 w-full rounded solid-input px-2 py-1"
-                />
-              </label>
+              {!hidden.has('inboxes_checked') && (
+                <label className="text-gray-600 dark:text-gray-300">
+                  Inboxes checked
+                  <input
+                    type="number"
+                    value={(form.inboxes_checked as number | null) ?? ''}
+                    onChange={(e) => setNum('inboxes_checked', e.target.value)}
+                    className="mt-1 w-full rounded solid-input px-2 py-1"
+                  />
+                </label>
+              )}
               <label className="text-gray-600 dark:text-gray-300">
                 Outbounds sent
                 <input
@@ -617,15 +684,17 @@ export default function KpiCalendar({
                   className="mt-1 w-full rounded solid-input px-2 py-1"
                 />
               </label>
-              <label className="text-gray-600 dark:text-gray-300">
-                Offers made
-                <input
-                  type="number"
-                  value={(form.offers_made as number | null) ?? ''}
-                  onChange={(e) => setNum('offers_made', e.target.value)}
-                  className="mt-1 w-full rounded solid-input px-2 py-1"
-                />
-              </label>
+              {!hidden.has('offers_made') && (
+                <label className="text-gray-600 dark:text-gray-300">
+                  Offers made
+                  <input
+                    type="number"
+                    value={(form.offers_made as number | null) ?? ''}
+                    onChange={(e) => setNum('offers_made', e.target.value)}
+                    className="mt-1 w-full rounded solid-input px-2 py-1"
+                  />
+                </label>
+              )}
               <label className="text-gray-600 dark:text-gray-300">
                 Revenue (manual)
                 <input

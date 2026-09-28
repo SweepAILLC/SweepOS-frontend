@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
@@ -18,8 +19,13 @@ import KpiBenchmarkSettings from './KpiBenchmarkSettings';
 import KpiFlagsBanner from './KpiFlagsBanner';
 import KpiCsvImportModal from './KpiCsvImportModal';
 import KpiRepPerformancePanel from './KpiRepPerformancePanel';
+import MonthNavigator from './MonthNavigator';
+import TeamOverviewView, { type TeamAttentionItem } from '@/components/team/TeamOverviewView';
+import type { TeamMember } from '@/types/team';
+import { useOptionalDateRange } from '@/contexts/DateRangeContext';
+import { formatRange } from '@/lib/dateRange';
 
-type ViewId = 'calendar' | 'by-rep' | 'settings';
+type ViewId = 'calendar' | 'grid' | 'by-rep' | 'settings';
 
 function toYmd(d: Date): string {
   const y = d.getFullYear();
@@ -67,13 +73,28 @@ function applyMonthRange(
   };
 }
 
-export default function KpiCommandCenterPanel() {
+/** Entry fields the Funnels Organic calendar leaves out. */
+const ORGANIC_HIDDEN_FIELDS = ['offers_made', 'inboxes_checked'];
+
+interface KpiCommandCenterPanelProps {
+  /**
+   * 'sales' (default): the Sales KPIs tab — calendar + monthly grid, By Rep, Benchmarks.
+   * 'organic': embedded in the Funnels tab when Organic is selected — calendar only,
+   * settings labelled Targets, no By Rep, no grid, offers/inboxes hidden, no URL writes.
+   */
+  variant?: 'sales' | 'organic';
+}
+
+export default function KpiCommandCenterPanel({ variant = 'sales' }: KpiCommandCenterPanelProps = {}) {
+  const isOrganic = variant === 'organic';
   const router = useRouter();
   const [view, setView] = useState<ViewId>('calendar');
   const [entries, setEntries] = useState<KpiDailyEntry[]>([]);
   const [rollups, setRollups] = useState<KpiMonthlyRollup[]>([]);
   const [benchmarks, setBenchmarks] = useState<KpiBenchmarks | null>(null);
   const [flags, setFlags] = useState<KpiFlag[]>([]);
+  // Organic: the team view hands its "Needs attention" list up to the right-hand column.
+  const [teamAttention, setTeamAttention] = useState<TeamAttentionItem[] | null>(null);
   const [autopopStatus, setAutopopStatus] = useState<KpiAutopopulateStatusResponse>({
     calendar_available: false,
     payments_available: false,
@@ -93,29 +114,59 @@ export default function KpiCommandCenterPanel() {
 
   const [rangeStart, setRangeStart] = useState(() => toYmd(startOfMonth(new Date())));
   const [rangeEnd, setRangeEnd] = useState(() => toYmd(endOfMonth(new Date())));
-  /** Shared with calendar two-month compare so grid/calendar show the same window. */
-  const [compareMonths, setCompareMonths] = useState(false);
+  // Organic calendar rep filter: null = everyone (org day = org row + all team EODs),
+  // else that rep's own EOD rows — their logging pattern and consistency.
+  const [repFilter, setRepFilter] = useState<string | null>(null);
+  const [salesReps, setSalesReps] = useState<TeamMember[]>([]);
 
   const visibleMonth = useMemo(() => monthFromYmd(rangeEnd), [rangeEnd]);
-  const visibleStartMonth = useMemo(() => monthFromYmd(rangeStart), [rangeStart]);
-  const visibleWindowLabel = useMemo(() => {
-    if (!compareMonths) return monthTitle(visibleMonth.year, visibleMonth.month);
-    const startLabel = monthTitle(visibleStartMonth.year, visibleStartMonth.month);
-    const endLabel = monthTitle(visibleMonth.year, visibleMonth.month);
-    if (startLabel === endLabel) return endLabel;
-    return `${startLabel} + ${endLabel}`;
-  }, [compareMonths, visibleMonth.year, visibleMonth.month, visibleStartMonth.year, visibleStartMonth.month]);
+  const visibleWindowLabel = monthTitle(visibleMonth.year, visibleMonth.month);
+
+  // Funnels → Organic: the Funnels tab's date range (header picker) drives this panel —
+  // entries, calendar months, grid, flags and team cards. No month arrows of its own.
+  const pageDateRange = useOptionalDateRange();
+  const pageRange = isOrganic && pageDateRange ? pageDateRange.range : null;
+  const pageStart = pageRange ? pageRange.start ?? pageRange.end : null;
+  const pageEnd = pageRange ? pageRange.end : null;
+  useEffect(() => {
+    if (!pageStart || !pageEnd) return;
+    setRangeStart(pageStart);
+    setRangeEnd(pageEnd);
+  }, [pageStart, pageEnd]);
+
+  useEffect(() => {
+    if (!isOrganic) return;
+    let cancelled = false;
+    apiClient
+      .getTeamMembers()
+      .then((rows) => {
+        if (!cancelled) setSalesReps(rows.filter((m) => m.team_role === 'sales'));
+      })
+      .catch(() => {
+        /* no filter without a roster */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOrganic]);
+
+  const changeRepFilter = (next: string | null) => {
+    // Rows from one scope must never merge into another's cache.
+    hasLoadedOnce.current = false;
+    setEntries([]);
+    setRepFilter(next);
+  };
 
   // Deep-link: /?tab=kpi_command_center&view=settings|calendar|by-rep|grid
   useEffect(() => {
-    if (!router.isReady) return;
+    if (!router.isReady || isOrganic) return;
     const v = router.query.view;
     if (v === 'settings' || v === 'calendar' || v === 'by-rep') {
       setView(v);
     } else if (v === 'grid') {
       setView('calendar');
     }
-  }, [router.isReady, router.query.view]);
+  }, [router.isReady, router.query.view, isOrganic]);
 
   const loadCore = useCallback(async () => {
     const gen = ++loadGen.current;
@@ -133,6 +184,7 @@ export default function KpiCommandCenterPanel() {
           start: requestedStart,
           end: requestedEnd,
           sync: shouldSync,
+          ...(repFilter ? { rep_user_id: repFilter } : {}),
         }),
         apiClient.getKpiRollups(18),
         apiClient.getKpiBenchmarks(),
@@ -170,6 +222,7 @@ export default function KpiCommandCenterPanel() {
               start: bgStart,
               end: bgEnd,
               sync: true,
+              ...(repFilter ? { rep_user_id: repFilter } : {}),
             });
             if (bgGen !== loadGen.current) return;
             setEntries((prev) => {
@@ -201,7 +254,7 @@ export default function KpiCommandCenterPanel() {
         setSoftUpdating(false);
       }
     }
-  }, [rangeStart, rangeEnd]);
+  }, [rangeStart, rangeEnd, repFilter]);
 
   const loadAutopopStatus = useCallback(async () => {
     try {
@@ -255,30 +308,21 @@ export default function KpiCommandCenterPanel() {
     [benchmarks]
   );
 
-  const setVisibleMonth = useCallback((year: number, month: number, compare = compareMonths) => {
-    const { start, end } = applyMonthRange(year, month, compare);
+  const setVisibleMonth = useCallback((year: number, month: number) => {
+    const { start, end } = applyMonthRange(year, month, false);
     setRangeStart(start);
     setRangeEnd(end);
-  }, [compareMonths]);
+  }, []);
 
   const shiftMonth = (delta: number) => {
-    // Always shift relative to the visible end month so compare ranges don't collapse oddly.
     const next = new Date(visibleMonth.year, visibleMonth.month + delta, 1);
-    setVisibleMonth(next.getFullYear(), next.getMonth(), compareMonths);
+    setVisibleMonth(next.getFullYear(), next.getMonth());
   };
-
-  const onCompareChange = useCallback(
-    (compare: boolean) => {
-      setCompareMonths(compare);
-      setVisibleMonth(visibleMonth.year, visibleMonth.month, compare);
-    },
-    [setVisibleMonth, visibleMonth.year, visibleMonth.month]
-  );
 
   const rangeDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const onCalendarVisibleRangeChange = useCallback((start: string, end: string) => {
     if (rangeDebounceRef.current) clearTimeout(rangeDebounceRef.current);
-    // Short debounce collapses rapid month clicks / compare toggles into one fetch.
+    // Short debounce collapses rapid month clicks into one fetch.
     rangeDebounceRef.current = setTimeout(() => {
       setRangeStart((prev) => (prev === start ? prev : start));
       setRangeEnd((prev) => (prev === end ? prev : end));
@@ -286,8 +330,10 @@ export default function KpiCommandCenterPanel() {
   }, []);
 
   const setViewAndUrl = (v: ViewId) => {
+    if (v !== 'calendar' && repFilter) changeRepFilter(null);
     setView(v);
-    if (router.isReady) {
+    // Embedded on the Funnels tab: never rewrite the URL to the Sales KPIs tab.
+    if (router.isReady && !isOrganic) {
       void router.replace(
         { pathname: '/', query: { tab: 'kpi_command_center', view: v } },
         undefined,
@@ -302,9 +348,8 @@ export default function KpiCommandCenterPanel() {
     repUserId?: string | null
   ) => {
     const updated = await apiClient.upsertKpiEntry(entryDate, data, repUserId);
-    // A per-rep save doesn't belong in this org-aggregate-only entries list
-    // (GET /kpi/entries excludes rep rows) — only merge in aggregate saves.
-    if (!repUserId) {
+    // Only merge a save that belongs to the scope on screen (org day, or the filtered rep).
+    if ((repUserId || null) === repFilter) {
       setEntries((prev) => {
         const next = [...prev];
         const idx = next.findIndex((e) => e.entry_date === entryDate);
@@ -325,17 +370,19 @@ export default function KpiCommandCenterPanel() {
       window.dispatchEvent(new CustomEvent(TERMINAL_CHART_REFRESH_EVENT));
     }
     return updated;
-  }, [loadFlags]);
+  }, [loadFlags, repFilter]);
 
   return (
     <div className="w-full space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-            Sales KPIs
+            {isOrganic ? 'Organic' : 'Sales KPIs'}
           </h2>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Calendar plus this month&apos;s grid. Two-month compare stays on the calendar.
+            {isOrganic
+              ? 'Daily organic activity for the selected dates — content, DMs, conversations, bookings, closes.'
+              : 'Calendar plus this month\'s grid.'}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -346,12 +393,16 @@ export default function KpiCommandCenterPanel() {
             </span>
           )}
           <div className="flex rounded-lg border border-white/10 overflow-hidden">
-            {(
-              [
-                ['calendar', 'Calendar'],
-                ['by-rep', 'By Rep'],
-                ['settings', 'Benchmarks'],
-              ] as const
+            {(isOrganic
+              ? ([
+                  ['calendar', 'Calendar'],
+                  ['grid', 'Grid'],
+                ] as const)
+              : ([
+                  ['calendar', 'Calendar'],
+                  ['by-rep', 'By Rep'],
+                  ['settings', 'Benchmarks'],
+                ] as const)
             ).map(([id, label]) => (
               <button
                 key={id}
@@ -372,29 +423,19 @@ export default function KpiCommandCenterPanel() {
 
       {/* Consolidated toolbar — month + calendar/grid live here. */}
       <div className="glass-card rounded-xl border border-white/10 px-3 py-2.5 flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => shiftMonth(-1)}
-          className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 text-xs"
-        >
-          ← Prev
-        </button>
-        <div className="rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-gray-800 dark:text-gray-100">
-          <span className="text-[10px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-            Viewing
+        {pageRange ? (
+          <span className="text-xs font-medium text-gray-700 dark:text-gray-200" title="Set by the date range at the top of the page">
+            {formatRange(pageStart, pageEnd ?? rangeEnd)}
           </span>
-          <div className="text-xs font-semibold leading-tight">{visibleWindowLabel}</div>
-          <div className="text-[10px] text-gray-500 dark:text-gray-400">
-            {rangeStart} → {rangeEnd}
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => shiftMonth(1)}
-          className="rounded-lg border border-white/10 px-2 py-1 hover:bg-white/5 text-gray-800 dark:text-gray-100 text-xs"
-        >
-          Next →
-        </button>
+        ) : (
+        <MonthNavigator
+          label={visibleWindowLabel}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          onPrev={() => shiftMonth(-1)}
+          onNext={() => shiftMonth(1)}
+        />
+        )}
 
         {view === 'calendar' && (
           <>
@@ -413,15 +454,24 @@ export default function KpiCommandCenterPanel() {
                 ))}
               </select>
             </label>
-            <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={compareMonths}
-                onChange={(e) => onCompareChange(e.target.checked)}
-                className="rounded"
-              />
-              Two-month compare
-            </label>
+            {isOrganic && salesReps.length ? (
+              <label className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                Rep
+                <select
+                  className="rounded-lg solid-input px-2 py-1 text-xs max-w-[12rem]"
+                  value={repFilter ?? ''}
+                  onChange={(e) => changeRepFilter(e.target.value || null)}
+                  aria-label="Filter the calendar by sales rep"
+                >
+                  <option value="">All (org + team EODs)</option>
+                  {salesReps.map((r) => (
+                    <option key={r.user_id} value={r.user_id}>
+                      {r.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </>
         )}
 
@@ -457,7 +507,39 @@ export default function KpiCommandCenterPanel() {
         </div>
       )}
 
-      {view === 'settings' ? (
+      {view !== 'settings' && !isOrganic && (
+        // Funnel stages live on the Funnels tab's weekly scorecard (same numbers,
+        // one home) — a link here instead of a second copy at a different grain.
+        <div className="glass-card rounded-xl border border-white/10 px-3 py-2.5 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-gray-600 dark:text-gray-300">
+            Funnel stages (leads → booked → showed → closed → cash), week by week against a benchmark, live on the
+            Funnels tab.
+          </p>
+          <Link
+            href={{ pathname: '/', query: { tab: 'funnels' } }}
+            shallow
+            className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+          >
+            Open Funnels scorecard →
+          </Link>
+        </div>
+      )}
+
+      {view === 'settings' && isOrganic ? (
+        // All targets are managed in one place: Team KPIs → Settings → Targets.
+        <div className="glass-card rounded-xl border border-white/10 p-4 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            Org KPI targets (and closer targets) are managed together in Team KPIs → Settings → Targets.
+          </p>
+          <Link
+            href={{ pathname: '/', query: { tab: 'kpi_command_center', view: 'settings' } }}
+            shallow
+            className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+          >
+            Open Targets →
+          </Link>
+        </div>
+      ) : view === 'settings' ? (
         <KpiBenchmarkSettings
           initial={benchmarks}
           onSaved={(b) => {
@@ -475,13 +557,32 @@ export default function KpiCommandCenterPanel() {
                   thresholds={thresholds}
                   loading={loading}
                   refreshing={refreshing || softUpdating}
-                  onUpsertEntry={upsertEntry}
+                  onUpsertEntry={
+                    repFilter ? (date, data) => upsertEntry(date, data, repFilter) : upsertEntry
+                  }
+                  hideRepPicker={Boolean(repFilter)}
                   year={visibleMonth.year}
                   month={visibleMonth.month}
-                  compareMonths={compareMonths}
                   onVisibleRangeChange={onCalendarVisibleRangeChange}
                   colorMetric={colorMetric}
+                  hiddenFields={isOrganic ? ORGANIC_HIDDEN_FIELDS : undefined}
+                  range={pageRange && pageStart && pageEnd ? { start: pageStart, end: pageEnd } : null}
                 />
+                {isOrganic ? (
+                  // Team accountability + performance for the same month, right under the org calendar.
+                  <TeamOverviewView
+                    month={toYmd(new Date(visibleMonth.year, visibleMonth.month, 1))}
+                    range={pageStart && pageEnd ? { start: pageStart, end: pageEnd } : null}
+                    onAttentionChange={setTeamAttention}
+                    onlyUserId={repFilter}
+                    onOpenRoster={() =>
+                      void router.push({ pathname: '/', query: { tab: 'settings', section: 'team' } }, undefined, {
+                        shallow: true,
+                      })
+                    }
+                  />
+                ) : null}
+                {isOrganic ? null : (
                 <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 overflow-x-auto">
                   <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {monthTitle(visibleMonth.year, visibleMonth.month)} grid
@@ -500,10 +601,32 @@ export default function KpiCommandCenterPanel() {
                     rangeEnd={applyMonthRange(visibleMonth.year, visibleMonth.month, false).end}
                   />
                 </div>
+                )}
               </>
             )}
 
-            {view === 'by-rep' && (
+            {view === 'grid' && isOrganic && (
+              <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 overflow-x-auto">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {pageStart && pageEnd ? formatRange(pageStart, pageEnd) : monthTitle(visibleMonth.year, visibleMonth.month)} grid
+                </div>
+                <KpiGrid
+                  entries={entries}
+                  rollups={rollups}
+                  thresholds={thresholds}
+                  autoPopulatedColumns={autopopStatus.autopopulated_columns}
+                  loading={loading}
+                  refreshing={refreshing || softUpdating}
+                  onEntriesChange={(next) => {
+                    setEntries(next);
+                  }}
+                  rangeStart={pageStart ?? applyMonthRange(visibleMonth.year, visibleMonth.month, false).start}
+                  rangeEnd={pageEnd ?? applyMonthRange(visibleMonth.year, visibleMonth.month, false).end}
+                />
+              </div>
+            )}
+
+            {view === 'by-rep' && !isOrganic && (
               <KpiRepPerformancePanel isActive rangeStart={rangeStart} rangeEnd={rangeEnd} />
             )}
 
@@ -513,7 +636,12 @@ export default function KpiCommandCenterPanel() {
             className="w-full lg:w-72 xl:w-80 shrink-0 lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-2rem)] lg:overflow-y-auto"
             aria-label="Issues that need attention"
           >
-            <KpiFlagsBanner flags={flags} loading={flagsLoading} variant="sidebar" />
+            <KpiFlagsBanner
+              flags={flags}
+              loading={flagsLoading}
+              variant="sidebar"
+              teamItems={isOrganic ? teamAttention : null}
+            />
           </aside>
         </div>
       )}

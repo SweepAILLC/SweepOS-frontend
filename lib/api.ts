@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
-import type { Client } from '@/types/client';
+import type { Client, ClientGridDetail } from '@/types/client';
 import type {
   FunnelSimulatorBaselines,
   FunnelSimulatorScenario,
@@ -802,6 +802,30 @@ export interface OutreachInboxResponse {
   performance_task_count: number;
 }
 
+/** Shared date-range filter params (docs/features/DATE_RANGE_FILTER_PRD.md); `end` set = explicit window. */
+export type DateWindowParams = {
+  start?: string;
+  end?: string;
+  compare_start?: string;
+  compare_end?: string;
+};
+
+function windowQuery(w?: DateWindowParams): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!w?.end) return out;
+  out.end = w.end;
+  if (w.start) out.start = w.start;
+  if (w.compare_start && w.compare_end) {
+    out.compare_start = w.compare_start;
+    out.compare_end = w.compare_end;
+  }
+  return out;
+}
+
+function windowKey(w?: DateWindowParams): string {
+  return w?.end ? `${w.start ?? ''}~${w.end}~${w.compare_start ?? ''}~${w.compare_end ?? ''}` : '';
+}
+
 class ApiClient {
   private client: AxiosInstance;
 
@@ -1150,6 +1174,11 @@ class ApiClient {
       }
       throw error;
     }
+  }
+
+  async getClientGridDetails(): Promise<ClientGridDetail[]> {
+    const response = await this.client.get('/clients/grid-details');
+    return Array.isArray(response.data) ? response.data : [];
   }
 
   async mergeClients(clientIds: string[]) {
@@ -2007,7 +2036,7 @@ class ApiClient {
 
   /** Scoped show-up / close-rate KPIs from full synced check-in history (not capped like bookings list). */
   async getCalendarTrendSummary(
-    params?: { scope?: 'mtd' | 'all'; range_days?: number },
+    params?: { scope?: 'mtd' | 'all'; range_days?: number; start?: string; end?: string },
     bypassCache?: boolean
   ) {
     const cacheKey = `calendar_trend_summary_${orgIdFromAccessToken()}_${JSON.stringify(params || {})}`;
@@ -2038,6 +2067,8 @@ class ApiClient {
     upcoming_limit?: number;
     past_limit?: number;
     past_since?: string;
+    /** ISO instant — past rows ending before it (date-range filter end). */
+    past_until?: string;
     provider?: 'calcom' | 'calendly';
   }) {
     // DB-backed read must stay under Postgres statement_timeout (see backend session); allow headroom
@@ -2169,16 +2200,16 @@ class ApiClient {
    */
   async getFinancesSummary(
     bypassCache?: boolean,
-    fin?: { range?: number; scope?: 'mtd' | 'all' }
+    fin?: { range?: number; scope?: 'mtd' | 'all' } & DateWindowParams
   ) {
     const range = fin?.range ?? 30;
     const scope = fin?.scope;
-    const cacheKey = `${CACHE_KEYS.FINANCES_SUMMARY}:${scope ?? 'r'}:${range}`;
+    const cacheKey = `${CACHE_KEYS.FINANCES_SUMMARY}:${scope ?? 'r'}:${range}:${windowKey(fin)}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: Record<string, string | number> = { range };
+    const params: Record<string, string | number> = { range, ...windowQuery(fin) };
     if (scope) params.scope = scope;
     const response = await this.client.get('/integrations/finances/summary', { params });
     const data = response.data;
@@ -2189,9 +2220,10 @@ class ApiClient {
   async getFinancesRevenueTimeline(
     rangeDays: number = 30,
     groupBy: 'day' | 'week' = 'day',
-    scope?: 'mtd' | 'all' | null
+    scope?: 'mtd' | 'all' | null,
+    win?: DateWindowParams
   ) {
-    const params: Record<string, string | number> = { range: rangeDays, group_by: groupBy };
+    const params: Record<string, string | number> = { range: rangeDays, group_by: groupBy, ...windowQuery(win) };
     if (scope) params.scope = scope;
     const response = await this.client.get('/integrations/finances/revenue-timeline', { params });
     return response.data;
@@ -2256,13 +2288,13 @@ class ApiClient {
     return response.data;
   }
 
-  async getStripeSummary(range?: number | 'mtd' | 'all', bypassCache?: boolean) {
-    const cacheKey = `stripe_summary_${range ?? 'all'}`;
+  async getStripeSummary(range?: number | 'mtd' | 'all', bypassCache?: boolean, win?: DateWindowParams) {
+    const cacheKey = `stripe_summary_${range ?? 'all'}_${windowKey(win)}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: Record<string, string | number> = {};
+    const params: Record<string, string | number> = { ...windowQuery(win) };
     if (range === 'mtd') params.scope = 'mtd';
     else if (range && range !== 'all') params.range = range;
     const response = await this.client.get('/integrations/stripe/summary', { params });
@@ -2475,14 +2507,15 @@ class ApiClient {
     page?: number,
     pageSize?: number,
     useTreasury?: boolean,
-    bypassCache?: boolean
+    bypassCache?: boolean,
+    win?: DateWindowParams
   ) {
-    const cacheKey = `stripe_payments_${status ?? 'all'}_${range ?? 'all'}_${page ?? 1}_${pageSize ?? 100}_${useTreasury ?? false}`;
+    const cacheKey = `stripe_payments_${status ?? 'all'}_${range ?? 'all'}_${page ?? 1}_${pageSize ?? 100}_${useTreasury ?? false}_${windowKey(win)}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: Record<string, string | number> = {};
+    const params: Record<string, string | number> = { ...windowQuery(win) };
     if (status) params.status = status;
     if (range === 'mtd') params.scope = 'mtd';
     else if (range !== undefined) params.range = range;
@@ -2508,14 +2541,15 @@ class ApiClient {
     excludeResolved?: boolean,
     bypassCache?: boolean,
     range?: number,
-    scope?: 'mtd' | 'all'
+    scope?: 'mtd' | 'all',
+    win?: DateWindowParams
   ) {
-    const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}_${range ?? ''}_${scope ?? ''}`;
+    const cacheKey = `${CACHE_KEYS.STRIPE_FAILED_PAYMENTS}_${page ?? 1}_${pageSize ?? 10}_${excludeResolved ?? false}_${range ?? ''}_${scope ?? ''}_${windowKey(win)}`;
     if (!bypassCache) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params: Record<string, string | number | boolean> = {};
+    const params: Record<string, string | number | boolean> = { ...windowQuery(win) };
     if (page) params.page = page;
     if (pageSize) params.page_size = pageSize;
     if (excludeResolved !== undefined) params.exclude_resolved = excludeResolved;
@@ -2639,13 +2673,55 @@ class ApiClient {
     return response.data;
   }
 
-  async getFunnelAnalytics(funnelId: string, range?: number, forceRefresh?: boolean) {
-    const cacheKey = `funnel_analytics_${funnelId}_${range ?? 30}`;
+  /** Whole Funnels dashboard in one call (PRD phase 8). */
+  async getFunnelDashboard(params: {
+    start: string;
+    end: string;
+    channel?: 'organic' | 'paid' | 'all';
+    funnel_id?: string | null;
+    compare_start?: string;
+    compare_end?: string;
+  }): Promise<import('@/types/funnel').FunnelDashboardResponse> {
+    const { funnel_id, ...rest } = params;
+    const response = await this.client.get('/funnels/dashboard', {
+      params: funnel_id ? { ...rest, funnel_id } : rest,
+      // Scans events for visitors; same headroom as funnel analytics.
+      timeout: 120000,
+    });
+    return response.data;
+  }
+
+  /** Set one week's ad spend for a funnel (null funnel = unassigned). amount_usd 0 clears it. */
+  async putFunnelAdSpend(body: {
+    funnel_id: string | null;
+    week_start: string;
+    amount_usd: number;
+    ads_deployed?: number | null;
+    angles_deployed?: number | null;
+  }): Promise<import('@/types/funnel').FunnelAdSpendRow | null> {
+    const response = await this.client.put('/funnels/ad-spend', body);
+    return response.data;
+  }
+
+  async getFunnelAdSpend(params: {
+    start: string;
+    end: string;
+    funnel_id?: string | null;
+  }): Promise<import('@/types/funnel').FunnelAdSpendRow[]> {
+    const { funnel_id, ...rest } = params;
+    const response = await this.client.get('/funnels/ad-spend', {
+      params: funnel_id ? { ...rest, funnel_id } : rest,
+    });
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async getFunnelAnalytics(funnelId: string, range?: number, forceRefresh?: boolean, win?: DateWindowParams) {
+    const cacheKey = `funnel_analytics_${funnelId}_${range ?? 30}_${windowKey(win)}`;
     if (!forceRefresh) {
       const cached = cache.get<unknown>(cacheKey);
       if (cached != null) return cached;
     }
-    const params = range ? { range } : {};
+    const params = { ...(range ? { range } : {}), ...windowQuery(win) };
     // Analytics can scan large event tables; default 20s axios timeout caused ECONNABORTED on busy orgs.
     const response = await this.client.get(`/funnels/${funnelId}/analytics`, {
       params,
@@ -2872,12 +2948,12 @@ class ApiClient {
     await this.client.delete(path);
   }
 
-  async getLlmUsageTimeseries(params?: { days?: number; scope?: string; org_id?: string }) {
+  async getLlmUsageTimeseries(params?: { days?: number; scope?: string; org_id?: string; start?: string; end?: string }) {
     const response = await this.client.get('/admin/llm-usage/timeseries', { params });
     return response.data;
   }
 
-  async getOrganizationDashboard(orgId: string, params?: { range?: number; scope?: string }) {
+  async getOrganizationDashboard(orgId: string, params?: { range?: number; scope?: string; start?: string; end?: string }) {
     const response = await this.client.get(`/admin/organizations/${orgId}/dashboard`, { params });
     return response.data;
   }
@@ -2925,7 +3001,7 @@ class ApiClient {
   }
 
   // Organization-scoped invitations (org admin/owner)
-  async inviteUserToOrg(orgId: string, data: { email: string; role?: string }) {
+  async inviteUserToOrg(orgId: string, data: { email: string; role?: string; team_role?: 'sales' | 'marketing' | null }) {
     const response = await this.client.post(`/organizations/${orgId}/invite-user`, data);
     cache.delete(`org_invitations_${orgId}`);
     return response.data;
@@ -2980,6 +3056,7 @@ class ApiClient {
 
   async updateUser(userId: string, data: any) {
     const response = await this.client.patch(`/users/${userId}`, data);
+    cache.delete(CACHE_KEYS.USERS);
     return response.data;
   }
 
@@ -3440,9 +3517,50 @@ class ApiClient {
     return Array.isArray(response.data?.reps) ? response.data.reps : [];
   }
 
-  async getPublicKpiReps(token: string): Promise<import('@/types/kpi').KpiRepOption[]> {
+  async getPublicKpiReps(token: string): Promise<import('@/types/kpi').KpiRepOptionsResponse> {
     const response = await this.client.get(`/kpi/public/${token}/reps`);
-    return Array.isArray(response.data?.reps) ? response.data.reps : [];
+    return {
+      reps: Array.isArray(response.data?.reps) ? response.data.reps : [],
+      require_rep: Boolean(response.data?.require_rep),
+    };
+  }
+
+  // --- Team KPIs (/team) ------------------------------------------------------
+
+  async getTeamMembers(): Promise<import('@/types/team').TeamMember[]> {
+    const response = await this.client.get('/team/members');
+    return Array.isArray(response.data) ? response.data : [];
+  }
+
+  async putTeamMemberRole(
+    userId: string,
+    teamRole: import('@/types/team').TeamRole | null,
+  ): Promise<import('@/types/team').TeamMember> {
+    const response = await this.client.put(`/team/members/${userId}/role`, { team_role: teamRole });
+    return response.data;
+  }
+
+  /** One Team view: EOD (setters), closer activity, trends vs the previous period. */
+  async getTeamOverview(
+    period: 'week' | 'month',
+    anchor?: string,
+    win?: DateWindowParams,
+  ): Promise<import('@/types/team').TeamOverviewResponse> {
+    const params = win?.end ? { period, ...windowQuery(win) } : anchor ? { period, anchor } : { period };
+    const response = await this.client.get('/team/overview', { params });
+    return response.data;
+  }
+
+  async getTeamSettings(): Promise<import('@/types/team').TeamSettings> {
+    const response = await this.client.get('/team/settings');
+    return response.data;
+  }
+
+  async putTeamSettings(
+    patch: Partial<import('@/types/team').TeamSettings>,
+  ): Promise<import('@/types/team').TeamSettings> {
+    const response = await this.client.put('/team/settings', patch);
+    return response.data;
   }
 
   async getKpiRepPerformance(params?: {
@@ -3489,6 +3607,19 @@ class ApiClient {
     return response.data;
   }
 
+  async getKpiFunnelSummary(params: {
+    start: string;
+    end: string;
+    channel?: 'organic' | 'paid' | 'all';
+    funnel_id?: string | null;
+  }): Promise<import('@/types/kpi').KpiFunnelSummaryResponse> {
+    const { funnel_id, ...rest } = params;
+    const response = await this.client.get('/kpi/funnel-summary', {
+      params: funnel_id ? { ...rest, funnel_id } : rest,
+    });
+    return response.data;
+  }
+
   async getKpiSnapshot(params?: {
     days?: number;
     start?: string;
@@ -3527,6 +3658,13 @@ class ApiClient {
     return response.data;
   }
 
+  async getKpiBookableClients(
+    entryDate: string
+  ): Promise<import('@/types/kpi').KpiBookableClientsResponse> {
+    const response = await this.client.get(`/kpi/entries/${entryDate}/bookable-clients`);
+    return response.data;
+  }
+
   async getKpiAutopopulateStatus(): Promise<import('@/types/kpi').KpiAutopopulateStatusResponse> {
     const response = await this.client.get('/kpi/autopopulate-status');
     return response.data;
@@ -3559,6 +3697,16 @@ class ApiClient {
     const response = await this.client.put(`/kpi/public/${token}/entries/${entryDate}`, data, {
       params: repUserId ? { rep_user_id: repUserId } : undefined,
     });
+    return response.data;
+  }
+
+  async getPublicKpiBookableClients(
+    token: string,
+    entryDate: string
+  ): Promise<import('@/types/kpi').KpiBookableClientsResponse> {
+    const response = await this.client.get(
+      `/kpi/public/${token}/entries/${entryDate}/bookable-clients`
+    );
     return response.data;
   }
 }

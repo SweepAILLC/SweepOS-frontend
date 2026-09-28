@@ -77,6 +77,7 @@ export default function ClientDetailDrawer({
   const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   const [showCheckInCalendar, setShowCheckInCalendar] = useState(false);
   const [nextCheckIn, setNextCheckIn] = useState<any>(null);
+  const [funnelName, setFunnelName] = useState<string | null>(null);
   const [engagementOpen, setEngagementOpen] = useState(false);
 
   // Form state
@@ -88,6 +89,7 @@ export default function ClientDetailDrawer({
     phone: '',
     instagram: '',
     notes: '',
+    source_channel: '' as '' | 'organic' | 'paid',
     program_start_date: '',
     program_end_date: '',
     follow_up_due_date: '',
@@ -116,6 +118,7 @@ export default function ClientDetailDrawer({
       phone: client.phone || '',
       instagram: client.instagram || '',
       notes: client.notes || '',
+      source_channel: (client.source_channel as 'organic' | 'paid' | null | undefined) || '',
       program_start_date: programIsoToDateInput(client.program_start_date),
       program_end_date: programIsoToDateInput(client.program_end_date),
       follow_up_due_date: followUpIsoToDateInput(
@@ -125,6 +128,20 @@ export default function ClientDetailDrawer({
     loadPayments();
     loadBrevoStatus();
     loadNextCheckIn();
+
+    if (client.source_funnel_id) {
+      apiClient
+        .getFunnels()
+        .then((funnels: any[]) => {
+          const match = Array.isArray(funnels)
+            ? funnels.find((f) => f?.id === client.source_funnel_id)
+            : null;
+          setFunnelName(match?.name || null);
+        })
+        .catch(() => setFunnelName(null));
+    } else {
+      setFunnelName(null);
+    }
 
     if (client.program_start_date && client.program_end_date) {
       apiClient.getClient(client.id).then((updatedClient) => {
@@ -263,6 +280,7 @@ export default function ClientDetailDrawer({
       setIfChanged('phone', snapshot.phone, client.phone ?? '');
       setIfChanged('instagram', snapshot.instagram, client.instagram ?? '');
       setIfChanged('notes', snapshot.notes, client.notes ?? '');
+      setIfChanged('source_channel', snapshot.source_channel || null, client.source_channel ?? null);
 
       const currentStartDate = programIsoToDateInput(client.program_start_date);
       const currentEndDate = programIsoToDateInput(client.program_end_date);
@@ -708,6 +726,7 @@ export default function ClientDetailDrawer({
                         <aside className="w-full lg:w-80 xl:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-white/10 overflow-y-auto bg-gray-50/50 dark:bg-white/[0.02]">
                           <ClientProfileRail
                             client={client}
+                            funnelName={funnelName}
                             formData={{
                               first_name: formData.first_name,
                               last_name: formData.last_name,
@@ -715,6 +734,7 @@ export default function ClientDetailDrawer({
                               emails: formData.emails,
                               phone: formData.phone,
                               instagram: formData.instagram,
+                              source_channel: formData.source_channel,
                               program_start_date: formData.program_start_date,
                               program_end_date: formData.program_end_date,
                               follow_up_due_date: formData.follow_up_due_date,
@@ -730,6 +750,7 @@ export default function ClientDetailDrawer({
                                         emails: prev.emails,
                                         phone: prev.phone,
                                         instagram: prev.instagram,
+                                        source_channel: prev.source_channel,
                                         program_start_date: prev.program_start_date,
                                         program_end_date: prev.program_end_date,
                                         follow_up_due_date: prev.follow_up_due_date,

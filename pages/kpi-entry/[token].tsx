@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import type { KpiDailyEntry, KpiEntryUpdatePayload, KpiRepOption } from '@/types/kpi';
+import KpiSetterBookedClientsModal from '@/components/kpi/KpiSetterBookedClientsModal';
 
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -104,8 +105,20 @@ function KpiEntryFormClient() {
   const [message, setMessage] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [phase, setPhase] = useState<'form' | 'submitting' | 'done'>('form');
+  const [showBookedPicker, setShowBookedPicker] = useState(false);
   const [reps, setReps] = useState<KpiRepOption[]>([]);
-  const [repUserId, setRepUserId] = useState<string>('');
+  const [repUserId, setRepUserIdState] = useState<string>('');
+  // With sales reps set up, every EOD must be attributed (the API rejects unattributed ones).
+  const [requireRep, setRequireRep] = useState(false);
+  const repStorageKey = token ? `sweep.eod.rep.${token}` : null;
+  const setRepUserId = (id: string) => {
+    setRepUserIdState(id);
+    try {
+      if (repStorageKey) window.localStorage.setItem(repStorageKey, id);
+    } catch {
+      /* remembering the name is a convenience */
+    }
+  };
   const loadGen = useRef(0);
 
   useEffect(() => {
@@ -113,8 +126,17 @@ function KpiEntryFormClient() {
     let cancelled = false;
     void apiClient
       .getPublicKpiReps(token)
-      .then((opts) => {
-        if (!cancelled) setReps(opts);
+      .then((res) => {
+        if (cancelled) return;
+        setReps(res.reps);
+        setRequireRep(Boolean(res.require_rep));
+        // Remember who's on this device so a setter doesn't re-pick every day.
+        try {
+          const saved = window.localStorage.getItem(`sweep.eod.rep.${token}`) || '';
+          if (saved && res.reps.some((r) => r.id === saved)) setRepUserIdState(saved);
+        } catch {
+          /* no storage — pick each time */
+        }
       })
       .catch(() => {
         /* rep picker is optional — silently fall back to org-aggregate-only entry */
@@ -167,6 +189,11 @@ function KpiEntryFormClient() {
 
   const submit = async () => {
     if (!token || saving) return;
+    if (requireRep && !repUserId) {
+      setSaveError('Choose your name at the top of the form first.');
+      setMessage(null);
+      return;
+    }
     if (!hasSubmitPayload(form)) {
       setSaveError('Enter at least one field before submitting.');
       setMessage(null);
@@ -264,9 +291,11 @@ function KpiEntryFormClient() {
 
         {reps.length > 0 && (
           <label className="block text-sm">
-            Who are you?
+            Who are you?{requireRep ? <span className="text-red-400"> *</span> : null}
             <span className="ml-1 text-[11px] text-gray-500">
-              (attributes today&apos;s numbers to you instead of the shared org total)
+              {requireRep
+                ? '(your EOD is logged under your name; remembered on this device)'
+                : '(attributes today\'s numbers to you instead of the shared org total)'}
             </span>
             <select
               value={repUserId}
@@ -274,7 +303,7 @@ function KpiEntryFormClient() {
               disabled={!token || saving}
               className="mt-1 w-full rounded border border-white/10 bg-black/30 px-2 py-1.5 disabled:opacity-50"
             >
-              <option value="">Org total (shared)</option>
+              <option value="">{requireRep ? 'Select your name…' : 'Org total (shared)'}</option>
               {reps.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
@@ -320,6 +349,15 @@ function KpiEntryFormClient() {
                     {' '}
                     (split {loggedSplit} — should match calendar total when connected)
                   </span>
+                )}
+                {loggedBooked > 0 && repUserId && (
+                  <button
+                    type="button"
+                    onClick={() => setShowBookedPicker(true)}
+                    className="ml-1.5 text-indigo-300 hover:text-indigo-200 underline"
+                  >
+                    {(logged?.setter_booked_client_ids?.length ?? 0) > 0 ? 'edit tags' : 'tag who'}
+                  </button>
                 )}
               </p>
               {logged.setter_context ? (
@@ -423,7 +461,8 @@ function KpiEntryFormClient() {
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={formDisabled || !hasSubmitPayload(form)}
+            disabled={formDisabled || !hasSubmitPayload(form) || (requireRep && !repUserId)}
+            title={requireRep && !repUserId ? 'Choose your name first' : undefined}
             className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
           >
             {saving ? 'Saving…' : 'Add to day totals'}
@@ -442,6 +481,18 @@ function KpiEntryFormClient() {
           {saveError && <span className="text-sm text-red-400">{saveError}</span>}
         </div>
       </div>
+      {showBookedPicker && token && (
+        <KpiSetterBookedClientsModal
+          entryDate={entryDate}
+          repUserId={repUserId}
+          initialSelectedIds={logged?.setter_booked_client_ids || []}
+          publicToken={token}
+          onClose={() => setShowBookedPicker(false)}
+          onSaved={(clientIds) => {
+            setLogged((prev) => (prev ? { ...prev, setter_booked_client_ids: clientIds } : prev));
+          }}
+        />
+      )}
     </SurveyShell>
   );
 }

@@ -320,7 +320,6 @@ export default function Navbar({
         {shouldShowTab('funnels') && tabBtn('funnels', 'Funnels')}
         {shouldShowTab('content_studio') && tabBtn('content_studio', 'Marketing Intel')}
         {shouldShowTab('call_library') && tabBtn('call_library', 'Call Library')}
-        {shouldShowTab('kpi_command_center') && tabBtn('kpi_command_center', 'Sales KPIs')}
         {shouldShowTab('automations') &&
           iconBtn('automations', 'Automations', TAB_ICONS.automations!, {
             title: 'Automated email playbooks & worker health',

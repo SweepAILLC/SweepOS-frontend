@@ -7,14 +7,14 @@ import { useSidebar } from '@/contexts/SidebarContext';
 import TerminalDashboard from '@/components/terminal/TerminalDashboard';
 import PipelineDashboard from '@/components/pipeline/PipelineDashboard';
 import FunnelListPanel from '@/components/FunnelListPanel';
-import FunnelDetailPanel from '@/components/funnels/FunnelDetailPanel';
+import FunnelDashboard from '@/components/funnels/FunnelDashboard';
+import { DateRangeProvider } from '@/contexts/DateRangeContext';
 import AdminPanel from '@/components/AdminPanel';
 import RestrictedTabView from '@/components/ui/RestrictedTabView';
 import SettingsPanel from '@/components/ui/SettingsPanel';
 import IntelligencePanel from '@/components/ui/IntelligencePanel';
 import ContentStudioPanel from '@/components/ui/ContentStudioPanel';
 import CallLibraryPanel from '@/components/ui/CallLibraryPanel';
-import KpiCommandCenterPanel from '@/components/kpi/KpiCommandCenterPanel';
 import ResourcesPanel from '@/components/ui/ResourcesPanel';
 import AutomationsTab from '@/components/automations/AutomationsTab';
 import OrgPortalPanel from '@/components/portal/OrgPortalPanel';
@@ -74,7 +74,6 @@ export default function Dashboard() {
   /** Pipeline board mounts on first visit and stays mounted for instant return. */
   const [pipelineMounted, setPipelineMounted] = useState(false);
   /** KPI Command Center stays mounted after first visit to avoid cold-load flicker. */
-  const [kpiMounted, setKpiMounted] = useState(false);
   const [loading, setLoadingState] = useState(true);
   const [isOwner, setIsOwner] = useState(false);
   /** Platform operators (sudo / Sweep Internal admin|owner) — see AdminPanel on org portal. */
@@ -99,7 +98,6 @@ export default function Dashboard() {
     const tab = getInitialTab();
     setActiveTab(tab);
     setPipelineMounted(tab === 'pipeline');
-    setKpiMounted(tab === 'kpi_command_center');
   }, []);
 
   // Persist tab so refresh keeps the same tab (new session after login still starts on terminal via newSession flag)
@@ -116,7 +114,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (activeTab === 'pipeline') setPipelineMounted(true);
-    if (activeTab === 'kpi_command_center') setKpiMounted(true);
   }, [activeTab]);
 
   // Lightweight poll for awaiting-approval automation jobs so the navbar badge stays fresh
@@ -366,13 +363,19 @@ export default function Dashboard() {
           return;
         }
         lastConsumedDeepLinkRef.current = consumeKey;
+        if (tabValue === 'kpi_command_center') {
+          // Team KPIs was folded into Funnels → Organic (team cards under the calendar).
+          setActiveTab('funnels');
+          router.replace({ pathname: '/', query: { tab: 'funnels', channel: 'organic' } }, undefined, { shallow: true });
+          return;
+        }
         setActiveTab(tabValue);
         if (tabValue === 'funnels' && fidParam) {
           router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: fidParam } }, undefined, { shallow: true });
         } else if (tabValue === 'settings' && (router.query.section || router.query.google || router.query.google_error)) {
           // Keep settings deep-link query for SettingsPanel
-        } else if (tabValue === 'kpi_command_center' && viewParam) {
-          // Leave ?tab=&view= for KpiCommandCenterPanel — do not replace (avoids re-trigger loops).
+        } else if (tabValue === 'funnels' && router.query.channel) {
+          // Keep ?tab=funnels&channel=… for FunnelDashboard's channel preselect.
         } else if (tabValue === 'content_studio') {
           // Keep ?tab=content_studio&sub=… for Marketing Intel (Overview | Signals).
           // Stripping the query here snapped every sub-tab click back to Overview.
@@ -579,18 +582,24 @@ export default function Dashboard() {
 
         {activeTab === 'funnels' && (
           hasTabAccess('funnels') ? (
-            <div>
-              {router.isReady && typeof router.query.funnelId === 'string' && router.query.funnelId ? (
-                <FunnelDetailPanel
-                  funnelId={router.query.funnelId}
+            // Pick a card (Organic or a funnel) to open its dashboard; no pick = the cards.
+            router.isReady &&
+            ((typeof router.query.funnelId === 'string' && router.query.funnelId) ||
+              router.query.channel === 'organic' ||
+              router.query.channel === 'paid') ? (
+              // One date range for the Funnels tab (every funnel dashboard + Organic).
+              <DateRangeProvider storageKey="funnels" defaultPreset="this_month">
+                <FunnelDashboard
+                  initialFunnelId={typeof router.query.funnelId === 'string' && router.query.funnelId ? router.query.funnelId : null}
+                  initialChannel={router.query.channel === 'organic' || router.query.channel === 'paid' ? router.query.channel : null}
                   onBack={() => {
                     router.replace({ pathname: '/', query: { tab: 'funnels' } }, undefined, { shallow: true });
                   }}
                 />
-              ) : (
-                <FunnelListPanel />
-              )}
-            </div>
+              </DateRangeProvider>
+            ) : (
+              <FunnelListPanel />
+            )
           ) : (
             <RestrictedTabView tabName="funnels" />
           )
@@ -612,16 +621,6 @@ export default function Dashboard() {
           )
         )}
 
-        {hasTabAccess('kpi_command_center') && kpiMounted ? (
-          <div
-            className={activeTab === 'kpi_command_center' ? undefined : 'hidden'}
-            aria-hidden={activeTab !== 'kpi_command_center'}
-          >
-            <KpiCommandCenterPanel />
-          </div>
-        ) : activeTab === 'kpi_command_center' ? (
-          <RestrictedTabView tabName="kpi_command_center" />
-        ) : null}
 
         {activeTab === 'resources' && (
           hasTabAccess('resources') ? (

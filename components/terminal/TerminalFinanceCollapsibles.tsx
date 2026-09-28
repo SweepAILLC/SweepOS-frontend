@@ -4,13 +4,9 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react
 import { apiClient } from '@/lib/api';
 import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
 import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
-import {
-  dashboardPeriodLabel,
-  isManualStripePaymentRow,
-  terminalFailedPaymentsParams,
-  terminalStripePaymentsParams,
-} from '@/lib/dashboardTimeRange';
-import { useTerminalTimeRange } from '@/contexts/TerminalTimeRangeContext';
+import { isManualStripePaymentRow } from '@/lib/dashboardTimeRange';
+import { useDateRange } from '@/contexts/DateRangeContext';
+import { rangeTitle } from '@/lib/dateRange';
 import {
   dispatchManualPaymentCreated,
   invalidateStripeAndTerminalAfterWebhook,
@@ -141,8 +137,9 @@ interface TerminalFinanceCollapsiblesProps {
 export default function TerminalFinanceCollapsibles({
   bookingsColumnHeight,
 }: TerminalFinanceCollapsiblesProps) {
-  const { timeRange } = useTerminalTimeRange();
-  const rangeLabel = dashboardPeriodLabel(timeRange);
+  const { range, params } = useDateRange();
+  const rangeLabel = rangeTitle(range);
+  const windowKey = `${params.start ?? ''}~${params.end}`;
   const [failedPayments, setFailedPayments] = useState<FailedPayment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [failedLoading, setFailedLoading] = useState(true);
@@ -186,15 +183,11 @@ export default function TerminalFinanceCollapsibles({
   const loadFailed = useCallback(async () => {
     setFailedLoading(true);
     try {
-      const failedParams = terminalFailedPaymentsParams(timeRange);
-      const response = await apiClient.getStripeFailedPayments(
-        1,
-        50,
-        true,
-        true,
-        failedParams.range,
-        failedParams.scope
-      );
+      const [start, end] = windowKey.split('~');
+      const response = await apiClient.getStripeFailedPayments(1, 50, true, true, undefined, undefined, {
+        start: start || undefined,
+        end,
+      });
       const arr = Array.isArray(response) ? response : [];
       setFailedPayments(
         arr.map((payment: Record<string, unknown>) => ({
@@ -215,20 +208,16 @@ export default function TerminalFinanceCollapsibles({
     } finally {
       setFailedLoading(false);
     }
-  }, [timeRange]);
+  }, [windowKey]);
 
   const loadPayments = useCallback(async (page = 1, append = false) => {
     setPaymentsLoading(true);
     try {
-      const payParams = terminalStripePaymentsParams(timeRange);
-      const data = await apiClient.getStripePayments(
-        'succeeded',
-        payParams.range,
-        page,
-        pageSize,
-        payParams.useTreasury,
-        true
-      );
+      const [start, end] = windowKey.split('~');
+      const data = await apiClient.getStripePayments('succeeded', undefined, page, pageSize, true, true, {
+        start: start || undefined,
+        end,
+      });
       const rows = Array.isArray(data) ? data : [];
       const sorted = [...rows].sort((a, b) => (b.created_at || 0) - (a.created_at || 0));
       setPayments((prev) => (append ? [...prev, ...sorted] : sorted));
@@ -239,7 +228,7 @@ export default function TerminalFinanceCollapsibles({
     } finally {
       setPaymentsLoading(false);
     }
-  }, [timeRange]);
+  }, [windowKey]);
 
   useEffect(() => {
     void loadFailed();
@@ -505,7 +494,7 @@ export default function TerminalFinanceCollapsibles({
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0 truncate">
             Failed payments
             <span className="ml-1.5 font-normal text-xs text-gray-500 dark:text-gray-400">
-              ({rangeLabel.toLowerCase()})
+              · {rangeLabel}
             </span>
           </span>
           {!failedLoading && (
@@ -588,7 +577,7 @@ export default function TerminalFinanceCollapsibles({
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex-1 min-w-0 truncate">
             Recent transactions
             <span className="ml-1.5 font-normal text-xs text-gray-500 dark:text-gray-400">
-              ({rangeLabel.toLowerCase()})
+              · {rangeLabel}
             </span>
           </span>
           {!paymentsLoading && (

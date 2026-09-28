@@ -10,7 +10,8 @@ import TerminalBookingsTable from '@/components/terminal/TerminalBookingsTable';
 import { PremiumReveal } from '@/components/ui/PremiumMotion';
 import { TERMINAL_STAGGER } from '@/lib/premiumMotion';
 import { TerminalCalendarProvider } from '@/contexts/TerminalCalendarContext';
-import { TerminalTimeRangeProvider } from '@/contexts/TerminalTimeRangeContext';
+import { DateRangeProvider } from '@/contexts/DateRangeContext';
+import PageDateRange from '@/components/ui/PageDateRange';
 import { useLoading } from '@/contexts/LoadingContext';
 import { apiClient } from '@/lib/api';
 import {
@@ -156,14 +157,21 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
   }, []);
 
   return (
+    <DateRangeProvider storageKey="terminal" defaultPreset="this_month">
     <TerminalCalendarProvider>
-      <TerminalTimeRangeProvider>
       <div className="space-y-4 sm:space-y-6 min-w-0 max-w-full">
-        <div className="flex items-center justify-between gap-2 min-w-0">
+        {/* One date range for the whole Terminal — every metric, chart and table below follows it. */}
+        <div className="flex flex-wrap items-start justify-between gap-3 min-w-0">
           <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 truncate min-w-0">
             Terminal
           </h2>
+          <PageDateRange />
         </div>
+
+        {/* Key metrics first, right under the date filter they follow */}
+        <PremiumReveal delayMs={TERMINAL_STAGGER.kpiRow}>
+          <TerminalKpiRow />
+        </PremiumReveal>
 
         {/* Row 1: unified chart + upcoming appointments + leads by source */}
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-4 sm:gap-6 min-w-0 lg:items-start">
@@ -172,8 +180,9 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
           </PremiumReveal>
           <div className="flex flex-col gap-4 min-w-0">
             <PremiumReveal delayMs={TERMINAL_STAGGER.sidebar} className="glass-card p-4 min-w-0">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-baseline justify-between gap-2">
                 Upcoming Appointments
+                <span className="text-[10px] font-normal text-gray-500 dark:text-gray-400">Next up · not date-filtered</span>
               </h3>
               <UpcomingAppointmentsList />
             </PremiumReveal>
@@ -183,17 +192,12 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
           </div>
         </div>
 
-        {/* Row 2: KPI row */}
-        <PremiumReveal delayMs={TERMINAL_STAGGER.kpiRow}>
-          <TerminalKpiRow />
-        </PremiumReveal>
-
         {/* Row 3: finance collapsibles + bookings table */}
         <PremiumReveal delayMs={TERMINAL_STAGGER.financeRow}>
           <TerminalFinanceBookingsRow />
         </PremiumReveal>
       </div>
-      </TerminalTimeRangeProvider>
     </TerminalCalendarProvider>
+    </DateRangeProvider>
   );
 }

@@ -125,3 +125,89 @@ export interface EventExplorerEvent {
   received_at?: string;
 }
 
+
+// ---------------------------------------------------------------------------
+// Funnels dashboard + weekly ad spend (PRD phase 8) — GET /funnels/dashboard
+// ---------------------------------------------------------------------------
+
+export type FunnelTrackingStatus = 'live' | 'silent' | 'errors' | 'no_funnels';
+
+export interface FunnelDashboardMoney {
+  has_spend: boolean;
+  spend_usd: number;
+  paid_cash_usd: number;
+  cpl_usd: number | null;
+  cac_usd: number | null;
+  roas: number | null;
+  profit_usd: number | null;
+}
+
+export interface FunnelDashboardWeek {
+  week_start: string;
+  spend_usd: number;
+  cash_usd: number;
+  opt_ins: number;
+  closed: number;
+  cac_usd: number | null;
+}
+
+export interface FunnelDashboardSource {
+  source: string;
+  opt_ins: number;
+  booked: number;
+  closed: number;
+  cash_usd: number;
+}
+
+export interface FunnelDashboardResponse {
+  window_start: string;
+  window_end: string;
+  channel: 'all' | 'organic' | 'paid';
+  funnel_id: string | null;
+  tracking: { status: FunnelTrackingStatus; last_event_at: string | null; errors_24h: number };
+  visitors: number | null;
+  summary: import('@/types/kpi').KpiFunnelSummaryResponse;
+  money: FunnelDashboardMoney | null;
+  weekly: FunnelDashboardWeek[];
+  sources: FunnelDashboardSource[];
+  scorecard: FunnelScorecard;
+}
+
+/** Sheet-style scorecard grid: metrics x weeks, each vs the average complete week. */
+export type FunnelScorecardGroup = 'ads' | 'funnel' | 'close' | 'economics';
+
+export interface FunnelScorecardMetric {
+  key: string;
+  label: string;
+  group: FunnelScorecardGroup;
+  /** 'pct' values are fractions (0.25 = 25%). */
+  format: 'int' | 'usd' | 'pct' | 'ratio';
+  better: 'up' | 'down' | 'neutral';
+  /** One per FunnelScorecard.weeks entry. */
+  values: Array<number | null>;
+  /** Average of the complete weeks' values. */
+  benchmark: number | null;
+}
+
+export interface FunnelScorecardWeek {
+  week_start: string;
+  /** Current week: shown, but excluded from the benchmark and gets no arrow. */
+  in_progress: boolean;
+}
+
+export interface FunnelScorecard {
+  weeks: FunnelScorecardWeek[];
+  benchmark_weeks: number;
+  /** 'compare' = benchmark is the compare range's average week (date-range filter compare on). */
+  benchmark_source?: 'range' | 'compare';
+  metrics: FunnelScorecardMetric[];
+}
+
+export interface FunnelAdSpendRow {
+  id: string;
+  funnel_id: string | null;
+  week_start: string;
+  amount_usd: number;
+  ads_deployed: number | null;
+  angles_deployed: number | null;
+}

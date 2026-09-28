@@ -4,6 +4,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { Client } from '@/types/client';
 import React, { memo, useMemo, useCallback } from 'react';
 import { computeLeadFollowUpBar } from '@/lib/leadFollowUp';
+import { channelLabel, useFunnelNames } from '@/lib/funnelNames';
 import { insightChipClass } from '@/lib/callInsightChips';
 import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import { isProgramProgressVisible } from '@/lib/clientProgram';
@@ -52,6 +53,7 @@ function ClientCard({
   );
 
   const followUpBar = useMemo(() => (isLeadColumn ? computeLeadFollowUpBar(client) : null), [isLeadColumn, client]);
+  const funnelNames = useFunnelNames();
 
   const mergeDroppable = useDroppable({ id: MERGE_DROP_ID(sortableId) });
 
@@ -194,6 +196,14 @@ function ClientCard({
                 title="Recorded payments are below the full offer amount"
               >
                 Balance due
+              </span>
+            )}
+            {client.source_channel === 'paid' && (
+              <span
+                className="inline-block max-w-[10rem] truncate align-middle text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded border border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300"
+                title={`Paid · entered via ${channelLabel(client, funnelNames)}`}
+              >
+                {channelLabel(client, funnelNames)}
               </span>
             )}
           </div>

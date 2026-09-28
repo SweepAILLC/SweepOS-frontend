@@ -22,22 +22,10 @@ import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import { chartRevealBudgetMs, PREMIUM_LINE_ANIMATION } from '@/lib/premiumMotion';
 import { ChartSkeleton, PremiumContentGate } from '@/components/ui/PremiumMotion';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
+import { useOptionalDateRange } from '@/contexts/DateRangeContext';
+import { addDays, diffDays, formatRange, formatYmd, mondayOf } from '@/lib/dateRange';
 
 const MONEY_CHART_HEIGHT = 180;
-
-type ChartRange = '6m' | '12m' | 'all';
-
-const CHART_RANGE_OPTIONS: { id: ChartRange; label: string }[] = [
-  { id: '6m', label: '6 month' },
-  { id: '12m', label: '12 month' },
-  { id: 'all', label: 'All time' },
-];
-
-function sliceChartRange<T>(data: T[], range: ChartRange): T[] {
-  if (data.length === 0 || range === 'all') return data;
-  const months = range === '6m' ? 6 : 12;
-  return data.slice(-months);
-}
 
 /** Left cash axis gutter for the money chart. */
 const LEFT_AXIS_WIDTH = 56;
@@ -79,7 +67,8 @@ type ChartOffset = {
   height?: number;
 };
 
-type TrendChartRow = ReturnType<typeof healthTrendPeriodsWithFinancesCash>[number];
+/** Fields the money chart reads; monthly trend rows and date-range rows both fit. */
+type TrendChartRow = { period_label: string; finances_cash_usd: number; deal_revenue_usd: number };
 
 const LeftCashAxisChart = memo(function LeftCashAxisChart({
   data,
@@ -150,23 +139,94 @@ function ChartRevealClip({
   );
 }
 
-function rangeDescriptionFor(dataLen: number, chartRange: ChartRange): string {
-  if (dataLen === 0) return '';
-  if (chartRange === 'all') {
-    return dataLen === 1 ? 'All time (1 month)' : `All time (${dataLen} months)`;
+/** Monthly chart: months overlapping the page range, at least MIN_MONTHS so it reads as a trend. */
+const MIN_MONTHS = 3;
+
+type Granularity = 'day' | 'week' | 'month';
+
+type MoneyRow = {
+  period_label: string;
+  period_start: string;
+  period_end: string;
+  finances_cash_usd: number;
+  deal_revenue_usd: number;
+};
+
+/** Bucket size that keeps the axis readable: days up to ~6 weeks, then weeks, then months. */
+function granularityFor(start: string, end: string): Granularity {
+  const days = diffDays(start, end) + 1;
+  if (days <= 45) return 'day';
+  if (days <= 200) return 'week';
+  return 'month';
+}
+
+function bucketStart(ymd: string, g: Granularity): string {
+  if (g === 'day') return ymd;
+  if (g === 'week') return mondayOf(ymd);
+  return `${ymd.slice(0, 7)}-01`;
+}
+
+function nextBucket(ymd: string, g: Granularity): string {
+  if (g === 'day') return addDays(ymd, 1);
+  if (g === 'week') return addDays(ymd, 7);
+  const [y, m] = ymd.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+}
+
+function bucketLabel(ymd: string, g: Granularity): string {
+  if (g === 'day') return formatYmd(ymd, false);
+  if (g === 'week') return `Wk ${formatYmd(ymd, false)}`;
+  return formatYmd(ymd).replace(/ \d+,/, '');
+}
+
+/**
+ * Cash (finances timeline, Stripe + Whop + Manual) and deal revenue (KPI ledger) summed into
+ * buckets covering exactly the page range — every bucket present, empty ones as 0.
+ */
+function buildRangeSeries(
+  cashByDay: Array<{ date: string; total_revenue: number }>,
+  revenueByDay: Array<{ entry_date: string; revenue?: number | null }>,
+  start: string | null,
+  end: string,
+): { rows: MoneyRow[]; granularity: Granularity } {
+  const firstData = [...cashByDay.map((c) => c.date), ...revenueByDay.map((r) => r.entry_date)].sort()[0];
+  const from = start ?? firstData ?? end;
+  const g = granularityFor(from, end);
+  const cash = new Map<string, number>();
+  const deal = new Map<string, number>();
+  for (const c of cashByDay) {
+    const d = c.date.slice(0, 10);
+    if (d < from || d > end) continue;
+    const k = bucketStart(d, g);
+    cash.set(k, (cash.get(k) ?? 0) + (c.total_revenue ?? 0));
   }
-  const target = chartRange === '6m' ? 6 : 12;
-  if (dataLen < target) {
-    return `Last ${dataLen} month${dataLen !== 1 ? 's' : ''}`;
+  for (const r of revenueByDay) {
+    const d = r.entry_date;
+    if (d < from || d > end || !r.revenue) continue;
+    const k = bucketStart(d, g);
+    deal.set(k, (deal.get(k) ?? 0) + Number(r.revenue));
   }
-  return chartRange === '6m' ? 'Last 6 months' : 'Last 12 months';
+  const rows: MoneyRow[] = [];
+  for (let k = bucketStart(from, g); k <= end; k = nextBucket(k, g)) {
+    rows.push({
+      period_label: bucketLabel(k, g),
+      period_start: k,
+      period_end: nextBucket(k, g),
+      finances_cash_usd: Math.round((cash.get(k) ?? 0) * 100) / 100,
+      deal_revenue_usd: Math.round((deal.get(k) ?? 0) * 100) / 100,
+    });
+  }
+  return { rows, granularity: g };
 }
 
 export default function TerminalUnifiedTrendChart() {
   const [periods, setPeriods] = useState<HealthTrendPeriod[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewportWidth, setViewportWidth] = useState(0);
-  const [chartRange, setChartRange] = useState<ChartRange>('6m');
+  const pageRange = useOptionalDateRange()?.range ?? null;
+  const pageRangeRef = useRef(pageRange);
+  pageRangeRef.current = pageRange;
+  const [rangeSeries, setRangeSeries] = useState<{ rows: MoneyRow[]; granularity: Granularity } | null>(null);
   const [animateChart, setAnimateChart] = useState(true);
   const [revealProgress, setRevealProgress] = useState(0);
   const [revealKey, setRevealKey] = useState(0);
@@ -182,6 +242,28 @@ export default function TerminalUnifiedTrendChart() {
       setAnimateChart(true);
       setRevealProgress(0);
       setRevealKey((k) => k + 1);
+    }
+    const range = pageRangeRef.current;
+    if (range) {
+      // Inside the Terminal: exact series for the page's date range.
+      const win = range.start ? { start: range.start, end: range.end } : { end: range.end };
+      return Promise.all([
+        apiClient.getFinancesRevenueTimeline(30, 'day', null, win),
+        apiClient.getKpiEntries({ ...win, sync: false }),
+      ])
+        .then(([tl, entries]) => {
+          if (gen !== fetchGenRef.current) return;
+          const points = ((tl as { timeline?: Array<{ date: string; total_revenue: number }> })?.timeline ?? []);
+          setRangeSeries(buildRangeSeries(points, entries, range.start, range.end));
+        })
+        .catch(() => {
+          if (gen !== fetchGenRef.current) return;
+          setRangeSeries({ rows: [], granularity: 'day' });
+        })
+        .finally(() => {
+          if (gen !== fetchGenRef.current) return;
+          setLoading(false);
+        });
     }
     return apiClient
       .getTerminalMonthlyTrends(force)
@@ -240,9 +322,9 @@ export default function TerminalUnifiedTrendChart() {
 
   const chartData = useMemo(() => healthTrendPeriodsWithFinancesCash(periods), [periods]);
 
-  const rangedChartData = useMemo(
-    () => sliceChartRange(chartData, chartRange),
-    [chartData, chartRange]
+  const rangedChartData = useMemo<MoneyRow[]>(
+    () => (pageRange ? rangeSeries?.rows ?? [] : chartData.slice(-6)),
+    [chartData, pageRange, rangeSeries]
   );
 
   const cashDomain = useMemo(
@@ -273,13 +355,6 @@ export default function TerminalUnifiedTrendChart() {
     () => chartRevealBudgetMs(rangedChartData.length),
     [revealKey, rangedChartData.length]
   );
-
-  const handleRangeChange = useCallback((range: ChartRange) => {
-    setChartRange(range);
-    setAnimateChart(true);
-    setRevealProgress(0);
-    setRevealKey((k) => k + 1);
-  }, []);
 
   useEffect(() => {
     if (revealFrameRef.current != null) {
@@ -327,32 +402,31 @@ export default function TerminalUnifiedTrendChart() {
     };
   }, [loading, animateChart, revealKey, revealBudgetMs, rangedChartData.length]);
 
-  const rangeDescription = useMemo(
-    () => rangeDescriptionFor(rangedChartData.length, chartRange),
-    [chartRange, rangedChartData.length]
-  );
+  // Replay the reveal when the page range changes.
+  const rangeKey = pageRange ? `${pageRange.start}~${pageRange.end}` : '';
+  const firstRangeLoad = useRef(true);
+  useEffect(() => {
+    // The mount effect already loaded the first range; refetch + replay the reveal on changes.
+    if (firstRangeLoad.current) {
+      firstRangeLoad.current = false;
+      return;
+    }
+    void reloadTrends({ animate: true });
+  }, [rangeKey, reloadTrends]);
+
+  const rangeDescription = useMemo(() => {
+    if (!rangedChartData.length) return '';
+    if (pageRange && rangeSeries) {
+      const unit = rangeSeries.granularity === 'day' ? 'Daily' : rangeSeries.granularity === 'week' ? 'Weekly' : 'Monthly';
+      const first = rangedChartData[0].period_start;
+      return `${unit} · ${pageRange.start ? formatRange(pageRange.start, pageRange.end) : `All time through ${formatYmd(pageRange.end)}`}${
+        !pageRange.start ? ` (from ${formatYmd(first)})` : ''
+      }`;
+    }
+    return `Last ${rangedChartData.length} months`;
+  }, [rangedChartData, pageRange, rangeSeries]);
 
   const axisTickClass = 'fill-gray-600 dark:fill-gray-400';
-
-  const rangeToggle = (
-    <div className="flex shrink-0 rounded-md border border-white/10 p-0.5 bg-black/[0.02] dark:bg-white/[0.03]">
-      {CHART_RANGE_OPTIONS.map((option) => (
-        <button
-          key={option.id}
-          type="button"
-          onClick={() => handleRangeChange(option.id)}
-          className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded transition-colors whitespace-nowrap ${
-            chartRange === option.id
-              ? 'glass-button neon-glow text-white'
-              : 'glass-button-secondary text-gray-700 dark:text-gray-300 hover:bg-white/10'
-          }`}
-          aria-pressed={chartRange === option.id}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  );
 
   return (
     <div className="min-w-0 flex flex-col gap-4 sm:gap-6">
@@ -367,7 +441,6 @@ export default function TerminalUnifiedTrendChart() {
               {rangeDescription} — cash collected (Stripe + Whop + Manual) and deal/contract revenue.
             </p>
           </div>
-          {rangeToggle}
         </div>
 
         {/* Measure inside card padding so plot width matches the visible content box. */}
@@ -503,11 +576,15 @@ export default function TerminalUnifiedTrendChart() {
         </div>
       </div>
 
+      {/* Follows the Terminal's date range (its own 7/30/90 toggle hides when controlled).
+          All time has no start, so it reads from 2000 and skips the live calendar sync. */}
       <PortalKpiSnapshot
         isActive
         showFlags={false}
-        syncLive
-        emptyHint="No KPI entries logged yet. Head to the KPI Command Center tab to start tracking."
+        syncLive={pageRange ? pageRange.start != null : true}
+        rangeStart={pageRange ? pageRange.start ?? '2000-01-01' : undefined}
+        rangeEnd={pageRange?.end}
+        emptyHint="No KPI entries logged yet. Head to Funnels → Organic to start tracking."
       />
 
     </div>

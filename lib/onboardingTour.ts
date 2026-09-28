@@ -49,12 +49,6 @@ const STEP_DEFS: TourStepDef[] = [
       'Every sales call, transcribed and analyzed for objections, wins, and next steps.',
   },
   {
-    tab: 'kpi_command_center',
-    title: 'Sales KPIs',
-    description:
-      "Log your team's daily funnel numbers and see performance broken down by setter and closer.",
-  },
-  {
     tab: 'automations',
     title: 'Automations',
     description:

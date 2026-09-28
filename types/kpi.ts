@@ -10,6 +10,11 @@ export interface KpiDailyEntry {
   entry_date: string; // YYYY-MM-DD
   /** Set when this row is one rep's own entry rather than the org aggregate. */
   rep_user_id?: string | null;
+  /**
+   * Org days only: what team members' EODs add to each activity field (the one
+   * daily ledger). Values shown are totals; editors change only the org-only part.
+   */
+  team_eod_totals?: Record<string, number>;
   total_followers: number | null;
   new_followers: number | null;
   content_posted: boolean | null;
@@ -36,6 +41,7 @@ export interface KpiDailyEntry {
   cash_collected: number | null;
   revenue: number | null;
   setter_context: string | null;
+  setter_booked_client_ids: string[] | null;
   created_at: string;
   updated_at: string;
   // Calculated
@@ -69,7 +75,8 @@ export type KpiManualField =
   | 'closes'
   | 'cash_collected'
   | 'revenue'
-  | 'setter_context';
+  | 'setter_context'
+  | 'setter_booked_client_ids';
 
 export type KpiCalculatedField =
   | 'outreach_reply_pct'
@@ -159,7 +166,7 @@ export interface KpiAutopopulateStatusResponse {
 
 /** Partial payload for PUT /kpi/entries/{date} */
 export type KpiEntryUpdatePayload = Partial<
-  Record<KpiManualField, number | boolean | string | null>
+  Record<KpiManualField, number | boolean | string | string[] | null>
 >;
 
 /** Compact cross-tab KPI insights — mirrors GET /kpi/snapshot */
@@ -170,12 +177,16 @@ export interface KpiSnapshotCard {
   kind: 'int' | 'pct' | 'currency';
   aggregation: 'sum' | 'avg' | 'ratio';
   tier: KpiTier | null;
+  /** Parts of a summed card — Total Leads: { conversations, inbound, paid }. */
+  breakdown?: Record<string, number> | null;
 }
 
 export interface KpiSnapshotSeriesPoint {
   date: string;
   outreach_sent: number | null;
   total_conversations?: number | null;
+  /** New conversations + inbound ICP leads + paid funnel opt-ins that day. */
+  total_leads?: number | null;
   calls_booked: number | null;
   calls_taken: number | null;
   closes: number | null;
@@ -212,6 +223,8 @@ export interface KpiRepOption {
 
 export interface KpiRepOptionsResponse {
   reps: KpiRepOption[];
+  /** Org has sales reps: the EOD form lists only them and picking one is required. */
+  require_rep?: boolean;
 }
 
 /** One period's totals for one rep — mirrors backend KpiRepPerformanceMetrics. */
@@ -263,4 +276,34 @@ export interface KpiRevenueContributorsResponse {
   entry_date: string;
   total_cents: number;
   contributors: KpiRevenueContributor[];
+}
+
+/** Clients booked on a day — the EOD setter picker's search list. Mirrors GET /kpi/entries/{date}/bookable-clients */
+export interface KpiBookableClient {
+  client_id: string;
+  client_name: string;
+  email: string | null;
+}
+
+export interface KpiBookableClientsResponse {
+  entry_date: string;
+  clients: KpiBookableClient[];
+}
+
+export interface KpiFunnelSummaryResponse {
+  window_start: string;
+  window_end: string;
+  channel: string;
+  outreach_sent: number;
+  respondents: number;
+  opt_ins: number;
+  booked: number;
+  showed: number;
+  closed: number;
+  cash_usd: number;
+  reply_rate_pct: number | null;
+  lead_to_book_rate_pct: number | null;
+  show_rate_pct: number | null;
+  close_rate_pct: number | null;
+  cash_per_close_usd: number | null;
 }

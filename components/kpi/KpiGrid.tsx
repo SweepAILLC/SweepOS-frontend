@@ -15,6 +15,7 @@ import {
 } from '@/lib/kpiBenchmarks';
 import { exportKpiEntriesCsv } from '@/lib/kpiCsv';
 import KpiRevenueContributorsModal from './KpiRevenueContributorsModal';
+import KpiSetterBookedClientsModal from './KpiSetterBookedClientsModal';
 
 type ColKind = 'int' | 'pct' | 'currency' | 'bool' | 'text';
 type ColDataSource = 'manual' | 'calculated' | 'system';
@@ -167,6 +168,7 @@ export default function KpiGrid({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savingDate, setSavingDate] = useState<string | null>(null);
   const [contributorsDate, setContributorsDate] = useState<string | null>(null);
+  const [bookedPickerDate, setBookedPickerDate] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLSelectElement | null>(null);
   const autoCols = useMemo(() => new Set(autoPopulatedColumns), [autoPopulatedColumns]);
 
@@ -295,9 +297,13 @@ export default function KpiGrid({
     [persist]
   );
 
+  // One daily ledger: a total that includes team EODs can't be typed over here (it would
+  // write team numbers into the org row) — edit the org-only part in the calendar.
+  const teamPart = (date: string, key: string): number => entryByDate.get(date)?.team_eod_totals?.[key] ?? 0;
+
   const startEdit = (date: string, col: ColDef, current: unknown) => {
     // Percentage / ratio (calculated) columns stay locked; AUTO fields are editable overrides.
-    if (!col.editable) return;
+    if (!col.editable || teamPart(date, col.key) > 0) return;
     setEditing({ date, key: col.key });
     if (col.kind === 'bool') {
       setDraft(current ? 'true' : 'false');
@@ -454,7 +460,8 @@ export default function KpiGrid({
                             thresholds
                           )
                         : null;
-                      const isEditableCell = col.editable;
+                      const teamLocked = teamPart(d, col.key) > 0;
+                      const isEditableCell = col.editable && !teamLocked;
                       const cellClass = `px-2 py-1.5 whitespace-nowrap ${kpiTierCellClass(shade)} ${
                         isEditableCell ? 'cursor-pointer' : 'text-gray-500 dark:text-gray-400'
                       } ${col.key === 'entry_date' ? stickyDateColClass('font-medium text-gray-800 dark:text-gray-100 group-hover/row:bg-gray-100 dark:group-hover/row:bg-gray-900') : ''}`;
@@ -510,7 +517,9 @@ export default function KpiGrid({
                           className={cellClass}
                           onClick={() => startEdit(d, col, raw)}
                           title={
-                            col.dataSource === 'calculated'
+                            teamLocked
+                              ? `Includes ${teamPart(d, col.key)} from team EODs — edit the org-only part from the calendar`
+                              : col.dataSource === 'calculated'
                               ? 'Calculated from other columns'
                               : isAutoColumn && col.editable
                                 ? 'Auto-populated when available — click to override'
@@ -535,6 +544,23 @@ export default function KpiGrid({
                                   title="View which clients contributed"
                                 >
                                   who?
+                                </button>
+                              )}
+                            </span>
+                          ) : col.key === 'calls_booked' ? (
+                            <span className="inline-flex items-center gap-1.5">
+                              {formatKpiValue(raw as number | null, col.kind)}
+                              {typeof raw === 'number' && raw > 0 && entry?.rep_user_id && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setBookedPickerDate(d);
+                                  }}
+                                  className="text-[10px] text-indigo-500 hover:text-indigo-400 underline"
+                                  title="Tag which specific clients you booked"
+                                >
+                                  {entry.setter_booked_client_ids?.length ? 'tagged' : 'tag'}
                                 </button>
                               )}
                             </span>
@@ -590,6 +616,22 @@ export default function KpiGrid({
         <KpiRevenueContributorsModal
           entryDate={contributorsDate}
           onClose={() => setContributorsDate(null)}
+        />
+      )}
+      {bookedPickerDate && (
+        <KpiSetterBookedClientsModal
+          entryDate={bookedPickerDate}
+          repUserId={entryByDate.get(bookedPickerDate)?.rep_user_id}
+          initialSelectedIds={entryByDate.get(bookedPickerDate)?.setter_booked_client_ids || []}
+          onClose={() => setBookedPickerDate(null)}
+          onSaved={(clientIds) => {
+            const updated = entries.map((e) =>
+              e.entry_date === bookedPickerDate && e.rep_user_id === entryByDate.get(bookedPickerDate)?.rep_user_id
+                ? { ...e, setter_booked_client_ids: clientIds }
+                : e,
+            );
+            onEntriesChange(updated);
+          }}
         />
       )}
     </div>

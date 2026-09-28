@@ -6,6 +6,7 @@ import { clearSessionCaches } from '@/lib/cache';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import UsersPanel from '@/components/UsersPanel';
+import TeamSettingsView from '@/components/team/TeamSettingsView';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import NotificationSettingsCard from '@/components/ui/NotificationSettingsCard';
 import OrgTimezoneCard from '@/components/ui/OrgTimezoneCard';
@@ -520,7 +521,14 @@ export default function SettingsPanel({
           )}
 
           {section === 'team' && isAdminOrOwner && (
-            <UsersPanel />
+            <div className="space-y-8">
+              <UsersPanel />
+              {/* Roles live on each user's role pill above; sales reps' EOD schedule here (team view: Funnels → Organic). */}
+              <div className="space-y-3">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">EOD &amp; reminders</h2>
+                <TeamSettingsView canEdit part="schedule" />
+              </div>
+            </div>
           )}
 
           {section === 'profile' && (

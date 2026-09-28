@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import {
   CALENDAR_BOOKINGS_UPDATED_EVENT,
@@ -9,33 +9,12 @@ import {
   TERMINAL_DATA_REFRESHED_EVENT,
 } from '@/lib/cache';
 import { runTerminalDataRefresh, notifyTerminalChartsRefreshed } from '@/lib/terminalRefresh';
-import type {
-  StripeSummary,
-  FinancesCombinedSummary,
-  FinancesTimelinePoint,
-  TerminalSummaryForWidgets,
-} from '@/types/integration';
+import type { StripeSummary, FinancesCombinedSummary, TerminalSummaryForWidgets } from '@/types/integration';
 import type { CalendarTrendSummary } from '@/lib/dashboardTimeRange';
-import {
-  dashboardPeriodLabel,
-  financesSummaryApiParams,
-  financesTimelineApiParams,
-  calendarTrendSummaryApiParams,
-  mapCalendarTrendSummaryFromApi,
-  computeCalendarTrendSummaryFromRows,
-  computeCalendarCloseRateTrendPp,
-  computeCalendarShowUpRateTrendPp,
-  computeAvgRevenuePerCustomerTrend,
-  computeFinancesTimelineTrend,
-  combinedCashForRange,
-  combinedAovForRange,
-  combinedOrderCountForRange,
-  computeCombinedAovTrendPct,
-  fallbackCashForRange,
-  stripeSummaryRange,
-} from '@/lib/dashboardTimeRange';
+import { mapCalendarTrendSummaryFromApi } from '@/lib/dashboardTimeRange';
+import { formatRange, pctChange } from '@/lib/dateRange';
 import { useTerminalCalendar } from '@/contexts/TerminalCalendarContext';
-import { useTerminalTimeRange } from '@/contexts/TerminalTimeRangeContext';
+import { useDateRange } from '@/contexts/DateRangeContext';
 import { KpiGridSkeleton, PremiumReveal } from '@/components/ui/PremiumMotion';
 import { COLUMN_STAGGER_MS } from '@/lib/premiumMotion';
 
@@ -48,11 +27,12 @@ function formatCurrency(amount: number) {
   }).format(amount);
 }
 
-function TrendBadge({ pct, suffix = '%' }: { pct: number | null | undefined; suffix?: string }) {
+function TrendBadge({ pct, suffix = '%', title }: { pct: number | null | undefined; suffix?: string; title?: string }) {
   if (pct == null || Number.isNaN(pct)) return null;
   const positive = pct >= 0;
   return (
     <span
+      title={title}
       className={`text-[10px] font-medium tabular-nums shrink-0 leading-none ${
         positive ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
       }`}
@@ -69,13 +49,18 @@ function KpiTile({
   value,
   trendPct,
   trendSuffix = '%',
+  trendTitle,
   sub,
+  now = false,
 }: {
   label: string;
   value: string;
   trendPct?: number | null;
   trendSuffix?: string;
+  trendTitle?: string;
   sub?: string;
+  /** Point-in-time metric: not filtered by the page's date range. */
+  now?: boolean;
 }) {
   return (
     <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md px-2 py-1.5 sm:px-2.5 sm:py-2 min-w-0 overflow-hidden">
@@ -83,10 +68,18 @@ function KpiTile({
         <div className="text-sm sm:text-base font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate min-w-0 leading-tight">
           {value}
         </div>
-        <TrendBadge pct={trendPct} suffix={trendSuffix} />
+        <TrendBadge pct={trendPct} suffix={trendSuffix} title={trendTitle} />
       </div>
-      <div className="text-[10px] sm:text-[11px] text-gray-600 dark:text-gray-400 mt-0.5 leading-snug line-clamp-2" title={label}>
-        {label}
+      <div className="text-[10px] sm:text-[11px] text-gray-600 dark:text-gray-400 mt-0.5 leading-snug line-clamp-2 flex items-center gap-1" title={label}>
+        <span className="truncate">{label}</span>
+        {now ? (
+          <span
+            className="shrink-0 rounded px-1 text-[9px] font-semibold uppercase tracking-wide bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300"
+            title="Current value — not affected by the date range"
+          >
+            Now
+          </span>
+        ) : null}
       </div>
       {sub && (
         <div className="text-[10px] text-gray-500 dark:text-gray-500 mt-0.5 truncate leading-snug" title={sub}>
@@ -98,83 +91,51 @@ function KpiTile({
 }
 
 export default function TerminalKpiRow() {
-  const { connectedProvider, syncedUpcoming, syncedPast } = useTerminalCalendar();
-  const { timeRange: kpiTimeRange, setTimeRange: setKpiTimeRange } = useTerminalTimeRange();
+  const { connectedProvider } = useTerminalCalendar();
+  const { range, params, compare } = useDateRange();
   const [financesSummary, setFinancesSummary] = useState<FinancesCombinedSummary | null>(null);
   const [terminalSummary, setTerminalSummary] = useState<TerminalSummaryForWidgets | null>(null);
-  const [cashTrendPct, setCashTrendPct] = useState<number | null>(null);
-  const [financesTimeline, setFinancesTimeline] = useState<FinancesTimelinePoint[]>([]);
   const [stripeSummary, setStripeSummary] = useState<StripeSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [calendarTrendSummary, setCalendarTrendSummary] = useState<CalendarTrendSummary | null>(null);
+  const [calendarPrior, setCalendarPrior] = useState<CalendarTrendSummary | null>(null);
   const [activeClientsCount, setActiveClientsCount] = useState<number | null>(null);
 
   const hasLoadedOnce = useRef(false);
+  const win = { ...params, ...compare };
+  const winKey = JSON.stringify(win);
+  const compareLabel = range.compare ? `vs ${formatRange(range.compare.start, range.compare.end)}` : undefined;
 
   const loadKpis = useCallback(async (opts?: { silent?: boolean; forceRefresh?: boolean }) => {
     if (!opts?.silent && !hasLoadedOnce.current) setLoading(true);
     setLoadError(null);
-
-    const sumParams = financesSummaryApiParams(kpiTimeRange);
-    const tlParams = financesTimelineApiParams(kpiTimeRange);
-    const stripeRange = stripeSummaryRange(kpiTimeRange);
+    const w = JSON.parse(winKey) as typeof win;
     const bustTerminalCache = opts?.forceRefresh === true || opts?.silent === true;
 
-    const [finRes, tlRes, stripeRes, terminalRes] = await Promise.allSettled([
-      apiClient.getFinancesSummary(true, sumParams),
-      apiClient.getFinancesRevenueTimeline(tlParams.days, 'day', tlParams.scope ?? null),
-      apiClient.getStripeSummary(stripeRange, true),
+    const [finRes, stripeRes, terminalRes] = await Promise.allSettled([
+      apiClient.getFinancesSummary(true, w),
+      apiClient.getStripeSummary(undefined, true, w),
       apiClient.getTerminalSummary(bustTerminalCache),
     ]);
 
-    let finSum: FinancesCombinedSummary | null = null;
-    if (finRes.status === 'fulfilled') {
-      finSum = finRes.value as FinancesCombinedSummary;
-      setFinancesSummary(finSum);
-    } else {
-      setFinancesSummary(null);
-    }
-
-    let stripeSum: StripeSummary | null = null;
-    if (stripeRes.status === 'fulfilled') {
-      stripeSum = stripeRes.value as StripeSummary;
-      setStripeSummary(stripeSum);
-    } else {
-      setStripeSummary(null);
-    }
-
-    let termSum: TerminalSummaryForWidgets | null = null;
-    if (terminalRes.status === 'fulfilled') {
-      termSum = terminalRes.value as TerminalSummaryForWidgets;
-      setTerminalSummary(termSum);
-      setActiveClientsCount(
-        typeof termSum.active_clients_count === 'number' ? termSum.active_clients_count : null
-      );
-    } else {
-      setTerminalSummary(null);
-      setActiveClientsCount(null);
-    }
-
-    if (tlRes.status === 'fulfilled') {
-      const pts = ((tlRes.value as { timeline?: FinancesTimelinePoint[] })?.timeline ??
-        []) as FinancesTimelinePoint[];
-      setFinancesTimeline(pts);
-      setCashTrendPct(computeFinancesTimelineTrend(pts, kpiTimeRange));
-    } else {
-      setFinancesTimeline([]);
-      setCashTrendPct(null);
-    }
+    const finSum = finRes.status === 'fulfilled' ? (finRes.value as FinancesCombinedSummary) : null;
+    setFinancesSummary(finSum);
+    const stripeSum = stripeRes.status === 'fulfilled' ? (stripeRes.value as StripeSummary) : null;
+    setStripeSummary(stripeSum);
+    const termSum = terminalRes.status === 'fulfilled' ? (terminalRes.value as TerminalSummaryForWidgets) : null;
+    setTerminalSummary(termSum);
+    setActiveClientsCount(termSum && typeof termSum.active_clients_count === 'number' ? termSum.active_clients_count : null);
 
     if (!finSum && !stripeSum && !termSum) {
       setLoadError('Could not load revenue metrics. Check Stripe/Whop connections.');
     }
-
     hasLoadedOnce.current = true;
     setLoading(false);
-  }, [kpiTimeRange]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- winKey captures the window
+  }, [winKey]);
 
   useEffect(() => {
     hasLoadedOnce.current = false;
@@ -213,46 +174,30 @@ export default function TerminalKpiRow() {
     }
   };
 
-  const loadCalendarTrendSummary = useCallback(async (forceRefresh?: boolean) => {
-    if (!connectedProvider) {
-      setCalendarTrendSummary(null);
-      return;
-    }
-    try {
-      const row = await apiClient.getCalendarTrendSummary(
-        calendarTrendSummaryApiParams(kpiTimeRange),
-        forceRefresh
-      );
-      setCalendarTrendSummary(mapCalendarTrendSummaryFromApi(row));
-    } catch {
-      if (syncedUpcoming.length > 0 || syncedPast.length > 0) {
-        setCalendarTrendSummary(
-          computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, kpiTimeRange)
-        );
+  const loadCalendarTrendSummary = useCallback(
+    async (forceRefresh?: boolean) => {
+      if (!connectedProvider) {
+        setCalendarTrendSummary(null);
+        setCalendarPrior(null);
+        return;
       }
-    }
-  }, [connectedProvider, kpiTimeRange, syncedUpcoming, syncedPast]);
+      const w = JSON.parse(winKey) as typeof win;
+      const [cur, prior] = await Promise.allSettled([
+        apiClient.getCalendarTrendSummary({ start: w.start, end: w.end }, forceRefresh),
+        w.compare_start && w.compare_end
+          ? apiClient.getCalendarTrendSummary({ start: w.compare_start, end: w.compare_end }, forceRefresh)
+          : Promise.resolve(null),
+      ]);
+      setCalendarTrendSummary(cur.status === 'fulfilled' && cur.value ? mapCalendarTrendSummaryFromApi(cur.value) : null);
+      setCalendarPrior(prior.status === 'fulfilled' && prior.value ? mapCalendarTrendSummaryFromApi(prior.value) : null);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- winKey captures the window
+    [connectedProvider, winKey],
+  );
 
   useEffect(() => {
-    if (!connectedProvider) {
-      setCalendarTrendSummary(null);
-      return;
-    }
-    if (syncedUpcoming.length > 0 || syncedPast.length > 0) {
-      setCalendarTrendSummary(
-        computeCalendarTrendSummaryFromRows(syncedUpcoming, syncedPast, kpiTimeRange)
-      );
-    }
-  }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
-
-  useEffect(() => {
-    if (!connectedProvider) return;
-    const delayMs = syncedUpcoming.length + syncedPast.length > 0 ? 400 : 1200;
-    const timer = window.setTimeout(() => {
-      void loadCalendarTrendSummary();
-    }, delayMs);
-    return () => window.clearTimeout(timer);
-  }, [connectedProvider, loadCalendarTrendSummary, syncedUpcoming.length, syncedPast.length]);
+    void loadCalendarTrendSummary();
+  }, [loadCalendarTrendSummary]);
 
   useEffect(() => {
     const handler = () => void loadCalendarTrendSummary(true);
@@ -264,63 +209,26 @@ export default function TerminalKpiRow() {
     };
   }, [loadCalendarTrendSummary]);
 
-  const calendarCloseRateTrendPp = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarCloseRateTrendPp(syncedUpcoming, syncedPast, kpiTimeRange);
-  }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
-
-
-  const calendarShowUpTrendPp = useMemo(() => {
-    if (!connectedProvider) return null;
-    return computeCalendarShowUpRateTrendPp(syncedUpcoming, syncedPast, kpiTimeRange);
-  }, [connectedProvider, syncedUpcoming, syncedPast, kpiTimeRange]);
-
-  const ltvTrendPct = useMemo(
-    () =>
-      computeAvgRevenuePerCustomerTrend(
-        financesTimeline,
-        stripeSummary?.total_customers ?? 0,
-        kpiTimeRange
-      ),
-    [financesTimeline, stripeSummary?.total_customers, kpiTimeRange]
-  );
-
-  const aovTrendPct = useMemo(
-    () => (financesSummary ? computeCombinedAovTrendPct(financesSummary, kpiTimeRange) : null),
-    [financesSummary, kpiTimeRange]
-  );
-
-  const aovValue = useMemo(
-    () => (financesSummary ? combinedAovForRange(financesSummary, kpiTimeRange) : null),
-    [financesSummary, kpiTimeRange]
-  );
-
-  const aovOrderCount = useMemo(
-    () => (financesSummary ? combinedOrderCountForRange(financesSummary, kpiTimeRange) : 0),
-    [financesSummary, kpiTimeRange]
-  );
-
-  const rangeLabel = dashboardPeriodLabel(kpiTimeRange);
-  const rangeLabelLower = rangeLabel.toLowerCase();
-
+  // ▲▼ only when compare is on — the compare window is what they're measured against.
+  const hasCompare = Boolean(range.compare);
   const combinedCash = financesSummary
-    ? combinedCashForRange(financesSummary, kpiTimeRange)
-    : fallbackCashForRange(kpiTimeRange, {
-        terminal: terminalSummary,
-        stripeLast30: stripeSummary?.last_30_days_revenue,
-      });
+    ? financesSummary.combined.last_30_days_revenue ?? 0
+    : stripeSummary?.last_30_days_revenue ?? 0;
+  const priorCash = financesSummary?.prior_period_revenue ?? null;
+  const cashTrendPct = hasCompare ? pctChange(combinedCash, priorCash) : null;
 
-  const mrr =
-    stripeSummary?.total_mrr ??
-    terminalSummary?.mrr?.current_mrr ??
-    0;
+  const aovOrderCount = financesSummary?.combined.last_30_days_order_count ?? 0;
+  const aovValue = aovOrderCount > 0 ? combinedCash / aovOrderCount : null;
+  const priorOrders = financesSummary?.prior_period_order_count ?? 0;
+  const priorAov = priorOrders > 0 && priorCash != null ? priorCash / priorOrders : null;
+  const aovTrendPct = hasCompare ? pctChange(aovValue, priorAov) : null;
 
-  const cashLabel =
-    kpiTimeRange === 'mtd'
-      ? 'Combined cash MTD'
-      : kpiTimeRange === 'all'
-        ? 'Combined cash (all time)'
-        : `Combined cash (${rangeLabelLower})`;
+  const ppDelta = (cur: number | null | undefined, prev: number | null | undefined) =>
+    hasCompare && cur != null && prev != null ? cur - prev : null;
+  const calendarCloseRateTrendPp = ppDelta(calendarTrendSummary?.closeRatePct, calendarPrior?.closeRatePct);
+  const calendarShowUpTrendPp = ppDelta(calendarTrendSummary?.showUpRatePct, calendarPrior?.showUpRatePct);
+
+  const mrr = stripeSummary?.total_mrr ?? terminalSummary?.mrr?.current_mrr ?? 0;
 
   return (
     <div className="glass-card p-3 sm:p-4 min-w-0">
@@ -348,21 +256,6 @@ export default function TerminalKpiRow() {
             </svg>
             {syncing ? 'Syncing…' : 'Refresh'}
           </button>
-          <select
-            value={kpiTimeRange === 'all' ? 'all' : kpiTimeRange === 'mtd' ? 'mtd' : String(kpiTimeRange)}
-            onChange={(e) => {
-              const v = e.target.value;
-              setKpiTimeRange(v === 'all' ? 'all' : v === 'mtd' ? 'mtd' : Number(v));
-            }}
-            className="text-sm glass-input rounded-md px-3 py-1"
-          >
-            <option value="mtd">Month to date</option>
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-            <option value={365}>Last year</option>
-            <option value="all">All time</option>
-          </select>
         </div>
       </div>
 
@@ -384,10 +277,11 @@ export default function TerminalKpiRow() {
               key: 'cash',
               tile: (
                 <KpiTile
-                  label={cashLabel}
+                  label="Cash collected"
                   value={formatCurrency(combinedCash)}
                   trendPct={cashTrendPct}
-                  sub={financesSummary ? 'Stripe + Whop + Manual' : 'Terminal / Stripe fallback'}
+                  trendTitle={compareLabel}
+                  sub={financesSummary ? 'Stripe + Whop + Manual' : 'Stripe only'}
                 />
               ),
             },
@@ -397,8 +291,9 @@ export default function TerminalKpiRow() {
                 <KpiTile
                   label="MRR"
                   value={formatCurrency(mrr)}
-                  trendPct={stripeSummary?.mrr_change_percent}
-                  sub={rangeLabel}
+                  trendPct={hasCompare ? stripeSummary?.mrr_change_percent : null}
+                  trendTitle="MRR change over the selected range"
+                  now
                 />
               ),
             },
@@ -412,8 +307,8 @@ export default function TerminalKpiRow() {
                       ? formatCurrency(stripeSummary.average_client_ltv)
                       : '—'
                   }
-                  trendPct={ltvTrendPct}
                   sub="Avg total spend"
+                  now
                 />
               ),
             },
@@ -424,6 +319,7 @@ export default function TerminalKpiRow() {
                   label="Active Clients"
                   value={activeClientsCount != null ? String(activeClientsCount) : '—'}
                   sub="Active + offboarding"
+                  now
                 />
               ),
             },
@@ -431,9 +327,10 @@ export default function TerminalKpiRow() {
               key: 'aov',
               tile: (
                 <KpiTile
-                  label={`AOV (${rangeLabelLower})`}
+                  label="AOV"
                   value={aovValue != null ? formatCurrency(aovValue) : '—'}
                   trendPct={aovTrendPct}
+                  trendTitle={compareLabel}
                   sub={
                     aovOrderCount > 0
                       ? `${aovOrderCount} payment${aovOrderCount === 1 ? '' : 's'} · Stripe + Whop + Manual`
@@ -448,7 +345,7 @@ export default function TerminalKpiRow() {
               key: 'close',
               tile: (
                 <KpiTile
-                  label={`Sales close rate (${rangeLabelLower})`}
+                  label="Sales close rate"
                   value={
                     calendarTrendSummary?.closeRatePct != null
                       ? `${calendarTrendSummary.closeRatePct}%`
@@ -456,6 +353,7 @@ export default function TerminalKpiRow() {
                   }
                   trendPct={calendarCloseRateTrendPp}
                   trendSuffix=" pp"
+                  trendTitle={compareLabel}
                   sub={
                     calendarTrendSummary && calendarTrendSummary.salesCallsInRange > 0
                       ? `${calendarTrendSummary.closedSalesCount}/${calendarTrendSummary.salesCallsInRange} sales calls`
@@ -468,7 +366,7 @@ export default function TerminalKpiRow() {
               key: 'showup',
               tile: (
                 <KpiTile
-                  label={`Show-up rate (${rangeLabelLower})`}
+                  label="Show-up rate"
                   value={
                     calendarTrendSummary?.showUpRatePct != null
                       ? `${calendarTrendSummary.showUpRatePct}%`
@@ -476,6 +374,7 @@ export default function TerminalKpiRow() {
                   }
                   trendPct={calendarShowUpTrendPp}
                   trendSuffix=" pp"
+                  trendTitle={compareLabel}
                   sub={
                     calendarTrendSummary && calendarTrendSummary.attendanceEligiblePast > 0
                       ? `${calendarTrendSummary.showedUpCount}/${calendarTrendSummary.attendanceEligiblePast} sales calls`

@@ -127,6 +127,40 @@ export function consumePipelineColumnFilter(): string | null {
   return v;
 }
 
+const PIPELINE_GRID_INTENT_PREFIX = 'pipelineGridIntent';
+
+/** Deep-link hand-off into the Pipeline Grid (e.g. Funnels dashboard "View in Pipeline Grid"). */
+export type PipelineGridIntent = {
+  /** Board source-filter keys (OR): 'organic', 'paid', or 'funnel:<id>'. */
+  sourceKeys?: string[];
+};
+
+function pipelineGridIntentKey(): string {
+  return `${PIPELINE_GRID_INTENT_PREFIX}_${orgIdFromAccessToken()}`;
+}
+
+export function setPipelineGridIntent(intent: PipelineGridIntent): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(pipelineGridIntentKey(), JSON.stringify(intent));
+  } catch {
+    /* storage blocked: link still opens the Pipeline tab, just unfiltered */
+  }
+}
+
+export function consumePipelineGridIntent(): PipelineGridIntent | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    const raw = sessionStorage.getItem(pipelineGridIntentKey());
+    if (!raw) return null;
+    sessionStorage.removeItem(pipelineGridIntentKey());
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as PipelineGridIntent) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Reset org scope without clearing listeners — used after org switch before reload. */
 export function resetPipelineOrgScope(): void {
   scopedOrgId = null;

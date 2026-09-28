@@ -12,11 +12,9 @@ import {
 } from 'recharts';
 import { apiClient } from '@/lib/api';
 import type { Organization, LlmUsageTimeseries } from '@/types/admin';
-import {
-  type DashboardTimeRange,
-  dashboardPeriodLabel,
-  financesTimelineApiParams,
-} from '@/lib/dashboardTimeRange';
+import DateRangePicker from '@/components/ui/DateRangePicker';
+import { useOptionalDateRange } from '@/contexts/DateRangeContext';
+import { makeRange, rangeParams, rangeTitle, todayIn, type DateRangeValue } from '@/lib/dateRange';
 import { PREMIUM_LINE_ANIMATION } from '@/lib/premiumMotion';
 
 const tooltipStyle = {
@@ -52,7 +50,13 @@ export function ApiCostsTrendChart({
   lockedOrgId?: string;
   refreshToken?: number;
 }) {
-  const [timeRange, setTimeRange] = useState<DashboardTimeRange>(30);
+  // Inside a page with a date range (org dashboard) the chart follows it; standalone
+  // (platform overview) it carries its own picker — one control either way.
+  const pageRange = useOptionalDateRange();
+  const [ownRange, setOwnRange] = useState<DateRangeValue>(() => makeRange('last_30', todayIn('UTC')));
+  const range = pageRange?.range ?? ownRange;
+  const win = rangeParams(range);
+  const windowKey = `${win.start ?? ''}~${win.end}`;
   const [orgId, setOrgId] = useState<string>(lockedOrgId || '');
   const [data, setData] = useState<LlmUsageTimeseries | null>(null);
   const [loading, setLoading] = useState(false);
@@ -66,7 +70,7 @@ export function ApiCostsTrendChart({
   useEffect(() => {
     // Filter/org change should show loading; soft refreshToken bumps should not.
     hasDataRef.current = false;
-  }, [timeRange, orgId, lockedOrgId]);
+  }, [windowKey, orgId, lockedOrgId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,11 +79,11 @@ export function ApiCostsTrendChart({
       if (!hasDataRef.current) setLoading(true);
       setError(null);
       try {
-        const tl = financesTimelineApiParams(timeRange);
+        const [start, end] = windowKey.split('~');
         const effectiveOrgId = lockedOrgId || orgId || undefined;
         const res = (await apiClient.getLlmUsageTimeseries({
-          days: tl.days,
-          scope: tl.scope,
+          ...(start ? { start } : {}),
+          end,
           org_id: effectiveOrgId,
         })) as LlmUsageTimeseries;
         if (!cancelled) {
@@ -104,7 +108,7 @@ export function ApiCostsTrendChart({
     return () => {
       cancelled = true;
     };
-  }, [timeRange, orgId, lockedOrgId, refreshToken]);
+  }, [windowKey, orgId, lockedOrgId, refreshToken]);
 
   const chartRows =
     data?.points.map((p) => ({
@@ -129,7 +133,7 @@ export function ApiCostsTrendChart({
             API costs over time
           </p>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            Estimated LLM spend ({scopeLabel}) · {dashboardPeriodLabel(timeRange)}
+            Estimated LLM spend ({scopeLabel}) · {rangeTitle(range)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -148,22 +152,9 @@ export function ApiCostsTrendChart({
               ))}
             </select>
           ) : null}
-          <select
-            value={timeRange === 'all' ? 'all' : timeRange === 'mtd' ? 'mtd' : String(timeRange)}
-            onChange={(e) => {
-              const v = e.target.value;
-              setTimeRange(v === 'all' ? 'all' : v === 'mtd' ? 'mtd' : Number(v));
-            }}
-            className="text-sm glass-input rounded-md px-3 py-1.5"
-            aria-label="Time range"
-          >
-            <option value="mtd">Month to Date</option>
-            <option value={7}>Last 7 days</option>
-            <option value={30}>Last 30 days</option>
-            <option value={90}>Last 90 days</option>
-            <option value={365}>Last year</option>
-            <option value="all">All Time</option>
-          </select>
+          {pageRange ? null : (
+            <DateRangePicker value={ownRange} onChange={setOwnRange} today={todayIn('UTC')} timezone="UTC" />
+          )}
         </div>
       </div>
 

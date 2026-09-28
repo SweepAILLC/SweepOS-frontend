@@ -12,6 +12,7 @@ export type ClientProfileFormData = {
   emails: string[];
   phone: string;
   instagram: string;
+  source_channel: '' | 'organic' | 'paid';
   program_start_date: string;
   program_end_date: string;
   follow_up_due_date: string;
@@ -19,6 +20,9 @@ export type ClientProfileFormData = {
 
 interface ClientProfileRailProps {
   client: Client;
+  /** Resolved name of client.source_funnel_id, when set — looked up by the drawer via the
+   * already-cached getFunnels() list, no per-client endpoint added. */
+  funnelName?: string | null;
   formData: ClientProfileFormData;
   setFormData: React.Dispatch<React.SetStateAction<ClientProfileFormData>>;
   fieldBlurSave: () => void;
@@ -48,6 +52,7 @@ interface ClientProfileRailProps {
 
 export default function ClientProfileRail({
   client,
+  funnelName,
   formData,
   setFormData,
   fieldBlurSave,
@@ -181,6 +186,27 @@ export default function ClientProfileRail({
               placeholder="@username"
               className="mt-0.5 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 text-sm"
             />
+          </div>
+          <div>
+            <dt className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Channel</dt>
+            <select
+              value={formData.source_channel}
+              onChange={(e) => {
+                const next = { ...formData, source_channel: e.target.value as ClientProfileFormData['source_channel'] };
+                setFormData(next);
+                void saveClientFields(next);
+              }}
+              className="mt-0.5 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 text-sm"
+            >
+              <option value="">Unset</option>
+              <option value="organic">Organic</option>
+              <option value="paid">Paid</option>
+            </select>
+            {formData.source_channel === 'paid' && funnelName && (
+              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
+                via <span className="font-medium text-gray-700 dark:text-gray-300">{funnelName}</span>
+              </p>
+            )}
           </div>
         </dl>
       </div>

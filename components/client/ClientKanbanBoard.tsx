@@ -45,11 +45,19 @@ import {
   setPipelineClients,
   subscribePipelineClients,
   pipelineClientsEqual,
+  consumePipelineGridIntent,
 } from '@/lib/pipelineStore';
 import { ORG_CHANGED_EVENT, orgIdFromAccessToken } from '@/lib/orgScope';
 import ClientCard, { MERGE_DROP_ID } from './ClientCard';
 import ClientCreateModal from './ClientCreateModal';
 import ClientDetailDrawer from './ClientDetailDrawer';
+import ClientGridView from './ClientGridView';
+
+/** Board source-filter key: 'organic', 'funnel:<id>', or 'paid' (paid with no funnel on record). */
+function clientSourceKey(client: Client): string {
+  if (client.source_funnel_id) return `funnel:${client.source_funnel_id}`;
+  return client.source_channel === 'paid' ? 'paid' : 'organic';
+}
 
 function mergeClientRow(existing: Client, incoming: Client): Client {
   const incomingMs = incoming.updated_at ? Date.parse(incoming.updated_at) : 0;
@@ -233,6 +241,19 @@ export default function ClientKanbanBoard({
   const [selectedInsightTags, setSelectedInsightTags] = useState<Set<string>>(() => new Set());
   /** When true, only clients with an outstanding offer balance (same rule as the card chip). */
   const [balanceDueFilter, setBalanceDueFilter] = useState(false);
+  /** Empty = no source filter. Non-empty = show clients whose clientSourceKey is in the set (OR). */
+  const [selectedChannels, setSelectedChannels] = useState<Set<string>>(() => new Set());
+  const [funnelOptions, setFunnelOptions] = useState<{ id: string; name: string }[]>([]);
+  const [boardView, setBoardView] = useState<'kanban' | 'grid'>('kanban');
+
+  // Deep link from the Funnels dashboard: open the Grid pre-filtered to a source.
+  useEffect(() => {
+    if (!isActive) return;
+    const intent = consumePipelineGridIntent();
+    if (!intent) return;
+    setBoardView('grid');
+    if (intent.sourceKeys?.length) setSelectedChannels(new Set(intent.sourceKeys));
+  }, [isActive]);
   const hasCalledOnLoadComplete = useRef(false);
   const pipelineLoadStartedRef = useRef(false);
   const orgIdRef = useRef(orgIdFromAccessToken());
@@ -1155,18 +1176,67 @@ export default function ClientKanbanBoard({
   const clearBoardFilters = useCallback(() => {
     setSelectedInsightTags(new Set());
     setBalanceDueFilter(false);
+    setSelectedChannels(new Set());
   }, []);
 
   const toggleBalanceDueFilter = useCallback(() => {
     setBalanceDueFilter((v) => !v);
   }, []);
 
-  const activeFilterCount = selectedInsightTags.size + (balanceDueFilter ? 1 : 0);
+  const toggleChannelFilter = useCallback((channel: string) => {
+    setSelectedChannels((prev) => {
+      const next = new Set(prev);
+      if (next.has(channel)) next.delete(channel);
+      else next.add(channel);
+      return next;
+    });
+  }, []);
+
+  const activeFilterCount =
+    selectedInsightTags.size + (balanceDueFilter ? 1 : 0) + selectedChannels.size;
 
   const balanceDueCount = useMemo(
     () => clients.filter((c) => hasOutstandingOfferBalance(c)).length,
     [clients],
   );
+
+  useEffect(() => {
+    if (!isActive) return;
+    let cancelled = false;
+    apiClient
+      .getFunnels()
+      .then((rows: any) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        setFunnelOptions(
+          rows
+            .filter((f) => f && typeof f.id === 'string')
+            .map((f) => ({ id: f.id as string, name: (f.name as string) || 'Untitled funnel' })),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setFunnelOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive]);
+
+  const sourceCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of clients) {
+      const key = clientSourceKey(c);
+      counts[key] = (counts[key] ?? 0) + 1;
+    }
+    return counts;
+  }, [clients]);
+
+  /** Organic, then every funnel in Funnels, then unattributed paid only when present. */
+  const sourceFilterOptions = useMemo(() => {
+    const opts: { key: string; label: string }[] = [{ key: 'organic', label: 'Organic' }];
+    for (const f of funnelOptions) opts.push({ key: `funnel:${f.id}`, label: f.name });
+    if ((sourceCounts.paid ?? 0) > 0) opts.push({ key: 'paid', label: 'Paid (no funnel)' });
+    return opts;
+  }, [funnelOptions, sourceCounts]);
 
   const insightTagCounts = useMemo(() => {
     const counts: Partial<Record<string, number>> = {};
@@ -1197,8 +1267,11 @@ export default function ClientKanbanBoard({
     if (balanceDueFilter) {
       list = list.filter((client) => hasOutstandingOfferBalance(client));
     }
+    if (selectedChannels.size > 0) {
+      list = list.filter((client) => selectedChannels.has(clientSourceKey(client)));
+    }
     return list;
-  }, [clients, searchQuery, selectedInsightTags, balanceDueFilter, callInsightTags]);
+  }, [clients, searchQuery, selectedInsightTags, balanceDueFilter, selectedChannels, callInsightTags]);
 
   const getClientsForColumn = (columnId: ColumnId) => {
     // If a filter is active and this column doesn't match, return empty array
@@ -1453,6 +1526,36 @@ export default function ClientKanbanBoard({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
+          <div
+            className="inline-flex items-center rounded-md border border-gray-200 dark:border-gray-600 bg-white/50 dark:bg-gray-900/40 p-0.5"
+            role="group"
+            aria-label="Board view"
+          >
+            <button
+              type="button"
+              onClick={() => setBoardView('kanban')}
+              className={`px-2.5 py-1.5 text-sm font-medium rounded min-h-[36px] transition-colors ${
+                boardView === 'kanban'
+                  ? 'bg-primary-500/90 text-white'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60'
+              }`}
+              aria-pressed={boardView === 'kanban'}
+            >
+              Kanban
+            </button>
+            <button
+              type="button"
+              onClick={() => setBoardView('grid')}
+              className={`px-2.5 py-1.5 text-sm font-medium rounded min-h-[36px] transition-colors ${
+                boardView === 'grid'
+                  ? 'bg-primary-500/90 text-white'
+                  : 'text-gray-600 dark:text-gray-300 hover:bg-white/60 dark:hover:bg-gray-800/60'
+              }`}
+              aria-pressed={boardView === 'grid'}
+            >
+              Grid
+            </button>
+          </div>
           <div className="relative" ref={filtersDropdownRef}>
             <button
               type="button"
@@ -1547,6 +1650,34 @@ export default function ClientKanbanBoard({
                       </span>
                     </label>
                   </li>
+                  <li className="px-2 pt-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Source
+                  </li>
+                  {sourceFilterOptions.map(({ key, label }) => {
+                    const checked = selectedChannels.has(key);
+                    return (
+                      <li key={key}>
+                        <label
+                          className={`flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                            checked
+                              ? 'bg-primary-500/12 text-gray-900 dark:text-gray-100'
+                              : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800/80'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 shrink-0 rounded border-gray-300 text-primary-600 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800"
+                            checked={checked}
+                            onChange={() => toggleChannelFilter(key)}
+                          />
+                          <span className="min-w-0 flex-1 truncate" title={label}>{label}</span>
+                          <span className="shrink-0 tabular-nums text-xs text-gray-500 dark:text-gray-400">
+                            ({sourceCounts[key] ?? 0})
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
                 </ul>
                 <div className="mt-1.5 border-t border-gray-200 pt-1.5 dark:border-gray-700">
                   <button
@@ -1597,6 +1728,27 @@ export default function ClientKanbanBoard({
         )}
       </div>
 
+      {boardView === 'grid' ? (
+        loading && clients.length === 0 ? (
+          <KanbanSkeleton />
+        ) : (
+          <ClientGridView
+            clients={
+              filteredColumn
+                ? filteredClients.filter(
+                    (client) => normalizeLifecycleColumn(client.lifecycle_state) === filteredColumn,
+                  )
+                : filteredClients
+            }
+            onClientDelete={handleDeleteClient}
+            onClientClick={(client) => {
+              const latest = clientsRef.current.find((c) => c.id === client.id) ?? client;
+              setSelectedClient(latest);
+              setIsDrawerOpen(true);
+            }}
+          />
+        )
+      ) : (
       <DndContext
         sensors={sensors}
         collisionDetection={kanbanCollisionDetection}
@@ -1677,6 +1829,7 @@ export default function ClientKanbanBoard({
           ) : null}
         </DragOverlay>
       </DndContext>
+      )}
 
       <ClientDetailDrawer
         client={selectedClient}

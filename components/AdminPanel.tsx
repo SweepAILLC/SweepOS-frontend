@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import {
   Organization,
@@ -31,15 +31,12 @@ import PortalSopDrawer, {
   SOP_DRAWER_WIDTH_OPEN,
 } from '@/components/portal/PortalSopDrawer';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
-import {
-  type DashboardTimeRange,
-  financesSummaryApiParams,
-} from '@/lib/dashboardTimeRange';
+import type { DateWindowParams } from '@/lib/api';
 
 /** Human-readable tab name for org tab permissions (internal keys stay snake_case). */
 function tabPermissionDisplayName(tab: string): string {
   if (tab === 'content_studio') return 'Marketing Intel';
-  if (tab === 'kpi_command_center') return 'Sales KPIs';
+  if (tab === 'kpi_command_center') return 'Team KPIs';
   if (tab === 'call_library') return 'Call Library';
   return tab.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
@@ -85,7 +82,8 @@ export default function AdminPanel() {
   const [savingOrgSettings, setSavingOrgSettings] = useState(false);
   const [sopDrawerOpen, setSopDrawerOpen] = useState(false);
   const [orgSearch, setOrgSearch] = useState('');
-  const [orgDashTimeRange, setOrgDashTimeRange] = useState<DashboardTimeRange>('mtd');
+  // Last date window the org dashboard asked for (its header date range); reused on reload.
+  const orgDashWindowRef = useRef<DateWindowParams | undefined>(undefined);
   /** Rollup from GET /integrations/calendar/platform-sales-close-rate (matches each org Calendar tab). */
   const [platformCalendarCloseRollup, setPlatformCalendarCloseRollup] = useState<{
     all_time: { total_sales_calls: number; closed_count: number; close_rate_pct: number };
@@ -262,17 +260,12 @@ export default function AdminPanel() {
     }
   };
 
-  const handleViewDashboard = async (orgId: string, timeRange: DashboardTimeRange = 'mtd') => {
+  const handleViewDashboard = async (orgId: string) => {
     setGlobalLoading(true, 'Loading organization dashboard...');
     try {
       setLoading(true);
       setError(null);
-      setOrgDashTimeRange(timeRange);
-      const sumParams = financesSummaryApiParams(timeRange);
-      const data = await apiClient.getOrganizationDashboard(orgId, {
-        range: sumParams.range,
-        scope: sumParams.scope,
-      });
+      const data = await apiClient.getOrganizationDashboard(orgId, orgDashWindowRef.current);
       setDashboardData(data);
       setMaxUserSeatsInput(data.max_user_seats != null ? String(data.max_user_seats) : '');
       setViewingDashboard(orgId);
@@ -311,28 +304,17 @@ export default function AdminPanel() {
 
   /** Quiet live refresh while org dashboard modal is open (no global overlay). */
   const refreshOrgDashboard = useCallback(
-    async (timeRange: DashboardTimeRange = orgDashTimeRange) => {
+    async (win?: DateWindowParams) => {
       if (!viewingDashboard) return;
+      if (win) orgDashWindowRef.current = win;
       try {
-        const sumParams = financesSummaryApiParams(timeRange);
-        const data = await apiClient.getOrganizationDashboard(viewingDashboard, {
-          range: sumParams.range,
-          scope: sumParams.scope,
-        });
+        const data = await apiClient.getOrganizationDashboard(viewingDashboard, orgDashWindowRef.current);
         setDashboardData(data);
       } catch {
         /* keep last good snapshot */
       }
     },
-    [viewingDashboard, orgDashTimeRange]
-  );
-
-  const handleOrgDashTimeRangeChange = useCallback(
-    (tr: DashboardTimeRange) => {
-      setOrgDashTimeRange(tr);
-      void refreshOrgDashboard(tr);
-    },
-    [refreshOrgDashboard]
+    [viewingDashboard]
   );
 
   const closeOrgDashboard = useCallback(() => {
@@ -340,7 +322,6 @@ export default function AdminPanel() {
     setDashboardData(null);
     setEditingFunnel(null);
     setShowFunnelForm(false);
-    setOrgDashTimeRange('mtd');
   }, []);
 
   const loadOrgTabPermissions = async (orgId: string) => {
@@ -446,8 +427,6 @@ export default function AdminPanel() {
           organizations={organizations}
           onClose={closeOrgDashboard}
           onRefreshDashboard={refreshOrgDashboard}
-          timeRange={orgDashTimeRange}
-          onTimeRangeChange={handleOrgDashTimeRangeChange}
           maxUserSeatsInput={maxUserSeatsInput}
           setMaxUserSeatsInput={setMaxUserSeatsInput}
           consultingTierInput={consultingTierInput}

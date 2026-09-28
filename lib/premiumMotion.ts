@@ -41,9 +41,9 @@ export function chartRevealBudgetMs(barCount: number): number {
 
 /** Stagger delays for Terminal section reveals (ms). */
 export const TERMINAL_STAGGER = {
-  heroChart: 0,
-  sidebar: 140,
-  kpiRow: 280,
+  kpiRow: 0,
+  heroChart: 140,
+  sidebar: 280,
   financeRow: 420,
   priorities: 560,
 } as const;

@@ -22,11 +22,11 @@ import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiRepPerformancePanel from '@/components/kpi/KpiRepPerformancePanel';
 import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
 import OrgFunnelSimulatorSnapshots from '@/components/owner/OrgFunnelSimulatorSnapshots';
-import {
-  type DashboardTimeRange,
-  dashboardPeriodLabel,
-  formatProgramDateRange,
-} from '@/lib/dashboardTimeRange';
+import { formatProgramDateRange } from '@/lib/dashboardTimeRange';
+import type { DateWindowParams } from '@/lib/api';
+import { DateRangeProvider, useDateRange } from '@/contexts/DateRangeContext';
+import PageDateRange from '@/components/ui/PageDateRange';
+import { rangeTitle } from '@/lib/dateRange';
 import ShinyButton from '@/components/ui/ShinyButton';
 import ToggleSwitch from '@/components/ui/ToggleSwitch';
 
@@ -223,9 +223,8 @@ export type OrgOwnerDashboardModalProps = {
   dashboardData: OrganizationDashboardSummary;
   organizations: Organization[];
   onClose: () => void;
-  onRefreshDashboard: (timeRange?: DashboardTimeRange) => Promise<void>;
-  timeRange: DashboardTimeRange;
-  onTimeRangeChange: (tr: DashboardTimeRange) => void;
+  /** Refetch the org dashboard for a date window (the header date range). */
+  onRefreshDashboard: (win?: DateWindowParams) => Promise<void>;
   // seats
   maxUserSeatsInput: string;
   setMaxUserSeatsInput: (v: string) => void;
@@ -265,14 +264,21 @@ export type OrgOwnerDashboardModalProps = {
   tabPermissionDisplayName: (tab: string) => string;
 };
 
-export default function OrgOwnerDashboardModal({
+/** One date range for the whole org dashboard (header), remembered per browser. */
+export default function OrgOwnerDashboardModal(props: OrgOwnerDashboardModalProps) {
+  return (
+    <DateRangeProvider storageKey="admin-org-dashboard" defaultPreset="this_month">
+      <OrgOwnerDashboardInner {...props} />
+    </DateRangeProvider>
+  );
+}
+
+function OrgOwnerDashboardInner({
   orgId,
   dashboardData,
   organizations,
   onClose,
   onRefreshDashboard,
-  timeRange,
-  onTimeRangeChange,
   maxUserSeatsInput,
   setMaxUserSeatsInput,
   consultingTierInput,
@@ -298,6 +304,17 @@ export default function OrgOwnerDashboardModal({
 }: OrgOwnerDashboardModalProps) {
   const [refreshToken, setRefreshToken] = useState(0);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
+  const { range, params } = useDateRange();
+  const windowKey = `${params.start ?? ''}~${params.end}`;
+  const win = useMemo<DateWindowParams>(() => {
+    const [start, end] = windowKey.split('~');
+    return { start: start || undefined, end };
+  }, [windowKey]);
+
+  // Range change: refetch the KPIs for the new window right away.
+  useEffect(() => {
+    void onRefreshDashboard(win).then(() => setRefreshToken((n) => n + 1));
+  }, [onRefreshDashboard, win]);
 
   useEffect(() => {
     let cancelled = false;
@@ -305,7 +322,7 @@ export default function OrgOwnerDashboardModal({
       if (cancelled) return;
       setLiveRefreshing(true);
       try {
-        await onRefreshDashboard(timeRange);
+        await onRefreshDashboard(win);
         if (!cancelled) setRefreshToken((n) => n + 1);
       } finally {
         if (!cancelled) setLiveRefreshing(false);
@@ -316,7 +333,7 @@ export default function OrgOwnerDashboardModal({
       cancelled = true;
       clearInterval(id);
     };
-  }, [onRefreshDashboard, timeRange]);
+  }, [onRefreshDashboard, win]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -326,25 +343,14 @@ export default function OrgOwnerDashboardModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Shared date window for the KPI snapshot + By Rep panel below — previously each
-  // ran its own disconnected range; both now read the same 30-day window.
-  const [kpiRangeStart] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 29);
-    return d.toISOString().slice(0, 10);
-  });
-  const [kpiRangeEnd] = useState(() => new Date().toISOString().slice(0, 10));
+  // KPI snapshot + By Rep panel read the same header range as every other metric here.
+  const kpiRangeStart = range.start ?? '2000-01-01';
+  const kpiRangeEnd = range.end;
 
   const llm = dashboardData.llm_usage_last_30d;
   const periods = dashboardData.monthly_health_since_onboarding ?? [];
-  const rangeLabel = dashboardPeriodLabel(timeRange);
-  const rangeLabelLower = rangeLabel.toLowerCase();
-  const cashLabel =
-    timeRange === 'mtd'
-      ? 'Combined cash MTD'
-      : timeRange === 'all'
-        ? 'Combined cash (all time)'
-        : `Combined cash (${rangeLabelLower})`;
+  const rangeLabel = rangeTitle(range);
+  const cashLabel = 'Cash collected';
 
   return (
     <div className="w-full min-w-0 space-y-5" role="region" aria-labelledby="org-dash-title">
@@ -374,6 +380,7 @@ export default function OrgOwnerDashboardModal({
             </p>
           </div>
         </div>
+        <PageDateRange caption="Applies to every metric on this dashboard" />
       </header>
 
       <div className="space-y-5">
@@ -537,23 +544,7 @@ export default function OrgOwnerDashboardModal({
                   Same Terminal KPI set for this org · Stripe + Whop + Manual
                 </p>
               </div>
-              <select
-                value={
-                  timeRange === 'all' ? 'all' : timeRange === 'mtd' ? 'mtd' : String(timeRange)
-                }
-                onChange={(e) => {
-                  const v = e.target.value;
-                  onTimeRangeChange(v === 'all' ? 'all' : v === 'mtd' ? 'mtd' : Number(v));
-                }}
-                className="text-sm glass-input rounded-md px-3 py-1.5"
-              >
-                <option value="mtd">Month to date</option>
-                <option value={7}>Last 7 days</option>
-                <option value={30}>Last 30 days</option>
-                <option value={90}>Last 90 days</option>
-                <option value={365}>Last year</option>
-                <option value="all">All time</option>
-              </select>
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">{rangeLabel}</span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-1.5 sm:gap-2 min-w-0">
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md px-2 py-1.5 sm:px-2.5 sm:py-2 min-w-0">
@@ -583,7 +574,7 @@ export default function OrgOwnerDashboardModal({
                   {(dashboardData.kpi_upcoming_count ?? 0).toLocaleString()}
                 </p>
                 <p className="text-[10px] sm:text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
-                  Upcoming ({rangeLabelLower})
+                  Upcoming (in range)
                 </p>
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md px-2 py-1.5 sm:px-2.5 sm:py-2 min-w-0">
@@ -591,7 +582,7 @@ export default function OrgOwnerDashboardModal({
                   {formatUsd(dashboardData.kpi_aov_usd)}
                 </p>
                 <p className="text-[10px] sm:text-[11px] text-gray-600 dark:text-gray-400 mt-0.5">
-                  AOV ({rangeLabelLower})
+                  AOV
                 </p>
               </div>
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-md px-2 py-1.5 sm:px-2.5 sm:py-2 min-w-0">

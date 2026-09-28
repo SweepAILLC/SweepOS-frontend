@@ -39,6 +39,35 @@ export default function FunnelListPanel() {
     router.push({ pathname: '/', query: { tab: 'funnels', funnelId } }, undefined, { shallow: true });
   };
 
+  // Every org has organic activity (DMs, content), so its card is always there.
+  const handleOrganicClick = () => {
+    router.push({ pathname: '/', query: { tab: 'funnels', channel: 'organic' } }, undefined, { shallow: true });
+  };
+
+  const organicCard = (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={handleOrganicClick}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') handleOrganicClick();
+      }}
+      className="glass-card neon-glow p-4 hover:shadow-lg cursor-pointer transition-shadow flex flex-col justify-between"
+    >
+      <div>
+        <div className="flex items-center gap-2 mb-2">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Organic</h3>
+          <span className="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5 bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+            Always on
+          </span>
+        </div>
+        <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+          Daily outreach calendar, team EODs, setter notes and targets.
+        </p>
+      </div>
+    </div>
+  );
+
   if (loading) {
     return (
       <div className="p-6">
@@ -75,15 +104,16 @@ export default function FunnelListPanel() {
         </ShinyButton>
       </div>
 
-      {funnels.length === 0 ? (
-        <div className="text-center py-12 glass-card">
-          <p className="text-gray-600 dark:text-gray-300 mb-4">No funnels yet</p>
-          <ShinyButton onClick={handleCreateFunnel}>
-            Create Your First Funnel
-          </ShinyButton>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {organicCard}
+          {funnels.length === 0 ? (
+            <div className="glass-card p-4 flex flex-col items-center justify-center text-center">
+              <p className="text-gray-600 dark:text-gray-300 mb-4">No paid funnels yet</p>
+              <ShinyButton onClick={handleCreateFunnel}>
+                Create Your First Funnel
+              </ShinyButton>
+            </div>
+          ) : null}
           {funnels.map((funnel) => (
             <div
               key={funnel.id}
@@ -125,8 +155,7 @@ export default function FunnelListPanel() {
               </div>
             </div>
           ))}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
