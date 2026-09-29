@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { KpiDailyEntry, KpiEntryUpdatePayload, KpiRepOption, MetricThreshold } from '@/types/kpi';
 import { apiClient } from '@/lib/api';
 import {
@@ -134,6 +134,66 @@ function toYmd(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+/** API dates are YYYY-MM-DD; some serializers append a time. Map keys must match cell clicks. */
+function entryDateKey(raw: unknown): string {
+  if (raw instanceof Date && !Number.isNaN(raw.getTime())) return toYmd(raw);
+  const m = String(raw ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : String(raw ?? '');
+}
+
+const TEAM_ACTIVITY_FIELDS = [
+  'inboxes_checked',
+  'outreach_sent',
+  'respondents',
+  'inbound_icp_leads',
+  'followups_sent',
+  'new_conversations',
+  'conversations_nurtured',
+  'calls_pitched',
+  'inbound_bookings',
+  'outbound_bookings',
+  'offers_made',
+] as const;
+
+function formFromEntry(e: KpiDailyEntry | undefined): KpiEntryUpdatePayload {
+  if (!e) return {};
+  return {
+    total_followers: e.total_followers ?? null,
+    content_posted: e.content_posted ?? null,
+    best_content_type: e.best_content_type ?? null,
+    inboxes_checked: e.inboxes_checked ?? null,
+    outreach_sent: e.outreach_sent ?? null,
+    respondents: e.respondents ?? null,
+    inbound_icp_leads: e.inbound_icp_leads ?? null,
+    followups_sent: e.followups_sent ?? null,
+    new_conversations: e.new_conversations ?? null,
+    conversations_nurtured: e.conversations_nurtured ?? null,
+    calls_pitched: e.calls_pitched ?? null,
+    inbound_bookings: e.inbound_bookings ?? null,
+    outbound_bookings: e.outbound_bookings ?? null,
+    offers_made: e.offers_made ?? null,
+    revenue: e.revenue ?? null,
+    setter_context: e.setter_context ?? null,
+  };
+}
+
+/** Org-row save must not persist team EOD activity onto the aggregate row. */
+function orgOnlyPayload(
+  form: KpiEntryUpdatePayload,
+  team: Record<string, number> | undefined
+): KpiEntryUpdatePayload {
+  if (!team || !Object.keys(team).length) return form;
+  const next: KpiEntryUpdatePayload = { ...form };
+  for (const key of TEAM_ACTIVITY_FIELDS) {
+    const v = next[key];
+    if (typeof v !== 'number' || Number.isNaN(v)) continue;
+    const t = team[key] ?? 0;
+    const rest = Math.max(0, v - t);
+    (next as Record<string, number | null>)[key] = t > 0 && rest === 0 ? null : rest;
+  }
+  return next;
 }
 
 function monthLabel(year: number, month: number): string {
@@ -307,6 +367,11 @@ interface Props {
    */
   hideRepPicker?: boolean;
   /**
+   * Calendar already scoped to this rep (Organic Rep filter). Prefill + save that
+   * row; do not subtract team EOD totals (those exist only on the org-day fold).
+   */
+  scopedRepId?: string | null;
+  /**
    * Entry-form fields to hide (e.g. the Funnels Organic calendar drops offers_made
    * and inboxes_checked). Hidden fields keep their stored value on save.
    */
@@ -329,6 +394,7 @@ export default function KpiCalendar({
   compareMonths = false,
   onVisibleRangeChange,
   hideRepPicker = false,
+  scopedRepId = null,
   colorMetric = 'overall',
   hiddenFields,
   range = null,
@@ -340,7 +406,7 @@ export default function KpiCalendar({
 
   const entryByDate = useMemo(() => {
     const m = new Map<string, KpiDailyEntry>();
-    for (const e of entries) m.set(e.entry_date, e);
+    for (const e of entries) m.set(entryDateKey(e.entry_date), e);
     return m;
   }, [entries]);
 
@@ -365,6 +431,7 @@ export default function KpiCalendar({
   const [reps, setReps] = useState<KpiRepOption[]>([]);
   const [modalRepId, setModalRepId] = useState('');
   const [showContributors, setShowContributors] = useState(false);
+  const formLoadGen = useRef(0);
 
   useEffect(() => {
     if (hideRepPicker) return;
@@ -383,9 +450,6 @@ export default function KpiCalendar({
   }, [hideRepPicker]);
 
   useEffect(() => {
-    // A per-rep row isn't fetched into `entries` (that list is org-aggregate only), so
-    // switching reps can't pre-fill their existing values here — start blank and let the
-    // additive/absolute save just apply to that rep's own row.
     setModalRepId('');
     setShowContributors(false);
   }, [selectedDate]);
@@ -395,37 +459,27 @@ export default function KpiCalendar({
       setForm({});
       return;
     }
-    // `selected` is the org-aggregate row; a specific rep's own values aren't
-    // fetched here, so pre-fill only for the aggregate (no rep chosen).
-    const e = modalRepId ? undefined : selected;
-    // One daily ledger: activity fields on the org day are totals (org + team EODs);
-    // prefill only the org-only part so saving never writes team numbers into the org row.
-    const team = (e?.team_eod_totals ?? {}) as Record<string, number>;
-    const orgOnly = (key: string, v: number | null | undefined): number | null => {
-      if (v == null) return null;
-      const t = team[key] ?? 0;
-      const rest = Math.max(0, v - t);
-      return t > 0 && rest === 0 ? null : rest;
-    };
-    setForm({
-      total_followers: e?.total_followers ?? null,
-      content_posted: e?.content_posted ?? null,
-      best_content_type: e?.best_content_type ?? null,
-      inboxes_checked: orgOnly('inboxes_checked', e?.inboxes_checked),
-      outreach_sent: orgOnly('outreach_sent', e?.outreach_sent),
-      respondents: orgOnly('respondents', e?.respondents),
-      inbound_icp_leads: orgOnly('inbound_icp_leads', e?.inbound_icp_leads),
-      followups_sent: orgOnly('followups_sent', e?.followups_sent),
-      new_conversations: orgOnly('new_conversations', e?.new_conversations),
-      conversations_nurtured: orgOnly('conversations_nurtured', e?.conversations_nurtured),
-      calls_pitched: orgOnly('calls_pitched', e?.calls_pitched),
-      inbound_bookings: orgOnly('inbound_bookings', e?.inbound_bookings),
-      outbound_bookings: orgOnly('outbound_bookings', e?.outbound_bookings),
-      offers_made: orgOnly('offers_made', e?.offers_made),
-      revenue: e?.revenue ?? null,
-      setter_context: e?.setter_context ?? null,
-    });
-  }, [selectedDate, selected, modalRepId]);
+    const rid = scopedRepId || modalRepId || null;
+    const gen = ++formLoadGen.current;
+    // Show ledger numbers as-is (org day = folded totals including EODs; rep = that row).
+    // Never subtract team_eod_totals here — that made EOD-only days look empty.
+    if (!rid || (selected && (!selected.rep_user_id || String(selected.rep_user_id) === rid))) {
+      setForm(formFromEntry(selected));
+    } else {
+      setForm({});
+    }
+    if (!rid) return;
+    void apiClient
+      .getKpiEntries({ start: selectedDate, end: selectedDate, sync: false, rep_user_id: rid })
+      .then((rows) => {
+        if (gen !== formLoadGen.current) return;
+        const row = rows.find((e) => entryDateKey(e.entry_date) === selectedDate);
+        setForm(formFromEntry(row));
+      })
+      .catch(() => {
+        /* keep whatever the in-memory row already painted */
+      });
+  }, [selectedDate, selected, modalRepId, scopedRepId]);
 
   const setNum = (key: keyof KpiEntryUpdatePayload, raw: string) => {
     setForm((prev) => ({
@@ -439,7 +493,10 @@ export default function KpiCalendar({
     setSaving(true);
     setError(null);
     try {
-      await onUpsertEntry(selectedDate, form, modalRepId || null);
+      const rid = scopedRepId || modalRepId || null;
+      const payload =
+        rid ? form : orgOnlyPayload(form, selected?.team_eod_totals as Record<string, number> | undefined);
+      await onUpsertEntry(selectedDate, payload, rid);
     } catch (e: unknown) {
       const { formatApiError } = await import('@/lib/apiError');
       setError(formatApiError(e, 'Save failed'));
@@ -548,13 +605,13 @@ export default function KpiCalendar({
               </label>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              {!modalRepId && selected?.team_eod_totals && Object.keys(selected.team_eod_totals).length ? (
+              {!scopedRepId && !modalRepId && selected?.team_eod_totals && Object.keys(selected.team_eod_totals).length ? (
                 <div className="col-span-full rounded-md border border-indigo-400/30 bg-indigo-500/10 px-2.5 py-1.5 text-[11px] text-indigo-800 dark:text-indigo-200">
-                  Team EODs add{' '}
+                  Includes team EODs:{' '}
                   {Object.entries(selected.team_eod_totals)
                     .map(([k, v]) => `${k.replace(/_/g, ' ')} +${v}`)
-                    .join(', ')}{' '}
-                  to this day. The fields below are the org-only part.
+                    .join(', ')}
+                  . Save keeps those on each rep&apos;s row.
                 </div>
               ) : null}
               <label className="text-gray-600 dark:text-gray-300">

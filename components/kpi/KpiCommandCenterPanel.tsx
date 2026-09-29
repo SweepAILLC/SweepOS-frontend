@@ -561,6 +561,7 @@ export default function KpiCommandCenterPanel({ variant = 'sales' }: KpiCommandC
                     repFilter ? (date, data) => upsertEntry(date, data, repFilter) : upsertEntry
                   }
                   hideRepPicker={Boolean(repFilter)}
+                  scopedRepId={repFilter}
                   year={visibleMonth.year}
                   month={visibleMonth.month}
                   onVisibleRangeChange={onCalendarVisibleRangeChange}
