@@ -5,7 +5,7 @@ import { PIPELINE_COLUMNS } from '@/lib/pipelineColumns';
 import LeadAnswersCell from '@/components/funnels/LeadAnswersCell';
 import { channelLabel, useFunnelNames } from '@/lib/funnelNames';
 
-type SortKey = 'name' | 'email' | 'stage' | 'channel' | 'created_at' | 'revenue' | 'booking';
+type SortKey = 'name' | 'email' | 'phone' | 'stage' | 'channel' | 'created_at' | 'revenue' | 'booking';
 type SortDir = 'asc' | 'desc';
 
 const COLUMN_TITLE_BY_ID: Record<string, string> = Object.fromEntries(
@@ -99,6 +99,8 @@ export default function ClientGridView({ clients, onClientClick, onClientDelete 
           return displayName(a).localeCompare(displayName(b)) * dir;
         case 'email':
           return (a.email || '').localeCompare(b.email || '') * dir;
+        case 'phone':
+          return (a.phone || '').localeCompare(b.phone || '') * dir;
         case 'stage':
           return (COLUMN_TITLE_BY_ID[a.lifecycle_state] || a.lifecycle_state).localeCompare(
             COLUMN_TITLE_BY_ID[b.lifecycle_state] || b.lifecycle_state,
@@ -158,6 +160,7 @@ export default function ClientGridView({ clients, onClientClick, onClientDelete 
           <tr>
             <SortHeader label="Name" sortKeyName="name" />
             <SortHeader label="Email" sortKeyName="email" />
+            <SortHeader label="Phone" sortKeyName="phone" />
             <SortHeader label="Stage" sortKeyName="stage" />
             <SortHeader label="Channel" sortKeyName="channel" />
             <SortHeader label="Created" sortKeyName="created_at" />
@@ -191,6 +194,12 @@ export default function ClientGridView({ clients, onClientClick, onClientDelete 
                 >
                   {/* Primary email only — merged-in addresses stay on the profile, not the grid */}
                   {c.email?.trim() || '—'}
+                </td>
+                <td
+                  className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap tabular-nums"
+                  title={c.phone || undefined}
+                >
+                  {c.phone?.trim() || '—'}
                 </td>
                 <td className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
                   {COLUMN_TITLE_BY_ID[c.lifecycle_state] || c.lifecycle_state}

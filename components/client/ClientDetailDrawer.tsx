@@ -38,6 +38,8 @@ interface ClientDetailDrawerProps {
   healthRefreshToken?: number;
   /** Called when the in-drawer health score loads so the board card tag can update instantly. */
   onHealthScoreLoaded?: (clientId: string, score: number, grade: string) => void;
+  /** Scroll to + highlight the offer / deal value editor (Terminal "Set revenue"). */
+  highlightDealValue?: boolean;
 }
 
 export default function ClientDetailDrawer({
@@ -48,6 +50,7 @@ export default function ClientDetailDrawer({
   onClientSaved,
   healthRefreshToken = 0,
   onHealthScoreLoaded,
+  highlightDealValue = false,
 }: ClientDetailDrawerProps) {
   const [savingFields, setSavingFields] = useState(false);
   const [advancingStage, setAdvancingStage] = useState(false);
@@ -726,6 +729,7 @@ export default function ClientDetailDrawer({
                         <aside className="w-full lg:w-80 xl:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-white/10 overflow-y-auto bg-gray-50/50 dark:bg-white/[0.02]">
                           <ClientProfileRail
                             client={client}
+                            highlightDealValue={highlightDealValue}
                             funnelName={funnelName}
                             formData={{
                               first_name: formData.first_name,

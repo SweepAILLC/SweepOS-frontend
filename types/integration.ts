@@ -238,6 +238,8 @@ export interface Payment {
   stripe_id?: string | null;
   amount_cents: number; // Cash collected in cents
   revenue_cents?: number | null;
+  /** Linked client already has a contract total (deal value) on their offer. */
+  client_deal_value_set?: boolean | null;
   currency?: string;
   status: string;
   created_at: number; // Unix timestamp

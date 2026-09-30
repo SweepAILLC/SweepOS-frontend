@@ -27,6 +27,12 @@ function ymd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+const OUTCOME_LABEL: Record<CloseSurveyDealOutcome, string> = {
+  yes: 'Closed',
+  no: 'No close',
+  no_show: 'No show',
+};
+
 /** Shared chrome so SSR + first client paint match (avoids hydration errors). */
 function SurveyShell({ children }: { children: ReactNode }) {
   return (
@@ -94,6 +100,13 @@ function CloseSurveyClient() {
   const [recordingUrl, setRecordingUrl] = useState('');
   const [callNotes, setCallNotes] = useState('');
   const [entryDate, setEntryDate] = useState(() => ymd(new Date()));
+  // Synchronous guard: `saving` state lags a render, so a fast double-tap could fire twice.
+  const submittingRef = useRef(false);
+  const [submitted, setSubmitted] = useState<{
+    clientName: string;
+    outcome: CloseSurveyDealOutcome;
+    date: string;
+  } | null>(null);
   const loadGen = useRef(0);
   const pickerRef = useRef<HTMLDivElement | null>(null);
 
@@ -196,6 +209,8 @@ function CloseSurveyClient() {
       setSaveError('Select a client and deal outcome.');
       return;
     }
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSaving(true);
     setPhase('submitting');
     setSaveError(null);
@@ -220,11 +235,13 @@ function CloseSurveyClient() {
       };
       const res = await apiClient.submitCloseSurvey(token, payload);
       setSuccessMsg(res.message || 'Logged — pipeline / payments / KPI will refresh in the background.');
+      setSubmitted({ clientName: selectedClient?.name || 'Client', outcome: dealOutcome, date: entryDate });
       setPhase('done');
     } catch (err) {
       setSaveError(formatApiError(err, 'Submit failed'));
       setPhase('form');
     } finally {
+      submittingRef.current = false;
       setSaving(false);
     }
   };
@@ -276,17 +293,32 @@ function CloseSurveyClient() {
   if (phase === 'done') {
     return (
       <SurveyShell>
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-4 text-center">
-          <p className="text-lg font-semibold text-emerald-100">Submitted</p>
-          <p className="text-sm text-emerald-100/80">
-            {successMsg || 'Logged — pipeline / payments / KPI will refresh in the background.'}
-          </p>
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-5 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/20 text-2xl text-emerald-300">
+            ✓
+          </div>
+          <div className="space-y-1">
+            <p className="text-lg font-semibold text-emerald-100">Thanks — your close is logged.</p>
+            {submitted && (
+              <p className="text-sm text-emerald-50">
+                <span className="font-medium">{submitted.clientName}</span> ·{' '}
+                {OUTCOME_LABEL[submitted.outcome]} · {submitted.date}
+              </p>
+            )}
+            <p className="text-sm text-emerald-100/70">
+              {successMsg || 'Logged — pipeline / payments / KPI will refresh in the background.'}
+            </p>
+            <p className="text-xs text-emerald-100/50">You can close this page.</p>
+          </div>
           <button
             type="button"
-            onClick={resetForAnother}
-            className="w-full rounded-lg bg-cyan-600 hover:bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-white"
+            onClick={() => {
+              setSubmitted(null);
+              resetForAnother();
+            }}
+            className="text-xs text-emerald-200/60 underline hover:text-emerald-100"
           >
-            Back to survey
+            Log a different call
           </button>
         </div>
       </SurveyShell>

@@ -43,6 +43,43 @@ function loggedValue(entry: KpiDailyEntry | null, key: keyof KpiEntryUpdatePaylo
   return String(v);
 }
 
+function prettyDate(value: string): string {
+  const d = new Date(`${value}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+}
+
+type SubmittedSummary = {
+  date: string;
+  repName: string | null;
+  lines: { label: string; value: string }[];
+};
+
+function summarizePayload(payload: KpiEntryUpdatePayload): SubmittedSummary['lines'] {
+  const lines: SubmittedSummary['lines'] = [];
+  for (const f of ADDITIVE_FIELDS) {
+    const v = payload[f.key];
+    if (v == null) continue;
+    lines.push({
+      label: f.label,
+      value: f.kind === 'currency' ? `+$${Number(v).toLocaleString()}` : `+${v}`,
+    });
+  }
+  if (payload.total_followers != null) {
+    lines.push({ label: 'Total followers', value: String(payload.total_followers) });
+  }
+  if (payload.content_posted != null) {
+    lines.push({ label: 'Content posted', value: payload.content_posted ? 'Yes' : 'No' });
+  }
+  if (payload.best_content_type) {
+    lines.push({ label: 'Content attracting ICP', value: String(payload.best_content_type) });
+  }
+  if (payload.setter_context) {
+    lines.push({ label: 'Setter context', value: 'Added' });
+  }
+  return lines;
+}
+
 function hasSubmitPayload(form: KpiEntryUpdatePayload): boolean {
   return Object.values(form).some((v) => {
     if (v === null || v === undefined || v === '') return false;
@@ -120,6 +157,24 @@ function KpiEntryFormClient() {
     }
   };
   const loadGen = useRef(0);
+  // Synchronous guard: `saving` state lags a render, so a fast double-tap could fire twice.
+  const submittingRef = useRef(false);
+  const [submitted, setSubmitted] = useState<SubmittedSummary | null>(null);
+  // A tab left open overnight would otherwise log today's EOD under yesterday's date.
+  const dateTouched = useRef(false);
+  useEffect(() => {
+    const rollDate = () => {
+      if (dateTouched.current) return;
+      const today = ymd(new Date());
+      setEntryDate((prev) => (prev === today ? prev : today));
+    };
+    window.addEventListener('focus', rollDate);
+    document.addEventListener('visibilitychange', rollDate);
+    return () => {
+      window.removeEventListener('focus', rollDate);
+      document.removeEventListener('visibilitychange', rollDate);
+    };
+  }, []);
 
   useEffect(() => {
     if (!token) return;
@@ -188,7 +243,7 @@ function KpiEntryFormClient() {
     (logged?.inbound_bookings ?? 0) + (logged?.outbound_bookings ?? 0);
 
   const submit = async () => {
-    if (!token || saving) return;
+    if (!token || saving || submittingRef.current) return;
     if (requireRep && !repUserId) {
       setSaveError('Choose your name at the top of the form first.');
       setMessage(null);
@@ -199,6 +254,7 @@ function KpiEntryFormClient() {
       setMessage(null);
       return;
     }
+    submittingRef.current = true;
     setSaving(true);
     setPhase('submitting');
     setSaveError(null);
@@ -213,12 +269,17 @@ function KpiEntryFormClient() {
       const updated = await apiClient.upsertPublicKpiEntry(token, entryDate, payload, repUserId || null);
       setLogged(updated);
       setForm(emptyForm());
-      setMessage('Added to day totals.');
+      setSubmitted({
+        date: entryDate,
+        repName: reps.find((r) => r.id === repUserId)?.name ?? null,
+        lines: summarizePayload(payload),
+      });
       setPhase('done');
     } catch (err) {
       setSaveError(formatApiError(err, 'Save failed. Please try again.'));
       setPhase('form');
     } finally {
+      submittingRef.current = false;
       setSaving(false);
     }
   };
@@ -240,21 +301,41 @@ function KpiEntryFormClient() {
   if (phase === 'done') {
     return (
       <SurveyShell>
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-4 text-center">
-          <p className="text-lg font-semibold text-emerald-100">Submitted</p>
-          <p className="text-sm text-emerald-100/80">
-            {message || 'Added to day totals.'}
-          </p>
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-6 space-y-5 text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/20 text-2xl text-emerald-300">
+            ✓
+          </div>
+          <div className="space-y-1">
+            <p className="text-lg font-semibold text-emerald-100">
+              Thanks{submitted?.repName ? `, ${submitted.repName.split(' ')[0]}` : ''} — your EOD is in.
+            </p>
+            <p className="text-sm text-emerald-100/80">
+              Logged for <span className="font-medium text-emerald-50">{prettyDate(submitted?.date ?? entryDate)}</span>
+              {submitted?.repName ? ` under ${submitted.repName}` : ' to the shared org total'}. You can close
+              this page.
+            </p>
+          </div>
+          {submitted && submitted.lines.length > 0 && (
+            <dl className="mx-auto max-w-sm divide-y divide-emerald-500/15 rounded-lg border border-emerald-500/20 bg-black/20 text-left text-sm">
+              {submitted.lines.map((l) => (
+                <div key={l.label} className="flex justify-between gap-4 px-3 py-1.5">
+                  <dt className="text-emerald-100/70">{l.label}</dt>
+                  <dd className="font-medium text-emerald-50 truncate">{l.value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
           <button
             type="button"
             onClick={() => {
               setPhase('form');
+              setSubmitted(null);
               setMessage(null);
               setSaveError(null);
             }}
-            className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white"
+            className="text-xs text-emerald-200/60 underline hover:text-emerald-100"
           >
-            Back to survey
+            Forgot something? Add more to this day
           </button>
         </div>
       </SurveyShell>
@@ -318,7 +399,10 @@ function KpiEntryFormClient() {
           <input
             type="date"
             value={entryDate}
-            onChange={(e) => setEntryDate(e.target.value)}
+            onChange={(e) => {
+              dateTouched.current = true;
+              setEntryDate(e.target.value);
+            }}
             disabled={!token || saving}
             className="mt-1 w-full rounded border border-white/10 bg-black/30 px-2 py-1.5 disabled:opacity-50"
           />
@@ -465,7 +549,11 @@ function KpiEntryFormClient() {
             title={requireRep && !repUserId ? 'Choose your name first' : undefined}
             className="rounded bg-indigo-600 px-4 py-2 text-sm font-medium hover:bg-indigo-500 disabled:opacity-50"
           >
-            {saving ? 'Saving…' : 'Add to day totals'}
+            {saving
+              ? 'Saving…'
+              : entryDate === ymd(new Date())
+                ? "Add to today's totals"
+                : `Add to ${prettyDate(entryDate)} totals`}
           </button>
           {token ? (
             <button

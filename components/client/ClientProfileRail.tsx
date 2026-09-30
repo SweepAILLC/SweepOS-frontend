@@ -1,5 +1,6 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
 import type { Client, ClientPaymentsResponse } from '@/types/client';
 import { isProgramProgressVisible, resolveProgramTimelineFromInputs } from '@/lib/clientProgram';
 import type { LeadFollowUpBar } from '@/lib/leadFollowUp';
@@ -48,6 +49,8 @@ interface ClientProfileRailProps {
   deletingPaymentId: string | null;
   onClientSaved?: (client: Client) => void;
   onReloadPayments?: () => void;
+  /** Opened from a "Set revenue" shortcut: scroll to + highlight the offer / deal value editor. */
+  highlightDealValue?: boolean;
 }
 
 export default function ClientProfileRail({
@@ -74,7 +77,23 @@ export default function ClientProfileRail({
   deletingPaymentId,
   onClientSaved,
   onReloadPayments,
+  highlightDealValue = false,
 }: ClientProfileRailProps) {
+  const dealValueRef = useRef<HTMLDivElement | null>(null);
+  // Highlight until a contract total is saved.
+  const dealValueMissing = !((client.offer_enrollment?.total_cents ?? 0) > 0);
+  const showDealValueHighlight = highlightDealValue && dealValueMissing;
+  useEffect(() => {
+    if (!highlightDealValue) return;
+    // Wait for the drawer's slide-in so the scroll lands on the section.
+    const t = window.setTimeout(() => {
+      const el = dealValueRef.current;
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.querySelector<HTMLElement>('select, input')?.focus({ preventScroll: true });
+    }, 350);
+    return () => window.clearTimeout(t);
+  }, [highlightDealValue, client.id]);
   const timelineFromForm = resolveProgramTimelineFromInputs(
     formData.program_start_date,
     formData.program_end_date,
@@ -337,7 +356,19 @@ export default function ClientProfileRail({
             <dd className="text-sm tabular-nums">{formatCurrency(client.estimated_mrr || 0)}</dd>
           </div>
         </dl>
-        <div className="mt-3">
+        <div
+          ref={dealValueRef}
+          className={
+            showDealValueHighlight
+              ? 'mt-3 rounded-lg p-2 -mx-2 ring-2 ring-amber-400/80 bg-amber-50/60 dark:bg-amber-500/10 transition-shadow'
+              : 'mt-3'
+          }
+        >
+          {showDealValueHighlight && (
+            <p className="mb-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+              Set revenue: pick the offer and enter the contract total (deal value), then save.
+            </p>
+          )}
           <OfferEnrollmentSection
             client={client}
             recordedPaidCents={recordedPaidCents}

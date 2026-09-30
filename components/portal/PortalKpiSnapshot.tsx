@@ -193,7 +193,8 @@ export default function PortalKpiSnapshot({
                       className="text-[10px] text-gray-500 dark:text-gray-400 leading-snug"
                       title="Each new conversation counts as a lead, plus inbound ICP leads and paid funnel opt-ins"
                     >
-                      {Math.round(card.breakdown.conversations ?? 0)} convos · {Math.round(card.breakdown.inbound ?? 0)} inbound ·{' '}
+                      {Math.round(card.breakdown.conversations ?? 0)} convos · {Math.round(card.breakdown.respondents ?? 0)} respondents ·{' '}
+                      {Math.round(card.breakdown.inbound ?? 0)} inbound ·{' '}
                       {Math.round(card.breakdown.paid ?? 0)} paid
                     </span>
                   ) : null}
