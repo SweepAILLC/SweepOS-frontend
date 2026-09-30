@@ -251,9 +251,30 @@ export default function ClientKanbanBoard({
     if (!isActive) return;
     const intent = consumePipelineGridIntent();
     if (!intent) return;
+    if (intent.openClientId) {
+      const id = intent.openClientId;
+      setHighlightDealValue(Boolean(intent.focusDealValue));
+      const onBoard = clientsRef.current.find((c) => c.id === id);
+      if (onBoard) {
+        setSelectedClient(onBoard);
+        setIsDrawerOpen(true);
+      }
+      // Fresh row either way — the board copy can predate the latest offer edit.
+      void apiClient
+        .getClient(id)
+        .then((fresh: Client) => {
+          setSelectedClient(fresh);
+          setIsDrawerOpen(true);
+        })
+        .catch(() => {
+          /* not on board + fetch failed: nothing to open */
+        });
+      return;
+    }
     setBoardView('grid');
     if (intent.sourceKeys?.length) setSelectedChannels(new Set(intent.sourceKeys));
   }, [isActive]);
+  const [highlightDealValue, setHighlightDealValue] = useState(false);
   const hasCalledOnLoadComplete = useRef(false);
   const pipelineLoadStartedRef = useRef(false);
   const orgIdRef = useRef(orgIdFromAccessToken());
@@ -1370,6 +1391,7 @@ export default function ClientKanbanBoard({
     setIsCreateModalOpen(false);
     setSelectedClient(created);
     setIsDrawerOpen(true);
+    setHighlightDealValue(false);
   }, [applyClientUpdate]);
 
   const handleImportComplete = useCallback(() => {
@@ -1745,6 +1767,7 @@ export default function ClientKanbanBoard({
               const latest = clientsRef.current.find((c) => c.id === client.id) ?? client;
               setSelectedClient(latest);
               setIsDrawerOpen(true);
+              setHighlightDealValue(false);
             }}
           />
         )
@@ -1795,6 +1818,7 @@ export default function ClientKanbanBoard({
                       const latest = clientsRef.current.find((c) => c.id === client.id) ?? client;
                       setSelectedClient(latest);
                       setIsDrawerOpen(true);
+                      setHighlightDealValue(false);
                     }}
                     onClientDelete={handleDeleteClient}
                     callInsightTags={callInsightTags}
@@ -1837,8 +1861,10 @@ export default function ClientKanbanBoard({
         onClose={() => {
           setIsDrawerOpen(false);
           setSelectedClient(null);
+          setHighlightDealValue(false);
         }}
         onClientSaved={applyClientUpdate}
+        highlightDealValue={highlightDealValue}
         healthRefreshToken={healthRefreshToken}
         onHealthScoreLoaded={(cid) => {
           apiClient

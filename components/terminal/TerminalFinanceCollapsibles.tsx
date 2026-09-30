@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
+import { setPipelineGridIntent } from '@/lib/pipelineStore';
 import { deduplicateClientsForAssign } from '@/lib/clientBoardSearch';
 import ClientSearchCombobox from '@/components/client/ClientSearchCombobox';
 import { isManualStripePaymentRow } from '@/lib/dashboardTimeRange';
@@ -140,6 +142,12 @@ export default function TerminalFinanceCollapsibles({
   const { range, params } = useDateRange();
   const rangeLabel = rangeTitle(range);
   const windowKey = `${params.start ?? ''}~${params.end}`;
+  const router = useRouter();
+  // Jump to the client's Pipeline drawer with the offer / deal value editor highlighted.
+  const openSetRevenue = (clientId: string) => {
+    setPipelineGridIntent({ openClientId: clientId, focusDealValue: true });
+    void router.push({ pathname: '/', query: { tab: 'pipeline' } }, undefined, { shallow: true });
+  };
   const [failedPayments, setFailedPayments] = useState<FailedPayment[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [failedLoading, setFailedLoading] = useState(true);
@@ -914,6 +922,19 @@ export default function TerminalFinanceCollapsibles({
                           ) : (
                             <span className="text-xs text-gray-400">Linked</span>
                           )}
+                          {p.client_id && p.client_deal_value_set === false ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSetRevenue(p.client_id as string);
+                              }}
+                              title="Open this client in Pipeline to set the offer and deal value"
+                              className="text-xs text-amber-600 dark:text-amber-400 hover:underline"
+                            >
+                              Set revenue
+                            </button>
+                          ) : null}
                           {!isManual ? (
                             <button
                               type="button"

@@ -133,6 +133,10 @@ const PIPELINE_GRID_INTENT_PREFIX = 'pipelineGridIntent';
 export type PipelineGridIntent = {
   /** Board source-filter keys (OR): 'organic', 'paid', or 'funnel:<id>'. */
   sourceKeys?: string[];
+  /** Open this client's drawer (stays on the current board view). */
+  openClientId?: string;
+  /** With openClientId: scroll to + highlight the offer / deal value editor. */
+  focusDealValue?: boolean;
 };
 
 function pipelineGridIntentKey(): string {
