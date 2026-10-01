@@ -21,6 +21,9 @@ import TeamSettingsView from '@/components/team/TeamSettingsView';
 import FunnelScorecardGrid from '@/components/funnels/FunnelScorecardGrid';
 import FunnelOverviewTab from '@/components/funnels/FunnelOverviewTab';
 import FunnelStepsTab from '@/components/funnels/FunnelStepsTab';
+import FunnelSnapshotPicker from '@/components/funnels/FunnelSnapshotPicker';
+import { paidSnapshotWeeklyBenchmarks, scenarioInputs } from '@/lib/funnelSimulator';
+import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 import type {
   Funnel,
   FunnelDashboardResponse,
@@ -352,6 +355,9 @@ export default function FunnelDashboard({
   const [spendOpen, setSpendOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  // Snapshot each view compares against (null = historic averages / no model).
+  const [paidSnapshot, setPaidSnapshot] = useState<FunnelSimulatorScenario | null>(null);
+  const [organicSnapshot, setOrganicSnapshot] = useState<FunnelSimulatorScenario | null>(null);
 
   // Funnels never offer "All time" (the scorecard needs a start), so start is always set.
   const start = range.start ?? range.end;
@@ -362,6 +368,8 @@ export default function FunnelDashboard({
   const effectiveChannel: FunnelChannelFilter = funnelId ? 'paid' : channel;
   // Organic has no landing page or spend: it's the daily-activity calendar, not the scorecard.
   const isOrganicView = !funnelId && channel === 'organic';
+  // Paid snapshots belong to one funnel (or to "all paid funnels"); "All channels" has none.
+  const showPaidSnapshot = !isOrganicView && effectiveChannel === 'paid';
 
   useEffect(() => {
     setFunnelId(initialFunnelId);
@@ -443,6 +451,14 @@ export default function FunnelDashboard({
     return rows;
   }, [summary, data?.visitors, effectiveChannel]);
 
+  const scorecardModel = useMemo(() => {
+    if (!showPaidSnapshot || !paidSnapshot) return null;
+    return {
+      name: paidSnapshot.name,
+      values: paidSnapshotWeeklyBenchmarks(scenarioInputs(paidSnapshot).paid),
+    };
+  }, [showPaidSnapshot, paidSnapshot]);
+
   const weekly = useMemo(
     () => (data?.weekly ?? []).map((w) => ({ ...w, label: weekLabel(w.week_start) })),
     [data?.weekly],
@@ -500,7 +516,23 @@ export default function FunnelDashboard({
       </div>
 
       {isOrganicView ? (
-        <KpiCommandCenterPanel variant="organic" />
+        <>
+          <div className="glass-card rounded-xl border border-white/10 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+            <div className="text-[11px] text-gray-500 dark:text-gray-400">
+              <span className="font-semibold uppercase tracking-wide">Financial model</span>
+              {organicSnapshot
+                ? ' · targets show under each month in Grid view'
+                : ' · pick or create an Organic DM snapshot to compare actuals against'}
+            </div>
+            <FunnelSnapshotPicker
+              mode="organic_dm"
+              funnelId={null}
+              noneLabel="No model"
+              onChange={setOrganicSnapshot}
+            />
+          </div>
+          <KpiCommandCenterPanel variant="organic" organicModel={organicSnapshot} />
+        </>
       ) : (
         <>
       {error ? (
@@ -518,7 +550,16 @@ export default function FunnelDashboard({
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Weekly scorecard · {formatRange(start, end)}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {showPaidSnapshot ? (
+              <FunnelSnapshotPicker
+                key={funnelId ?? 'all-paid'}
+                mode="paid_vsl"
+                funnelId={funnelId}
+                noneLabel="Historic averages"
+                onChange={setPaidSnapshot}
+              />
+            ) : null}
             <button
               type="button"
               onClick={openInPipelineGrid}
@@ -555,6 +596,7 @@ export default function FunnelDashboard({
           scorecard={scorecard}
           loading={loading}
           compareLabel={range.compare ? formatRange(range.compare.start, range.compare.end) : null}
+          model={scorecardModel}
         />
       </div>
 

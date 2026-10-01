@@ -24,6 +24,7 @@ import TeamOverviewView, { type TeamAttentionItem } from '@/components/team/Team
 import type { TeamMember } from '@/types/team';
 import { useOptionalDateRange } from '@/contexts/DateRangeContext';
 import { formatRange } from '@/lib/dateRange';
+import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 
 type ViewId = 'calendar' | 'grid' | 'by-rep' | 'settings';
 
@@ -83,9 +84,14 @@ interface KpiCommandCenterPanelProps {
    * settings labelled Targets, no By Rep, no grid, offers/inboxes hidden, no URL writes.
    */
   variant?: 'sales' | 'organic';
+  /** Organic only: a Funnels-tab snapshot whose targets the grid shows under each month. */
+  organicModel?: FunnelSimulatorScenario | null;
 }
 
-export default function KpiCommandCenterPanel({ variant = 'sales' }: KpiCommandCenterPanelProps = {}) {
+export default function KpiCommandCenterPanel({
+  variant = 'sales',
+  organicModel = null,
+}: KpiCommandCenterPanelProps = {}) {
   const isOrganic = variant === 'organic';
   const router = useRouter();
   const [view, setView] = useState<ViewId>('calendar');
@@ -623,6 +629,7 @@ export default function KpiCommandCenterPanel({ variant = 'sales' }: KpiCommandC
                   }}
                   rangeStart={pageStart ?? applyMonthRange(visibleMonth.year, visibleMonth.month, false).start}
                   rangeEnd={pageEnd ?? applyMonthRange(visibleMonth.year, visibleMonth.month, false).end}
+                  model={organicModel}
                 />
               </div>
             )}

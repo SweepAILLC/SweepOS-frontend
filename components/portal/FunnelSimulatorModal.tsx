@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
+import { formatApiError } from '@/lib/apiError';
 import { orgIdFromAccessToken } from '@/lib/orgScope';
 import {
   calculateOrganicDm,
@@ -62,7 +63,24 @@ type Props = {
   initialScenarioId?: string;
   /** Skip restoring the last localStorage scenario (owner “New snapshot”). */
   startFresh?: boolean;
+  /**
+   * Funnels tab: pin the modal to one funnel's snapshots. The mode toggle and funnel
+   * picker are hidden and only snapshots in this scope are listed and saved.
+   */
+  scope?: { mode: SimulatorMode; funnelId: string | null };
+  onSaved?: (row: FunnelSimulatorScenario) => void;
+  onDeleted?: (id: string) => void;
 };
+
+/** Does a saved snapshot belong to this Funnels-tab scope? Organic has one funnel. */
+export function scenarioInScope(
+  row: FunnelSimulatorScenario,
+  scope: { mode: SimulatorMode; funnelId: string | null }
+): boolean {
+  if (row.mode !== scope.mode) return false;
+  if (scope.mode === 'organic_dm') return true;
+  return (row.funnel_id || null) === (scope.funnelId || null);
+}
 
 function NumField({
   label,
@@ -186,12 +204,15 @@ export default function FunnelSimulatorModal({
   orgId,
   initialScenarioId,
   startFresh,
+  scope,
+  onSaved,
+  onDeleted,
 }: Props) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
-  const [mode, setMode] = useState<SimulatorMode>('paid_vsl');
+  const [mode, setMode] = useState<SimulatorMode>(scope?.mode ?? 'paid_vsl');
   const [lookback, setLookback] = useState<SimulatorLookback>(90);
-  const [funnelId, setFunnelId] = useState<string>('');
+  const [funnelId, setFunnelId] = useState<string>(scope?.funnelId ?? '');
   const [inputs, setInputs] = useState<SimulatorInputs>(defaultSimulatorInputs);
   const [baselines, setBaselines] = useState<FunnelSimulatorBaselines | null>(null);
   const [baselineError, setBaselineError] = useState<string | null>(null);
@@ -221,7 +242,8 @@ export default function FunnelSimulatorModal({
 
   const loadScenarios = useCallback(async () => {
     try {
-      const rows = await apiClient.listFunnelSimulatorScenarios(orgId);
+      const all = await apiClient.listFunnelSimulatorScenarios(orgId);
+      const rows = scope ? all.filter((r) => scenarioInScope(r, scope)) : all;
       setScenarios(rows);
       const preferred =
         (initialScenarioId && rows.find((r) => r.id === initialScenarioId)) ||
@@ -238,7 +260,8 @@ export default function FunnelSimulatorModal({
     } catch {
       setScenarios([]);
     }
-  }, [orgId, initialScenarioId, startFresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orgId, initialScenarioId, startFresh, scope?.mode, scope?.funnelId]);
 
   const loadBaselines = useCallback(async () => {
     setLoadingBaselines(true);
@@ -256,11 +279,7 @@ export default function FunnelSimulatorModal({
         setInputs((prev) => applyHistoric(prev, data));
       }
     } catch (err: unknown) {
-      const detail =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null;
-      setBaselineError(detail || 'Could not load historic averages.');
+      setBaselineError(formatApiError(err, 'Could not load historic averages.'));
     } finally {
       setLoadingBaselines(false);
     }
@@ -288,8 +307,8 @@ export default function FunnelSimulatorModal({
     appliedOnce.current = true;
     setScenarioId(row.id);
     setScenarioName(row.name);
-    setMode(row.mode);
-    setFunnelId(row.funnel_id || '');
+    setMode(scope?.mode ?? row.mode);
+    setFunnelId(scope ? scope.funnelId ?? '' : row.funnel_id || '');
     const lb = row.lookback_days;
     if (lb === 'mtd') setLookback('mtd');
     else if (lb === '30') setLookback(30);
@@ -321,11 +340,13 @@ export default function FunnelSimulatorModal({
         const row = await apiClient.updateFunnelSimulatorScenario(scenarioId, payload, orgId);
         setScenarios((prev) => prev.map((s) => (s.id === row.id ? row : s)));
         setScenarioName(row.name);
+        onSaved?.(row);
       } else {
         const row = await apiClient.createFunnelSimulatorScenario(payload, orgId);
         setScenarios((prev) => [row, ...prev]);
         setScenarioId(row.id);
         setScenarioName(row.name);
+        onSaved?.(row);
         try {
           window.localStorage.setItem(lastScenarioKey(orgId), row.id);
         } catch {
@@ -333,11 +354,7 @@ export default function FunnelSimulatorModal({
         }
       }
     } catch (err: unknown) {
-      const detail =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null;
-      setSaveError(detail || 'Failed to save scenario.');
+      setSaveError(formatApiError(err, 'Failed to save scenario.'));
     } finally {
       setSaving(false);
     }
@@ -359,17 +376,14 @@ export default function FunnelSimulatorModal({
       setScenarios((prev) => [row, ...prev]);
       setScenarioId(row.id);
       setScenarioName(row.name);
+      onSaved?.(row);
       try {
         window.localStorage.setItem(lastScenarioKey(orgId), row.id);
       } catch {
         /* ignore */
       }
     } catch (err: unknown) {
-      const detail =
-        err && typeof err === 'object' && 'response' in err
-          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
-          : null;
-      setSaveError(detail || 'Failed to save scenario.');
+      setSaveError(formatApiError(err, 'Failed to save scenario.'));
     } finally {
       setSaving(false);
     }
@@ -382,6 +396,7 @@ export default function FunnelSimulatorModal({
     try {
       await apiClient.deleteFunnelSimulatorScenario(scenarioId, orgId);
       setScenarios((prev) => prev.filter((s) => s.id !== scenarioId));
+      onDeleted?.(scenarioId);
       setScenarioId('');
       setScenarioName('Untitled');
       try {
@@ -412,10 +427,13 @@ export default function FunnelSimulatorModal({
       <div className="relative w-full max-w-5xl my-6 sm:my-0 max-h-[92vh] bg-white dark:bg-gray-900 border border-gray-200/30 dark:border-white/10 rounded-lg shadow-2xl flex flex-col overflow-hidden">
         <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-gray-200/40 dark:border-white/8">
           <div className="min-w-0">
-            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">Funnel Simulator</h2>
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              {scope ? 'Funnel snapshot' : 'Funnel Simulator'}
+            </h2>
             <p className="text-[11px] text-gray-500 mt-0.5">Outputs update live as you edit.</p>
           </div>
           <div className="flex items-center gap-2">
+            {scope ? null : (
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-white/10 p-0.5">
               <button
                 type="button"
@@ -440,6 +458,7 @@ export default function FunnelSimulatorModal({
                 Organic DM
               </button>
             </div>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -454,6 +473,7 @@ export default function FunnelSimulatorModal({
         </div>
 
         <div className="flex-shrink-0 flex flex-wrap items-center gap-2 px-5 py-2.5 border-b border-gray-200/30 dark:border-white/8 bg-gray-50/60 dark:bg-white/[0.02]">
+          {scope ? null : (
           <select
             value={funnelId}
             onChange={(e) => {
@@ -469,6 +489,7 @@ export default function FunnelSimulatorModal({
               </option>
             ))}
           </select>
+          )}
           <div className="inline-flex rounded-md border border-gray-200 dark:border-white/10 p-0.5">
             {([30, 90, 'mtd'] as SimulatorLookback[]).map((lb) => (
               <button
@@ -510,7 +531,7 @@ export default function FunnelSimulatorModal({
             }}
             className="text-xs rounded-md bg-white/80 dark:bg-black/30 border border-gray-200 dark:border-white/10 px-2 py-1.5 text-gray-800 dark:text-gray-100 min-w-[8rem]"
           >
-            <option value="">New scenario</option>
+            <option value="">{scope ? 'New snapshot' : 'New scenario'}</option>
             {scenarios.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}

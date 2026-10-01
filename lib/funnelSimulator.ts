@@ -1,4 +1,5 @@
 import type {
+  FunnelSimulatorScenario,
   OrganicDmInputs,
   OrganicDmOutputs,
   PaidVslInputs,
@@ -232,4 +233,78 @@ export function parseNumInput(raw: string): number | null {
   if (!t) return null;
   const n = Number(t);
   return Number.isFinite(n) ? n : null;
+}
+
+/** Rebuild a saved snapshot's inputs over the defaults (older rows may miss fields). */
+export function scenarioInputs(row: FunnelSimulatorScenario): SimulatorInputs {
+  const next = defaultSimulatorInputs();
+  if (row.inputs?.paid) next.paid = { ...next.paid, ...row.inputs.paid };
+  if (row.inputs?.organic) next.organic = { ...next.organic, ...row.inputs.organic };
+  return next;
+}
+
+/**
+ * A paid snapshot as one modeled week, keyed like the funnel scorecard's metrics
+ * (rates as fractions, counts and dollars per 7 days). Metrics the model doesn't
+ * cover (new ads / angles) are absent so the grid keeps their historic average.
+ */
+export function paidSnapshotWeeklyBenchmarks(input: PaidVslInputs): Record<string, number | null> {
+  const out = calculatePaidVsl(input);
+  const days = Math.max(1, num(input.daysInMonth) ?? 30);
+  const week = (monthly: number | null) => (monthly == null ? null : (monthly * 7) / days);
+  const rate = (pct: number | null) => pctRate(pct);
+  const spend = week(out.monthlyAdSpend);
+  const cash = week(out.revenue);
+  const book = rate(input.bookCallPct);
+  const show = rate(input.showPct);
+  const close = rate(input.closePct);
+  return {
+    ad_spend: spend,
+    visitors: out.dailyVisitors == null ? null : out.dailyVisitors * 7,
+    cost_per_lpv: num(input.cpc),
+    leads: week(out.monthlyLeads),
+    lp_conv_rate: rate(input.lpConvPct),
+    booked_calls: week(out.booked),
+    lead_to_book_rate: book,
+    calls_on_calendar: week(out.booked),
+    live_calls: week(out.showed),
+    show_rate: show,
+    deals_closed: week(out.sales),
+    close_rate: close,
+    cash_collected: cash,
+    cash_per_close: num(input.aov),
+    lead_to_close_rate: book == null || show == null || close == null ? null : book * show * close,
+    cost_per_lead: out.cpl,
+    cost_per_booking: safeDiv(out.monthlyAdSpend, out.booked),
+    cac: out.cpa,
+    roas: out.roas,
+    // Scorecard profit/margin are cash minus ad spend only, so the model matches that.
+    profit: cash == null || spend == null ? null : cash - spend,
+    margin: cash == null || spend == null ? null : safeDiv(cash - spend, cash),
+  };
+}
+
+/**
+ * An organic snapshot as targets for `periodDays` days, keyed like the KPI grid's
+ * columns (counts and dollars prorated from the month, rates as 0–100 percents).
+ */
+export function organicSnapshotTargets(
+  input: OrganicDmInputs,
+  periodDays: number
+): Record<string, number | null> {
+  const out = calculateOrganicDm(input);
+  const days = Math.max(1, num(input.daysInMonth) ?? 30);
+  const scale = (monthly: number | null) => (monthly == null ? null : (monthly * periodDays) / days);
+  return {
+    new_conversations: scale(out.convos),
+    calls_pitched: scale(out.callsPitched),
+    calls_booked: scale(out.callsBooked),
+    calls_taken: scale(out.callsTaken),
+    closes: scale(out.closesNeeded),
+    cash_collected: scale(out.ccGoal),
+    convo_to_booking_pct: num(input.convoToBookPct),
+    show_up_pct: num(input.showPct),
+    closing_rate_pct: num(input.closePct),
+    avg_order_value: num(input.aov),
+  };
 }

@@ -31,9 +31,19 @@ interface FunnelScorecardGridProps {
   loading: boolean;
   /** Compare range label when the date filter's compare is on (benchmark = its average week). */
   compareLabel?: string | null;
+  /**
+   * A funnel snapshot standing in for the averages: one modeled week per metric key.
+   * Metrics the model leaves null keep their historic benchmark.
+   */
+  model?: { name: string; values: Record<string, number | null> } | null;
 }
 
-export default function FunnelScorecardGrid({ scorecard, loading, compareLabel = null }: FunnelScorecardGridProps) {
+export default function FunnelScorecardGrid({
+  scorecard,
+  loading,
+  compareLabel = null,
+  model = null,
+}: FunnelScorecardGridProps) {
   if (!scorecard || scorecard.weeks.length === 0) {
     return (
       <p className="px-1 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -45,6 +55,10 @@ export default function FunnelScorecardGrid({ scorecard, loading, compareLabel =
   const { weeks, metrics, benchmark_weeks: benchmarkWeeks } = scorecard;
   const fromCompare = scorecard.benchmark_source === 'compare';
   const stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-950';
+  const modelValue = (key: string): number | null => (model ? model.values[key] ?? null : null);
+  const benchmarkTint = model
+    ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
+    : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300';
 
   return (
     <div className={`overflow-x-auto ${loading ? 'opacity-60 transition-opacity' : ''}`}>
@@ -56,16 +70,20 @@ export default function FunnelScorecardGrid({ scorecard, loading, compareLabel =
             </th>
             <th
               scope="col"
-              className="text-right font-semibold py-2 px-3 bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 whitespace-nowrap"
+              className={`text-right font-semibold py-2 px-3 whitespace-nowrap ${benchmarkTint}`}
               title={
-                fromCompare
+                model
+                  ? `Snapshot "${model.name}" as one modeled week (monthly model × 7 / days in month)`
+                  : fromCompare
                   ? `Average week of the compare range (${compareLabel ?? ''}), ${benchmarkWeeks} week${benchmarkWeeks === 1 ? '' : 's'}`
                   : `Average of ${benchmarkWeeks} complete week${benchmarkWeeks === 1 ? '' : 's'} in this range`
               }
             >
-              Benchmark
-              <div className="text-[10px] font-normal normal-case tracking-normal">
-                {fromCompare ? `compare · ${benchmarkWeeks} wk${benchmarkWeeks === 1 ? '' : 's'}` : `avg of ${benchmarkWeeks} wk${benchmarkWeeks === 1 ? '' : 's'}`}
+              {model ? 'Model' : 'Benchmark'}
+              <div className="text-[10px] font-normal normal-case tracking-normal max-w-[9rem] truncate ml-auto">
+                {model
+                  ? model.name
+                  : fromCompare ? `compare · ${benchmarkWeeks} wk${benchmarkWeeks === 1 ? '' : 's'}` : `avg of ${benchmarkWeeks} wk${benchmarkWeeks === 1 ? '' : 's'}`}
               </div>
             </th>
             {weeks.map((w) => (
@@ -97,7 +115,11 @@ export default function FunnelScorecardGrid({ scorecard, loading, compareLabel =
                     {GROUP_TITLES[group]}
                   </th>
                 </tr>
-                {rows.map((m) => (
+                {rows.map((m) => {
+                  const modeled = modelValue(m.key);
+                  const benchmark = modeled ?? m.benchmark;
+                  const fellBack = model != null && modeled == null && m.benchmark != null;
+                  return (
                   <tr key={m.key} className="hover:bg-white/[0.03]">
                     <th
                       scope="row"
@@ -105,12 +127,15 @@ export default function FunnelScorecardGrid({ scorecard, loading, compareLabel =
                     >
                       {m.label}
                     </th>
-                    <td className="text-right py-1.5 px-3 tabular-nums font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border-t border-white/5">
-                      {formatKpiValue(m.benchmark, m.format)}
+                    <td
+                      className={`text-right py-1.5 px-3 tabular-nums font-medium border-t border-white/5 ${benchmarkTint} ${fellBack ? 'italic opacity-70' : ''}`}
+                      title={fellBack ? 'Not in the snapshot — historic average shown' : undefined}
+                    >
+                      {formatKpiValue(benchmark, m.format)}
                     </td>
                     {weeks.map((w, i) => {
                       const value = m.values[i];
-                      const trend = w.in_progress ? null : trendOf(value, m.benchmark);
+                      const trend = w.in_progress ? null : trendOf(value, benchmark);
                       const arrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : null;
                       return (
                         <td
@@ -134,14 +159,17 @@ export default function FunnelScorecardGrid({ scorecard, loading, compareLabel =
                       );
                     })}
                   </tr>
-                ))}
+                  );
+                })}
               </Fragment>
             );
           })}
         </tbody>
       </table>
       <p className="mt-3 text-[10px] text-gray-500 dark:text-gray-400">
-        {fromCompare
+        {model
+          ? `Model = snapshot "${model.name}" scaled to one week, so each arrow reads "vs plan". Italic values aren't in the snapshot and fall back to the historic average. `
+          : fromCompare
           ? `Benchmark = the average week of the compare range (${compareLabel ?? ''}), so each arrow reads "vs then". `
           : 'Benchmark = average of each complete week\'s value in this date range. '}
         Weeks where a metric can&apos;t be computed (e.g. CAC with no spend) are skipped. Columns are the Mon–Sun weeks that
