@@ -14,6 +14,8 @@ import {
   tierForMetric,
 } from '@/lib/kpiBenchmarks';
 import { exportKpiEntriesCsv } from '@/lib/kpiCsv';
+import { organicSnapshotTargets, scenarioInputs } from '@/lib/funnelSimulator';
+import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 import KpiRevenueContributorsModal from './KpiRevenueContributorsModal';
 import KpiSetterBookedClientsModal from './KpiSetterBookedClientsModal';
 
@@ -147,6 +149,17 @@ interface Props {
   onEntriesChange: (entries: KpiDailyEntry[]) => void;
   rangeStart: string;
   rangeEnd: string;
+  /** Organic DM snapshot: adds a "Model" row under each period's totals. */
+  model?: FunnelSimulatorScenario | null;
+}
+
+/** Days from a period's start through its end, or through today while it's running. */
+function elapsedDays(periodStart: string, periodEnd: string): number {
+  const today = todayYmd();
+  const last = periodEnd < today ? periodEnd : today;
+  if (last < periodStart) return 0;
+  const ms = parseLocalYmd(last).getTime() - parseLocalYmd(periodStart).getTime();
+  return Math.round(ms / 86_400_000) + 1;
 }
 
 export default function KpiGrid({
@@ -159,6 +172,7 @@ export default function KpiGrid({
   onEntriesChange,
   rangeStart,
   rangeEnd,
+  model = null,
 }: Props) {
   const [sortKey, setSortKey] = useState<string>('entry_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
@@ -333,6 +347,8 @@ export default function KpiGrid({
       (r) => r.period_end >= rangeStart && r.period_start <= rangeEnd
     );
   }, [rollups, rangeStart, rangeEnd]);
+
+  const modelInputs = useMemo(() => (model ? scenarioInputs(model).organic : null), [model]);
 
   return (
     <div className="space-y-3">
@@ -602,6 +618,65 @@ export default function KpiGrid({
                   })}
                 </tr>
               ))}
+              {modelInputs && model
+                ? visibleRollups.map((r) => {
+                    const days = elapsedDays(r.period_start, r.period_end);
+                    const targets = organicSnapshotTargets(modelInputs, days);
+                    const actuals = r as unknown as Record<string, number | null | undefined>;
+                    return (
+                      <tr
+                        key={`model-${r.period_label}`}
+                        className="border-t border-violet-300/40 dark:border-violet-400/20 bg-violet-500/10 text-violet-800 dark:text-violet-200"
+                      >
+                        {COLUMNS.map((col, i) => {
+                          if (i === 0) {
+                            return (
+                              <td
+                                key={col.key}
+                                className={`px-2 py-2 whitespace-nowrap font-medium ${stickyDateColClass('z-20 bg-violet-100 dark:bg-violet-950')}`}
+                                colSpan={2}
+                                title={`Snapshot "${model.name}" prorated to ${days} day${days === 1 ? '' : 's'} of ${r.period_label}`}
+                              >
+                                Model · {model.name} ({days}d)
+                              </td>
+                            );
+                          }
+                          if (i === 1) return null;
+                          if (!(col.key in targets)) return <td key={col.key} className="px-2 py-2" />;
+                          const target = targets[col.key];
+                          const actual = actuals[col.key];
+                          const attainment =
+                            target != null && target > 0 && actual != null ? (Number(actual) / target) * 100 : null;
+                          return (
+                            <td key={col.key} className="px-2 py-2 whitespace-nowrap">
+                              <div className="font-medium">
+                                {target == null
+                                  ? '—'
+                                  : col.kind === 'pct'
+                                    ? formatKpiValue(Math.round(target * 10) / 10, 'pct')
+                                    : col.kind === 'currency'
+                                      ? formatKpiValue(target, 'currency')
+                                      : target.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+                              </div>
+                              {attainment != null ? (
+                                <div
+                                  className={`text-[10px] ${
+                                    attainment >= 100
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-rose-600 dark:text-rose-400'
+                                  }`}
+                                  title="Actual totals as a share of the model"
+                                >
+                                  {Math.round(attainment)}% of model
+                                </div>
+                              ) : null}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })
+                : null}
             </tfoot>
           )}
         </table>
