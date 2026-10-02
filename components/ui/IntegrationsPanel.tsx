@@ -23,6 +23,7 @@ type IntegrationModal =
   | 'calendly'
   | 'whop'
   | 'claude'
+  | 'chatgpt'
   | 'instagram'
   | 'discord'
   | 'ghl'
@@ -59,6 +60,14 @@ function BrandTileImage({ src, alt }: { src: string; alt: string }) {
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:bg-zinc-900 dark:ring-zinc-600/80">
       {/* Static logos from /public */}
       <img src={src} alt={alt} className="h-full w-full object-contain" />
+    </div>
+  );
+}
+
+function ChatGptTileMark() {
+  return (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80">
+      <img src="/chatgpt.png" alt="" className="h-full w-full object-contain" />
     </div>
   );
 }
@@ -954,6 +963,21 @@ export default function IntegrationsPanel() {
           </div>
         </button>
 
+        <button type="button" onClick={() => setModal('chatgpt')} className={tileBtn}>
+          <div className="flex h-full min-h-0 flex-col">
+            <ChatGptTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">ChatGPT</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Custom connector (MCP)
+              </p>
+            </div>
+            <p className="mt-auto text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+              Setup guide
+            </p>
+          </div>
+        </button>
+
         <button type="button" onClick={() => setModal('instagram')} className={tileBtn}>
           <div className="flex h-full min-h-0 flex-col">
             <InstagramTileMark />
@@ -1636,6 +1660,76 @@ export default function IntegrationsPanel() {
                 <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal, KPIs</li>
                 <li>Instagram performance (when connected)</li>
                 <li>Brevo email send (when connected; confirm before send)</li>
+              </ul>
+            </div>
+          </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'chatgpt' && (
+        <SquareModalShell title="ChatGPT custom connector" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <BeginnerSetupGuide
+              intro="Connect ChatGPT to SweepOS with the same Remote MCP URL Claude uses (no API key). ChatGPT signs in with Google and binds to your Sweep org."
+              steps={[
+                <>
+                  In Sweep, connect Google under <strong>Settings → Profile</strong> (or sign in with Google).
+                </>,
+                <>
+                  In ChatGPT (Plus, Pro, Business, Enterprise or Edu): <strong>Settings → Apps &amp; Connectors → Advanced settings</strong> and
+                  turn on <strong>Developer mode</strong>. On Business/Enterprise a workspace admin may need to allow it first.
+                </>,
+                <>
+                  Back in <strong>Apps &amp; Connectors</strong>, click <strong>Create</strong>. Name it <strong>SweepOS</strong>, paste the URL
+                  below as the <strong>MCP Server URL</strong>, set <strong>Authentication</strong> to <strong>OAuth</strong>, tick the trust
+                  checkbox, and click <strong>Create</strong>.
+                </>,
+                <>
+                  Finish Google sign-in (pick your org if asked). In a chat, click <strong>+ → Developer mode</strong> and enable{' '}
+                  <strong>SweepOS</strong>. It also works in <strong>Deep research</strong> via the search/fetch tools.
+                </>,
+              ]}
+            />
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
+                MCP Server URL
+              </p>
+              {!MCP_RESOURCE_URL.startsWith('https://') && (
+                <p className="rounded-lg border-2 border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                  ChatGPT connects from OpenAI&apos;s servers, so it needs a public <strong>https://</strong> API URL — localhost
+                  and plain http will not work.
+                </p>
+              )}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+                <code className="block min-w-0 flex-1 break-all rounded-lg border-2 border-zinc-300 bg-zinc-50 px-3 py-2.5 text-sm text-zinc-900 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-50">
+                  {MCP_RESOURCE_URL}
+                </code>
+                <button
+                  type="button"
+                  className="shrink-0 rounded-lg border-2 border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-900 shadow-sm hover:bg-zinc-50 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-50 dark:hover:bg-zinc-700"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(MCP_RESOURCE_URL);
+                      setMcpUrlCopied(true);
+                      window.setTimeout(() => setMcpUrlCopied(false), 2000);
+                    } catch {
+                      setError('Could not copy MCP URL. Select and copy it manually.');
+                    }
+                  }}
+                >
+                  {mcpUrlCopied ? 'Copied' : 'Copy URL'}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">What ChatGPT can access</p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-700 dark:text-zinc-300">
+                <li>Clients and pipeline (channel, UTM, funnel answers, bookings), call insights, Marketing Intel</li>
+                <li>Funnels, KPIs, team EOD tracking, Terminal</li>
+                <li>Instagram performance (when connected)</li>
+                <li>Brevo email send (when connected; ChatGPT asks you to confirm)</li>
               </ul>
             </div>
           </div>
