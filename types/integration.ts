@@ -451,6 +451,8 @@ export interface GhlStatus {
   needs_reconnect?: boolean;
   message?: string | null;
   webhook_secret_set?: boolean;
+  /** Returned by connect only: read scopes the private integration token lacks. */
+  missing_scopes?: string[];
 }
 
 /** A GHL form or survey (GET /integrations/ghl/forms). */
