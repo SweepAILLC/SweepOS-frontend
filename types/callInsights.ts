@@ -53,6 +53,32 @@ export interface CallInsightsRollup {
   latest_framework_review?: { summary?: string; meeting_at?: string } | null;
   /** Theme keys that met org-wide thresholds (for transparency). */
   org_validated_theme_keys?: string[];
+  /** Sales/CSM hand-off brief merged across calls. Null until a call is analyzed with prompt v1.1+. */
+  deal_brief?: DealBrief | null;
+}
+
+export interface DealObjection {
+  objection: string;
+  category: string;
+  quote?: string;
+  resolved?: boolean;
+}
+
+/** Compact sales/CSM brief: hard facts + where they stand today. */
+export interface DealBrief {
+  outcome: 'closed' | 'not_closed' | 'pending_decision' | 'not_applicable' | string;
+  source_meeting_at?: string;
+  /** Most recent sales call (calendar check-in or analyzed Fathom sales call). */
+  sales_call_at?: string;
+  sales_call_count?: number;
+  sale_closed?: boolean | null;
+  situation?: string;
+  struggles?: string[];
+  objections?: DealObjection[];
+  decision_drivers?: string[];
+  why_not_closed?: string;
+  next_move?: string;
+  csm_handoff?: { success_definition?: string; watch_outs?: string[] };
 }
 
 export interface OfferSuggestion {
