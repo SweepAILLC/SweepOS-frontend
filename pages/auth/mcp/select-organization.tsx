@@ -10,13 +10,15 @@ interface OrgChoice {
 }
 
 /**
- * Mid-OAuth org picker for Claude MCP connectors.
+ * Mid-OAuth org picker for MCP connectors (Claude, ChatGPT).
  * Shown when a Google account belongs to multiple Sweep organizations.
  */
 export default function McpSelectOrganization() {
   const router = useRouter();
   const [organizations, setOrganizations] = useState<OrgChoice[]>([]);
   const [email, setEmail] = useState('');
+  // DCR client_name from the backend (e.g. "Claude", "ChatGPT"); generic until loaded.
+  const [clientName, setClientName] = useState('your AI assistant');
   const [selectedOrgId, setSelectedOrgId] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -28,7 +30,7 @@ export default function McpSelectOrganization() {
   useEffect(() => {
     if (!router.isReady) return;
     if (!selectToken) {
-      setError('Missing Claude connector selection token. Restart Connect in Claude.');
+      setError('Missing connector selection token. Restart Connect in your AI assistant.');
       setLoading(false);
       return;
     }
@@ -46,6 +48,7 @@ export default function McpSelectOrganization() {
         const orgs: OrgChoice[] = Array.isArray(data.organizations) ? data.organizations : [];
         setOrganizations(orgs);
         setEmail(typeof data.email === 'string' ? data.email : '');
+        if (typeof data.client_name === 'string' && data.client_name) setClientName(data.client_name);
         if (orgs.length > 0) setSelectedOrgId(orgs[0].id);
       } catch (e: any) {
         setError(e?.message || 'Failed to load organizations');
@@ -71,7 +74,7 @@ export default function McpSelectOrganization() {
         throw new Error(data?.detail || 'Could not bind organization');
       }
       if (!data.redirect_url) {
-        throw new Error('Missing Claude redirect URL');
+        throw new Error('Missing connector redirect URL');
       }
       window.location.href = data.redirect_url;
     } catch (e: any) {
@@ -84,11 +87,11 @@ export default function McpSelectOrganization() {
     <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950 px-4">
       <div className="w-full max-w-md rounded-2xl border-2 border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Choose organization for Claude
+          Choose organization for {clientName}
         </h1>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-          Your Google account has access to more than one Sweep organization. Pick which org Claude
-          should use for this connector.
+          Your Google account has access to more than one Sweep organization. Pick which org{' '}
+          {clientName} should use for this connector.
         </p>
         {email && (
           <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
@@ -145,7 +148,7 @@ export default function McpSelectOrganization() {
               disabled={submitting || !selectedOrgId}
               className="mt-4 w-full rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white"
             >
-              {submitting ? 'Connecting…' : 'Continue to Claude'}
+              {submitting ? 'Connecting…' : `Continue to ${clientName}`}
             </button>
           </div>
         )}
