@@ -450,6 +450,17 @@ export interface GhlStatus {
   last_sync_at?: string | null;
   needs_reconnect?: boolean;
   message?: string | null;
+  webhook_secret_set?: boolean;
+}
+
+/** One GHL funnel in the connected location (GET /integrations/ghl/funnels). */
+export interface GhlFunnelOption {
+  id: string;
+  name: string;
+  path: string | null;
+  steps: { name: string | null; path: string }[];
+  paired_funnel_id: string | null;
+  paired_funnel_name: string | null;
 }
 
 export interface GhlCalendar {

@@ -1867,6 +1867,18 @@ class ApiClient {
     dispatchCalendarIntegrationChanged();
   }
 
+  async listGhlFunnels() {
+    const response = await this.client.get('/integrations/ghl/funnels');
+    return response.data as { funnels: import('@/types/integration').GhlFunnelOption[] };
+  }
+
+  /** Generate or rotate the org's GHL webhook secret. The value is returned once. */
+  async rotateGhlWebhookSecret() {
+    const response = await this.client.post('/integrations/ghl/webhook-secret');
+    cache.delete(CACHE_KEYS.GHL_STATUS);
+    return response.data as { secret: string; header: string };
+  }
+
   async syncGhlContacts() {
     const response = await this.client.post('/integrations/ghl/contacts/sync');
     return response.data as { started: boolean; message?: string };
@@ -2611,7 +2623,27 @@ class ApiClient {
 
   async createFunnel(data: any) {
     const response = await this.client.post('/funnels', data);
+    cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
     return response.data;
+  }
+
+  /** Pair an existing funnel with a GoHighLevel funnel (admin/owner). */
+  async pairFunnelWithGhl(funnelId: string, ghlFunnelId: string) {
+    const response = await this.client.post(`/funnels/${funnelId}/ghl/pair`, { ghl_funnel_id: ghlFunnelId });
+    cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
+    return response.data as import('@/types/funnel').Funnel;
+  }
+
+  async unpairFunnelFromGhl(funnelId: string) {
+    const response = await this.client.delete(`/funnels/${funnelId}/ghl/pair`);
+    cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
+    return response.data as import('@/types/funnel').Funnel;
+  }
+
+  /** Run the GHL lead reconcile pull now (one pull covers every GHL funnel in the org). */
+  async syncFunnelGhlLeads(funnelId: string) {
+    const response = await this.client.post(`/funnels/${funnelId}/ghl/sync`);
+    return response.data as { started: boolean };
   }
 
   async updateFunnel(funnelId: string, data: any) {
