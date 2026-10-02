@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import { Funnel } from '@/types/funnel';
 import ShinyButton from './ui/ShinyButton';
+import GhlBadge from './funnels/GhlBadge';
 import { useLoading } from '@/contexts/LoadingContext';
 
 export default function FunnelListPanel() {
@@ -120,7 +121,10 @@ export default function FunnelListPanel() {
               className="glass-card neon-glow p-4 hover:shadow-lg cursor-pointer transition-shadow flex flex-col justify-between"
             >
               <div onClick={() => handleFunnelClick(funnel.id)}>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{funnel.name}</h3>
+                <h3 className="flex items-center gap-2 text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
+                  {funnel.source === 'ghl' ? <GhlBadge /> : null}
+                  {funnel.name}
+                </h3>
                 {funnel.domain && (
                   <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">Domain: {funnel.domain}</p>
                 )}

@@ -27,6 +27,8 @@ export default function GhlIntegrationCard({
   const [locationId, setLocationId] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  // Scopes the token lacks, reported once by connect (not persisted).
+  const [missingScopes, setMissingScopes] = useState<string[]>([]);
   const [disconnecting, setDisconnecting] = useState(false);
   const [calendars, setCalendars] = useState<GhlCalendar[]>([]);
   const [calendarsError, setCalendarsError] = useState<string | null>(null);
@@ -75,7 +77,8 @@ export default function GhlIntegrationCard({
     setConnecting(true);
     setConnectError(null);
     try {
-      await apiClient.connectGhl(apiKey.trim(), locationId.trim());
+      const connected = await apiClient.connectGhl(apiKey.trim(), locationId.trim());
+      setMissingScopes(connected.missing_scopes ?? []);
       setApiKey('');
       await loadStatus();
     } catch (error: unknown) {
@@ -173,6 +176,13 @@ export default function GhlIntegrationCard({
               </p>
             </div>
           </div>
+
+          {missingScopes.length ? (
+            <p className="rounded-md bg-amber-50 dark:bg-amber-900/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-200" role="alert">
+              Connected, but the private integration is missing these scopes: {missingScopes.join(', ')}. Add them in
+              GoHighLevel (Settings → Private Integrations), then reconnect so every feature works.
+            </p>
+          ) : null}
 
           <div className="space-y-2">
             <button
