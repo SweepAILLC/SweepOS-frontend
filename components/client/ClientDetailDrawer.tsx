@@ -584,7 +584,7 @@ export default function ClientDetailDrawer({
                 leaveFrom="translate-x-0"
                 leaveTo="translate-x-full"
               >
-                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:glass-card dark:bg-gray-950/95 rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
+                <Dialog.Panel className="pointer-events-auto w-full sm:w-[min(92vw,1400px)] max-w-none flex h-full max-h-[100dvh] flex-col bg-white dark:bg-gray-950 rounded-none sm:rounded-lg shadow-lg border border-gray-200 dark:border-white/10">
                   <div className="flex flex-1 min-h-0 overflow-hidden flex flex-col">
                     <div className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
                     <div className="flex-shrink-0 px-3 py-3 sm:px-6 sm:py-4 border-b border-gray-200 dark:border-white/10">
@@ -726,7 +726,7 @@ export default function ClientDetailDrawer({
                           />
                         </div>
 
-                        <aside className="w-full lg:w-80 xl:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-white/10 overflow-y-auto bg-gray-50/50 dark:bg-white/[0.02]">
+                        <aside className="w-full lg:w-80 xl:w-96 shrink-0 border-t lg:border-t-0 lg:border-l border-gray-200 dark:border-white/10 overflow-y-auto bg-gray-50 dark:bg-gray-900">
                           <ClientProfileRail
                             client={client}
                             highlightDealValue={highlightDealValue}

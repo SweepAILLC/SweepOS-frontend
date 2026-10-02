@@ -17,6 +17,7 @@ import {
 } from '@/lib/intelligenceQueue';
 import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import AIRecommendationsSection from './aiRecommendations/AIRecommendationsSection';
+import DealBriefCard from './DealBriefCard';
 import ConfirmDialog from '../ui/ConfirmDialog';
 
 const TAG_STYLES: Record<string, string> = {
@@ -264,7 +265,10 @@ export default function IntelligenceSection({
   const avoid = Array.isArray(pv.avoid_phrasing) ? (pv.avoid_phrasing as string[]) : [];
   const pvSummary = typeof pv.summary_one_liner === 'string' ? pv.summary_one_liner : '';
 
-  const synthesis = (rollup.client_state_synthesis || '').trim();
+  const brief = rollup.deal_brief;
+  const briefHasBody = Boolean(brief && (brief.situation || brief.objections?.length || brief.struggles?.length));
+  // The compact brief supersedes the long narrative paragraph once it exists.
+  const synthesis = briefHasBody ? '' : (rollup.client_state_synthesis || '').trim();
 
   const handleClipDismissConfirmed = async () => {
     const clip = clipConfirmClip;
@@ -314,6 +318,8 @@ export default function IntelligenceSection({
   const isClientRoi = lc === 'active' || lc === 'offboarding';
   const isLead = (LEAD_PIPELINE_COLUMNS as readonly string[]).includes(lc);
   const isDead = lc === 'dead';
+  // Churned clients who paid still get the hand-off view; dead leads that never paid get the sales view.
+  const isConverted = isClientRoi || (isDead && (client.lifetime_revenue_cents ?? 0) > 0);
   const summaryTags = insightData?.summary?.tags || [];
 
   const showMaximizeRoiBox =
@@ -452,6 +458,10 @@ export default function IntelligenceSection({
       {insightData?.summary?.headline && (
         <p className="text-sm font-medium text-gray-800 dark:text-gray-200">{insightData.summary.headline}</p>
       )}
+
+      {insightData ? (
+        <DealBriefCard client={client} brief={rollup.deal_brief} pipeline={pipeline} converted={isConverted} />
+      ) : null}
 
       {showLeadPlaybook && leadPlaybookMode && (
         <div className="rounded-lg border border-slate-200 dark:border-slate-600/50 bg-slate-50/80 dark:bg-slate-900/30 px-3 py-2.5 space-y-2">
@@ -696,7 +706,7 @@ export default function IntelligenceSection({
             </div>
           )}
 
-          {!synthesis && rollup.accumulated_priorities.length > 0 && (
+          {!synthesis && !briefHasBody && rollup.accumulated_priorities.length > 0 && (
             <div>
               <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Themes & priorities (legacy)</p>
               <ul className="list-disc list-inside text-sm text-gray-800 dark:text-gray-200 space-y-1">
