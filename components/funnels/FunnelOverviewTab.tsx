@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FunnelWithSteps } from '@/types/funnel';
+import GhlFunnelSettings from '@/components/funnels/GhlFunnelSettings';
 
 interface FunnelOverviewTabProps {
   funnel: FunnelWithSteps;
@@ -17,6 +18,8 @@ export default function FunnelOverviewTab({ funnel, onReload }: FunnelOverviewTa
 
   return (
     <div className="space-y-6">
+      <GhlFunnelSettings funnel={funnel} onReload={onReload} />
+
       {/* Funnel ID Copy Widget */}
       <div className="glass-card p-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">Funnel ID</h3>

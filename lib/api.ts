@@ -1867,6 +1867,11 @@ class ApiClient {
     dispatchCalendarIntegrationChanged();
   }
 
+  async listGhlForms() {
+    const response = await this.client.get('/integrations/ghl/forms');
+    return response.data as { forms: import('@/types/integration').GhlFormOption[] };
+  }
+
   async listGhlFunnels() {
     const response = await this.client.get('/integrations/ghl/funnels');
     return response.data as { funnels: import('@/types/integration').GhlFunnelOption[] };
@@ -2637,6 +2642,12 @@ class ApiClient {
   async unpairFunnelFromGhl(funnelId: string) {
     const response = await this.client.delete(`/funnels/${funnelId}/ghl/pair`);
     cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
+    return response.data as import('@/types/funnel').Funnel;
+  }
+
+  /** Forms outside the funnel's pages whose submissions count as its opt-ins. */
+  async setFunnelGhlExtraForms(funnelId: string, formIds: string[]) {
+    const response = await this.client.put(`/funnels/${funnelId}/ghl/extra-forms`, { form_ids: formIds });
     return response.data as import('@/types/funnel').Funnel;
   }
 

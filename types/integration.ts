@@ -453,6 +453,13 @@ export interface GhlStatus {
   webhook_secret_set?: boolean;
 }
 
+/** A GHL form or survey (GET /integrations/ghl/forms). */
+export interface GhlFormOption {
+  id: string;
+  name: string;
+  kind: 'form' | 'survey';
+}
+
 /** One GHL funnel in the connected location (GET /integrations/ghl/funnels). */
 export interface GhlFunnelOption {
   id: string;

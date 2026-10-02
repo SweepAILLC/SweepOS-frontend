@@ -169,6 +169,7 @@ function WebhookCard({ funnel, canManage }: { funnel: Funnel; canManage: boolean
   const [error, setError] = useState<string | null>(null);
   const url = ghlWebhookUrl(funnel.org_id);
   const lastHook = funnel.ghl_config?.webhook?.last_received_at;
+  const missed = funnel.ghl_config?.sync?.missed_by_webhook ?? 0;
 
   useEffect(() => {
     apiClient.getGhlStatus().then(setStatus).catch(() => setStatus(null));
@@ -249,6 +250,12 @@ function WebhookCard({ funnel, canManage }: { funnel: Funnel; canManage: boolean
         <StatusDot tone={lastHook ? 'good' : 'wait'} />
         <span>{lastHook ? `Last webhook lead ${formatWhen(lastHook)}` : 'No webhook leads yet'}</span>
       </p>
+      {missed > 0 ? (
+        <p className="rounded-md bg-amber-50 dark:bg-amber-900/30 px-3 py-2 text-xs text-amber-800 dark:text-amber-200" role="alert">
+          The webhook missed {missed} lead{missed === 1 ? '' : 's'} from the last 7 days; the background import caught
+          {missed === 1 ? ' it' : ' them'}. Check that the workflow is published and its trigger covers every form on this funnel.
+        </p>
+      ) : null}
     </Card>
   );
 }

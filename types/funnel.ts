@@ -31,6 +31,9 @@ export interface GhlFunnelConfig {
     last_attempt_at?: string;
     last_error?: string | null;
     last_counts?: GhlFunnelSyncCounts;
+    last_lead_at?: string;
+    /** New leads from the last 7 days the pull found that a live webhook didn't deliver. */
+    missed_by_webhook?: number;
   };
   webhook?: { last_received_at?: string };
 }
