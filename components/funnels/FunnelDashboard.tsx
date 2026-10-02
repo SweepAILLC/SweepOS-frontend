@@ -20,6 +20,7 @@ import KpiCommandCenterPanel from '@/components/kpi/KpiCommandCenterPanel';
 import TeamSettingsView from '@/components/team/TeamSettingsView';
 import FunnelScorecardGrid from '@/components/funnels/FunnelScorecardGrid';
 import FunnelOverviewTab from '@/components/funnels/FunnelOverviewTab';
+import GhlBadge from '@/components/funnels/GhlBadge';
 import FunnelStepsTab from '@/components/funnels/FunnelStepsTab';
 import FunnelSnapshotPicker from '@/components/funnels/FunnelSnapshotPicker';
 import { paidSnapshotWeeklyBenchmarks, scenarioInputs } from '@/lib/funnelSimulator';
@@ -477,7 +478,10 @@ export default function FunnelDashboard({
             ← Funnels
           </button>
         ) : null}
-        <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mr-2">{viewTitle}</h2>
+        <h2 className="flex items-center gap-2 text-xl sm:text-2xl font-bold text-gray-900 dark:text-gray-100 mr-2">
+          {funnelId && funnels.find((f) => f.id === funnelId)?.source === 'ghl' ? <GhlBadge className="h-5 w-5" /> : null}
+          {viewTitle}
+        </h2>
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {isOrganicView ? null : (
           <span

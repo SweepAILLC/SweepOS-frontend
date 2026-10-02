@@ -9,6 +9,35 @@ export interface FunnelStep {
   updated_at: string;
 }
 
+export interface GhlFunnelSyncCounts {
+  seen: number;
+  routed: number;
+  processed: number;
+  skipped: number;
+  failed: number;
+}
+
+/** funnels.ghl_config — pairing + lead-sync state for a GoHighLevel-paired funnel. */
+export interface GhlFunnelConfig {
+  ghl_funnel_id: string;
+  name: string;
+  path?: string | null;
+  steps: { id?: string | null; name?: string | null; path: string; sequence?: number }[];
+  extra_form_ids: string[];
+  paired_at: string;
+  sync?: {
+    cursor?: string;
+    last_run_at?: string;
+    last_attempt_at?: string;
+    last_error?: string | null;
+    last_counts?: GhlFunnelSyncCounts;
+    last_lead_at?: string;
+    /** New leads from the last 7 days the pull found that a live webhook didn't deliver. */
+    missed_by_webhook?: number;
+  };
+  webhook?: { last_received_at?: string };
+}
+
 export interface Funnel {
   id: string;
   org_id: string;
@@ -17,6 +46,9 @@ export interface Funnel {
   slug?: string;
   domain?: string;
   env?: string;
+  /** 'sweep' (or null on older rows) = Sweep-tracked page; 'ghl' = paired to a GoHighLevel funnel. */
+  source?: 'sweep' | 'ghl' | null;
+  ghl_config?: GhlFunnelConfig | null;
   created_at: string;
   updated_at: string;
   steps?: FunnelStep[];

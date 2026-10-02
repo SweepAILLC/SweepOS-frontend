@@ -450,6 +450,26 @@ export interface GhlStatus {
   last_sync_at?: string | null;
   needs_reconnect?: boolean;
   message?: string | null;
+  webhook_secret_set?: boolean;
+  /** Returned by connect only: read scopes the private integration token lacks. */
+  missing_scopes?: string[];
+}
+
+/** A GHL form or survey (GET /integrations/ghl/forms). */
+export interface GhlFormOption {
+  id: string;
+  name: string;
+  kind: 'form' | 'survey';
+}
+
+/** One GHL funnel in the connected location (GET /integrations/ghl/funnels). */
+export interface GhlFunnelOption {
+  id: string;
+  name: string;
+  path: string | null;
+  steps: { name: string | null; path: string }[];
+  paired_funnel_id: string | null;
+  paired_funnel_name: string | null;
 }
 
 export interface GhlCalendar {
