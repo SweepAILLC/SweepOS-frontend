@@ -16,6 +16,8 @@ interface GhlFunnelSetupProps {
   canManage: boolean;
   /** 'setup' right after create: polls until the first page view lands. */
   mode: 'setup' | 'settings';
+  /** 'columns': the three cards side by side on wide screens (Finish setup page). */
+  layout?: 'stack' | 'columns';
   onFunnelChange?: (funnel: Funnel) => void;
 }
 
@@ -76,7 +78,7 @@ function StatusDot({ tone }: { tone: 'good' | 'wait' | 'bad' }) {
 
 function Card({ step, title, optional, children }: { step: number; title: string; optional?: boolean; children: React.ReactNode }) {
   return (
-    <section className="glass-card p-4 sm:p-5 space-y-3">
+    <section className="glass-card h-full min-w-0 p-4 sm:p-5 space-y-3">
       <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
         {step}. {title}
         {optional ? <span className="ml-2 text-[11px] font-normal text-gray-500 dark:text-gray-400">Optional</span> : null}
@@ -372,9 +374,15 @@ function ImportCard({
  * Setup for a GoHighLevel-paired funnel: visitor snippet, optional real-time
  * webhook, and lead import status. Shown after create and in funnel settings.
  */
-export default function GhlFunnelSetup({ funnel, canManage, mode, onFunnelChange }: GhlFunnelSetupProps) {
+export default function GhlFunnelSetup({
+  funnel,
+  canManage,
+  mode,
+  onFunnelChange,
+  layout = 'stack',
+}: GhlFunnelSetupProps) {
   return (
-    <div className="space-y-4">
+    <div className={layout === 'columns' ? 'grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch' : 'space-y-4'}>
       <VisitorCard funnel={funnel} mode={mode} />
       <WebhookCard funnel={funnel} canManage={canManage} />
       <ImportCard funnel={funnel} canManage={canManage} onFunnelChange={onFunnelChange} />
