@@ -152,7 +152,9 @@ export default function NewFunnelPage() {
         onTabChange={(tab) => router.push(`/?tab=${tab}`)}
         organizationName={organizationName}
       />
-      <div className={`max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-[padding] duration-300 ease-out ${mobileTopPaddingClass} ${mainPaddingClass}`}>
+      <div
+        className={`${created ? 'max-w-7xl' : 'max-w-2xl'} mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-[padding] duration-300 ease-out ${mobileTopPaddingClass} ${mainPaddingClass}`}
+      >
         <div className="mb-6">
           <button
             onClick={() => router.push('/')}
@@ -171,7 +173,7 @@ export default function NewFunnelPage() {
 
         {created ? (
           <div className="space-y-4">
-            <GhlFunnelSetup funnel={created} canManage={canManage} mode="setup" onFunnelChange={setCreated} />
+            <GhlFunnelSetup funnel={created} canManage={canManage} mode="setup" layout="columns" onFunnelChange={setCreated} />
             <button
               type="button"
               onClick={() => void goToDashboard(created.id)}
