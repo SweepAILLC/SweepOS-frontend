@@ -172,6 +172,60 @@ export function isToolResource(r: Resource): boolean {
   return r.category !== 'SOP';
 }
 
+function isGfmTableRow(line: string): boolean {
+  const t = line.trim();
+  return t.includes('|') && t.split('|').filter((c) => c.trim() !== '').length >= 2;
+}
+
+function isGfmTableSeparator(line: string): boolean {
+  const t = line.trim();
+  if (!t.includes('|') || !t.includes('-')) return false;
+  const cells = splitGfmTableCells(t);
+  return cells.length >= 2 && cells.every((c) => /^:?-{1,}:?$/.test(c.replace(/\s/g, '')));
+}
+
+function splitGfmTableCells(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map((c) => c.trim());
+}
+
+function renderGfmTables(src: string): string {
+  const lines = src.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (
+      isGfmTableRow(lines[i]) &&
+      i + 1 < lines.length &&
+      isGfmTableSeparator(lines[i + 1])
+    ) {
+      const header = splitGfmTableCells(lines[i]);
+      i += 2;
+      const body: string[][] = [];
+      while (i < lines.length && isGfmTableRow(lines[i]) && !isGfmTableSeparator(lines[i])) {
+        body.push(splitGfmTableCells(lines[i]));
+        i++;
+      }
+      const th = header.map((c) => `<th class="md-th">${c}</th>`).join('');
+      const trs = body
+        .map((row) => {
+          const cells = header.map((_, idx) => row[idx] ?? '');
+          return `<tr>${cells.map((c) => `<td class="md-td">${c}</td>`).join('')}</tr>`;
+        })
+        .join('');
+      out.push(
+        `</p><div class="md-table-wrap"><table class="md-table"><thead><tr>${th}</tr></thead><tbody>${trs}</tbody></table></div><p class="md-p">`
+      );
+      continue;
+    }
+    out.push(lines[i]);
+    i++;
+  }
+  return out.join('\n');
+}
+
 export function renderMarkdown(md: string): string {
   let html = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -193,6 +247,7 @@ export function renderMarkdown(md: string): string {
     /\[([^\]]+)\]\(([^)]+)\)/g,
     '<a href="$2" target="_blank" rel="noopener noreferrer" class="md-link">$1</a>'
   );
+  html = renderGfmTables(html);
   html = html.replace(/\n\n/g, '</p><p class="md-p">');
   html = html.replace(/(?<!<\/pre>)\n(?!<)/g, '<br/>');
 
@@ -508,4 +563,31 @@ export const RESOURCE_MD_STYLES = `
   .resource-md-content .md-link:hover { color: #5b21b6; }
   .dark .resource-md-content .md-link { color: #c4b5fd; }
   .dark .resource-md-content .md-link:hover { color: #ddd6fe; }
+  .resource-md-content .md-table-wrap {
+    overflow-x: auto;
+    margin: 0.85rem 0;
+  }
+  .resource-md-content .md-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9em;
+  }
+  .resource-md-content .md-th,
+  .resource-md-content .md-td {
+    border: 1px solid rgba(0,0,0,0.14);
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+    vertical-align: top;
+  }
+  .resource-md-content .md-th {
+    font-weight: 600;
+    background: rgba(0,0,0,0.04);
+  }
+  .dark .resource-md-content .md-th,
+  .dark .resource-md-content .md-td {
+    border-color: rgba(255,255,255,0.14);
+  }
+  .dark .resource-md-content .md-th {
+    background: rgba(255,255,255,0.06);
+  }
 `;
