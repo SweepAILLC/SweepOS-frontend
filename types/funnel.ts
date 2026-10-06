@@ -64,6 +64,8 @@ export interface StepCount {
   event_name: string;
   count: number;
   conversion_rate?: number; // Percentage from previous step
+  unique_visitors?: number; // Distinct visitor_id that fired this step
+  unique_conversion_rate?: number | null; // Percentage of previous step's unique visitors
 }
 
 export interface FunnelHealth {
