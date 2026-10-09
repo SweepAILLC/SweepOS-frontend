@@ -3,6 +3,8 @@ import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
 
+export const ONBOARDING_CALL_BOOKED_KEY = 'onboarding_call_booked';
+
 const PUBLIC_PATH_PREFIXES = [
   '/login',
   '/invite',
@@ -18,22 +20,48 @@ function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATH_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+function sessionCallBooked(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return sessionStorage.getItem(ONBOARDING_CALL_BOOKED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function markOnboardingCallBooked(): void {
+  try {
+    sessionStorage.setItem(ONBOARDING_CALL_BOOKED_KEY, '1');
+  } catch {
+    /* private mode */
+  }
+}
+
 export default function MandatoryOnboardingGate({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const pathname = router.pathname;
   const [checking, setChecking] = useState(true);
   const [callBooked, setCallBooked] = useState(true);
 
   const applyUser = useCallback((user: { onboarding_call_booked?: boolean }) => {
-    setCallBooked(user.onboarding_call_booked !== false);
+    const booked = user.onboarding_call_booked !== false;
+    if (booked) markOnboardingCallBooked();
+    setCallBooked(booked || sessionCallBooked());
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (isPublicPath(window.location.pathname) || !Cookies.get('access_token')) {
+    if (typeof window === 'undefined' || !router.isReady) return;
+    if (sessionCallBooked()) {
+      setCallBooked(true);
+      setChecking(false);
+      return;
+    }
+    if (isPublicPath(pathname) || !Cookies.get('access_token')) {
       setChecking(false);
       return;
     }
     let cancelled = false;
+    setChecking(true);
     apiClient
       .getCurrentUser()
       .then((user) => {
@@ -48,12 +76,13 @@ export default function MandatoryOnboardingGate({ children }: { children: ReactN
     return () => {
       cancelled = true;
     };
-  }, [applyUser]);
+  }, [applyUser, pathname, router.isReady]);
 
   useEffect(() => {
-    if (checking || callBooked) return;
+    if (checking || callBooked || sessionCallBooked()) return;
+    if (isPublicPath(pathname)) return;
     void router.replace('/onboarding/book-call');
-  }, [checking, callBooked, router]);
+  }, [checking, callBooked, pathname, router]);
 
   return <>{children}</>;
 }

@@ -89,7 +89,10 @@ export default function InviteAcceptPage() {
           path: '/',
         });
         await new Promise((r) => setTimeout(r, 150));
-        window.location.href = '/onboarding/book-call';
+        const skipOnboardingCall =
+          res.existing_user === true ||
+          (validateState?.invitation_type || '').toUpperCase() !== 'ORG_ADMIN';
+        window.location.href = skipOnboardingCall ? '/' : '/onboarding/book-call';
         return;
       }
       setError('Something went wrong. Please try again.');
