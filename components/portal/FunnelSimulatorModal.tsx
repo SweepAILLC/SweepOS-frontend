@@ -99,6 +99,14 @@ function NumField({
   placeholder?: string;
   hint?: string;
 }) {
+  // Keep the raw text so partial decimals ("1.", "0.0") survive re-render;
+  // resync only when the value changes from outside (scenario load, reset).
+  const [draft, setDraft] = useState(value == null ? '' : String(value));
+  useEffect(() => {
+    if (parseNumInput(draft) !== value) setDraft(value == null ? '' : String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+
   return (
     <label className="block">
       <span className="block text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1">
@@ -111,9 +119,14 @@ function NumField({
         <input
           type="text"
           inputMode="decimal"
-          value={value == null ? '' : String(value)}
+          value={draft}
           placeholder={placeholder}
-          onChange={(e) => onChange(parseNumInput(e.target.value))}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (!/^[\d,]*\.?\d*$/.test(raw.trim())) return;
+            setDraft(raw);
+            onChange(parseNumInput(raw));
+          }}
           className="w-full bg-transparent px-2.5 py-1.5 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none"
         />
         {suffix ? (
