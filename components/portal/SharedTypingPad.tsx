@@ -7,6 +7,7 @@ import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import Underline from '@tiptap/extension-underline';
 import { Markdown } from 'tiptap-markdown';
+import { TableKit } from '@tiptap/extension-table';
 import {
   apiClient,
   MAX_PORTAL_SHARED_PADS,
@@ -166,6 +167,28 @@ function EditorToolbar({
         Link
       </ToolbarBtn>
       <ToolbarBtn
+        title="Insert table"
+        active={editor.isActive('table')}
+        onClick={() =>
+          editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
+        }
+      >
+        Table
+      </ToolbarBtn>
+      {editor.isActive('table') ? (
+        <>
+          <ToolbarBtn title="Add column" onClick={() => editor.chain().focus().addColumnAfter().run()}>
+            +Col
+          </ToolbarBtn>
+          <ToolbarBtn title="Add row" onClick={() => editor.chain().focus().addRowAfter().run()}>
+            +Row
+          </ToolbarBtn>
+          <ToolbarBtn title="Delete table" onClick={() => editor.chain().focus().deleteTable().run()}>
+            Del table
+          </ToolbarBtn>
+        </>
+      ) : null}
+      <ToolbarBtn
         title="Clear formatting"
         onClick={() => editor.chain().focus().unsetAllMarks().clearNodes().run()}
       >
@@ -247,7 +270,10 @@ export default function SharedTypingPad({
         },
       }),
       Placeholder.configure({
-        placeholder: 'Start writing — headings, bullets, and to-dos sync live…',
+        placeholder: 'Start writing — headings, tables, bullets, and to-dos sync live…',
+      }),
+      TableKit.configure({
+        table: { resizable: false },
       }),
       Markdown.configure({
         html: false,

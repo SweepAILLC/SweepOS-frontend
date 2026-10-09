@@ -13,6 +13,7 @@ import { useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Cookies from 'js-cookie';
 import { apiClient } from '@/lib/api';
+import { markOnboardingCallBooked } from '@/components/ui/MandatoryOnboardingGate';
 
 const CAL_LINK = 'sweep-ai/onboarding';
 
@@ -51,10 +52,12 @@ declare global {
 export default function OnboardingBookCall() {
   const router = useRouter();
   const handledRef = useRef(false);
+  const replaceRef = useRef(router.replace);
+  replaceRef.current = router.replace;
 
   useEffect(() => {
     if (!Cookies.get('access_token')) {
-      void router.replace('/login');
+      void replaceRef.current('/login');
       return;
     }
 
@@ -62,11 +65,12 @@ export default function OnboardingBookCall() {
     window.__onCalBooked = () => {
       if (handledRef.current) return;
       handledRef.current = true;
+      markOnboardingCallBooked();
       apiClient
         .completeOnboardingForm('cal_onboarding')
         .catch(() => {})
         .finally(() => {
-          void router.replace('/');
+          void replaceRef.current('/');
         });
     };
 
@@ -84,15 +88,14 @@ export default function OnboardingBookCall() {
       elementOrSelector: '#cal-booking-embed',
       config: { layout: 'month_view' },
     });
-    window.Cal!('on', {
-      action: 'bookingSuccessful',
-      callback: () => window.__onCalBooked?.(),
-    });
+    const onBooked = () => window.__onCalBooked?.();
+    window.Cal!('on', { action: 'bookingSuccessful', callback: onBooked });
+    window.Cal!('on', { action: 'bookingSuccessfulV2', callback: onBooked });
 
     return () => {
       delete window.__onCalBooked;
     };
-  }, [router]);
+  }, []);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
