@@ -2657,6 +2657,35 @@ class ApiClient {
     return response.data as { started: boolean };
   }
 
+  /** Custom webhook (admins/owners): URL, field map, last-24h counts, recent deliveries. */
+  async getFunnelWebhook(funnelId: string) {
+    const response = await this.client.get(`/funnels/${funnelId}/webhook`);
+    return response.data as import('@/types/funnel').FunnelWebhookState;
+  }
+
+  /** Create the webhook URL, or rotate it (the previous URL stops working). */
+  async rotateFunnelWebhook(funnelId: string) {
+    const response = await this.client.post(`/funnels/${funnelId}/webhook`);
+    cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
+    return response.data as import('@/types/funnel').FunnelWebhookState;
+  }
+
+  async disableFunnelWebhook(funnelId: string) {
+    const response = await this.client.delete(`/funnels/${funnelId}/webhook`);
+    cache.deleteByPrefix(CACHE_KEYS.FUNNELS);
+    return response.data as import('@/types/funnel').FunnelWebhookState;
+  }
+
+  async setFunnelWebhookFieldMap(funnelId: string, fieldMap: Record<string, string>) {
+    const response = await this.client.put(`/funnels/${funnelId}/webhook/field-map`, { field_map: fieldMap });
+    return response.data as import('@/types/funnel').FunnelWebhookState;
+  }
+
+  async retryFunnelWebhookDelivery(funnelId: string, deliveryId: string) {
+    const response = await this.client.post(`/funnels/${funnelId}/webhook/deliveries/${deliveryId}/retry`);
+    return response.data as { ok: boolean };
+  }
+
   async updateFunnel(funnelId: string, data: any) {
     const response = await this.client.patch(`/funnels/${funnelId}`, data);
     return response.data;
@@ -2735,6 +2764,17 @@ class ApiClient {
   }
 
   /** Set one week's ad spend for a funnel (null funnel = unassigned). amount_usd 0 clears it. */
+  /** Hand-edit one week's count in the Funnels scorecard grid; value null reverts to computed. */
+  async putFunnelScorecardOverride(body: {
+    funnel_id: string | null;
+    channel: 'all' | 'paid' | 'organic';
+    week_start: string;
+    metric_key: string;
+    value: number | null;
+  }) {
+    await this.client.put('/funnels/scorecard/override', body);
+  }
+
   async putFunnelAdSpend(body: {
     funnel_id: string | null;
     week_start: string;
