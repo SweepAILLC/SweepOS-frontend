@@ -1,6 +1,6 @@
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import { formatKpiValue, trendClass, trendOf } from '@/lib/kpiFormat';
-import type { FunnelScorecard, FunnelScorecardGroup } from '@/types/funnel';
+import type { FunnelScorecard, FunnelScorecardGroup, FunnelScorecardMetric } from '@/types/funnel';
 
 /**
  * The Google Sheet, in the app: metrics as rows, Mon-Sun weeks as columns, and a
@@ -8,6 +8,8 @@ import type { FunnelScorecard, FunnelScorecardGroup } from '@/types/funnel';
  * when the date filter's compare is on) next to each title.
  * Every week cell carries a green/red arrow against that benchmark; the current
  * week is shown muted, with no arrow, since its counts are still partial.
+ * Count rows (leads, calls, cash, spend...) can be clicked and typed over per week;
+ * rates and costs recompute from the edited counts on reload.
  */
 
 const GROUP_TITLES: Record<FunnelScorecardGroup, string> = {
@@ -26,6 +28,100 @@ function weekHeader(mondayYmd: string): string {
   return `${fmt(start)} – ${fmt(end)}`;
 }
 
+/** Click-to-edit week cell for count rows. Enter saves, Escape cancels, empty reverts to computed. */
+function EditableValue({
+  metric,
+  index,
+  onSave,
+}: {
+  metric: FunnelScorecardMetric;
+  index: number;
+  onSave: (value: number | null) => Promise<void>;
+}) {
+  const value = metric.values[index];
+  const overridden = metric.overridden?.[index] === true;
+  const original = metric.original?.[index] ?? null;
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const start = () => {
+    setDraft(value == null ? '' : String(value));
+    setError(null);
+    setEditing(true);
+  };
+
+  const commit = async () => {
+    const raw = draft.trim().replace(/[$,]/g, '');
+    let next: number | null = null;
+    if (raw !== '') {
+      const n = Number(raw);
+      const whole = metric.format === 'int';
+      if (!Number.isFinite(n) || n < 0 || (whole && !Number.isInteger(n))) {
+        setError(whole ? 'Whole number' : 'Number ≥ 0');
+        return;
+      }
+      next = n;
+    } else if (!overridden) {
+      setEditing(false);
+      return;
+    }
+    if (next !== null && next === value) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave(next);
+      setEditing(false);
+    } catch {
+      setError('Save failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <span className="inline-flex flex-col items-end">
+        <input
+          autoFocus
+          value={draft}
+          disabled={saving}
+          inputMode="decimal"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void commit();
+            if (e.key === 'Escape') setEditing(false);
+          }}
+          placeholder={overridden ? 'empty = computed' : ''}
+          className="w-24 rounded border border-indigo-400 bg-white dark:bg-gray-900 px-1.5 py-0.5 text-right tabular-nums text-sm"
+        />
+        {error ? <span className="text-[10px] text-red-500">{error}</span> : null}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={start}
+      title={
+        overridden
+          ? `Edited by hand. Calculated: ${formatKpiValue(original, metric.format)}. Click to change; clear to revert.`
+          : 'Click to edit this week'
+      }
+      className={`rounded px-1 -mx-1 hover:bg-indigo-500/10 hover:underline decoration-dotted ${
+        overridden ? 'underline decoration-indigo-400 decoration-dotted' : ''
+      }`}
+    >
+      {formatKpiValue(value, metric.format)}
+      {overridden ? <span className="ml-0.5 align-super text-[9px] text-indigo-500" aria-label="edited">✎</span> : null}
+    </button>
+  );
+}
+
 interface FunnelScorecardGridProps {
   scorecard: FunnelScorecard | null;
   loading: boolean;
@@ -36,6 +132,8 @@ interface FunnelScorecardGridProps {
    * Metrics the model leaves null keep their historic benchmark.
    */
   model?: { name: string; values: Record<string, number | null> } | null;
+  /** Save a hand edit for one count-row cell (null reverts it). Omit to make the grid read-only. */
+  onEditCell?: (weekStart: string, metricKey: string, value: number | null) => Promise<void>;
 }
 
 export default function FunnelScorecardGrid({
@@ -43,6 +141,7 @@ export default function FunnelScorecardGrid({
   loading,
   compareLabel = null,
   model = null,
+  onEditCell,
 }: FunnelScorecardGridProps) {
   if (!scorecard || scorecard.weeks.length === 0) {
     return (
@@ -144,7 +243,15 @@ export default function FunnelScorecardGrid({
                             w.in_progress ? 'text-gray-400 dark:text-gray-500' : 'text-gray-900 dark:text-gray-100'
                           }`}
                         >
-                          {formatKpiValue(value, m.format)}
+                          {onEditCell && m.editable ? (
+                            <EditableValue
+                              metric={m}
+                              index={i}
+                              onSave={(next) => onEditCell(w.week_start, m.key, next)}
+                            />
+                          ) : (
+                            formatKpiValue(value, m.format)
+                          )}
                           {arrow && trend ? (
                             <span
                               className={`ml-1 text-[10px] ${trendClass(trend, m.better)}`}
@@ -172,6 +279,7 @@ export default function FunnelScorecardGrid({
           : fromCompare
           ? `Benchmark = the average week of the compare range (${compareLabel ?? ''}), so each arrow reads "vs then". `
           : 'Benchmark = average of each complete week\'s value in this date range. '}
+        {onEditCell ? 'Click any count (leads, calls, cash, spend…) to correct a week; ✎ marks edited cells and rates recompute from them. ' : ''}
         Weeks where a metric can&apos;t be computed (e.g. CAC with no spend) are skipped. Columns are the Mon–Sun weeks that
         start inside the range. Costs are green when below benchmark; ad spend is neutral.
       </p>

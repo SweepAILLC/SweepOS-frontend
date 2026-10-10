@@ -22,6 +22,7 @@ import FunnelScorecardGrid from '@/components/funnels/FunnelScorecardGrid';
 import FunnelOverviewTab from '@/components/funnels/FunnelOverviewTab';
 import GhlBadge from '@/components/funnels/GhlBadge';
 import FunnelStepsTab from '@/components/funnels/FunnelStepsTab';
+import FunnelStepDropoff from '@/components/funnels/FunnelStepDropoff';
 import FunnelSnapshotPicker from '@/components/funnels/FunnelSnapshotPicker';
 import { paidSnapshotWeeklyBenchmarks, scenarioInputs } from '@/lib/funnelSimulator';
 import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
@@ -601,6 +602,16 @@ export default function FunnelDashboard({
           loading={loading}
           compareLabel={range.compare ? formatRange(range.compare.start, range.compare.end) : null}
           model={scorecardModel}
+          onEditCell={async (weekStart, metricKey, value) => {
+            await apiClient.putFunnelScorecardOverride({
+              funnel_id: funnelId ?? null,
+              channel: effectiveChannel,
+              week_start: weekStart,
+              metric_key: metricKey,
+              value,
+            });
+            setReloadKey((k) => k + 1);
+          }}
         />
       </div>
 
@@ -663,6 +674,13 @@ export default function FunnelDashboard({
           </div>
         </Panel>
       </div>
+
+      {/* Steps belong to one funnel, so the drop-off view needs a funnel selected */}
+      {funnelId ? (
+        <Panel title="Step drop-off" subtitle="Unique visitors reaching each tracked step in this range">
+          <FunnelStepDropoff funnelId={funnelId} start={start} end={end} reloadKey={reloadKey} />
+        </Panel>
+      ) : null}
 
       {/* One table */}
       <Panel title="Top sources" subtitle="Grouped by utm_source on the lead">
