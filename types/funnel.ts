@@ -49,6 +49,8 @@ export interface Funnel {
   /** 'sweep' (or null on older rows) = Sweep-tracked page; 'ghl' = paired to a GoHighLevel funnel. */
   source?: 'sweep' | 'ghl' | null;
   ghl_config?: GhlFunnelConfig | null;
+  /** A custom webhook URL is live for this funnel (Settings → Integrations → Funnel webhooks). */
+  webhook_enabled?: boolean;
   created_at: string;
   updated_at: string;
   steps?: FunnelStep[];
@@ -221,6 +223,12 @@ export interface FunnelScorecardMetric {
   values: Array<number | null>;
   /** Average of the complete weeks' values. */
   benchmark: number | null;
+  /** Count row that can be typed over per week (rates/costs recompute from it). */
+  editable?: boolean;
+  /** Per week: the value was hand-edited. */
+  overridden?: boolean[];
+  /** Per week: the computed value a hand edit replaced (null when not edited). */
+  original?: Array<number | null>;
 }
 
 export interface FunnelScorecardWeek {
@@ -244,4 +252,30 @@ export interface FunnelAdSpendRow {
   amount_usd: number;
   ads_deployed: number | null;
   angles_deployed: number | null;
+}
+
+/** GET /funnels/{id}/webhook — custom webhook URL state + delivery log (admins/owners only). */
+export interface FunnelWebhookDelivery {
+  id: string;
+  received_at: string | null;
+  status: 'pending' | 'processing' | 'done' | 'failed';
+  attempts: number;
+  error: string | null;
+  email: string | null;
+  phone: string | null;
+  name: string | null;
+  extra_fields: string[];
+}
+
+export interface FunnelWebhookState {
+  enabled: boolean;
+  url: string | null;
+  token_prefix: string | null;
+  created_at: string | null;
+  field_map: Record<string, string>;
+  map_targets: string[];
+  rate_limit_per_minute: number;
+  last_24h: { received: number; done: number; pending: number; failed: number };
+  last_received_at: string | null;
+  recent: FunnelWebhookDelivery[];
 }

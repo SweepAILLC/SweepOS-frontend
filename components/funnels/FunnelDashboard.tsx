@@ -602,6 +602,16 @@ export default function FunnelDashboard({
           loading={loading}
           compareLabel={range.compare ? formatRange(range.compare.start, range.compare.end) : null}
           model={scorecardModel}
+          onEditCell={async (weekStart, metricKey, value) => {
+            await apiClient.putFunnelScorecardOverride({
+              funnel_id: funnelId ?? null,
+              channel: effectiveChannel,
+              week_start: weekStart,
+              metric_key: metricKey,
+              value,
+            });
+            setReloadKey((k) => k + 1);
+          }}
         />
       </div>
 

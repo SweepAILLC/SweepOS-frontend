@@ -10,6 +10,7 @@ import {
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
 import GhlIntegrationCard from '@/components/ui/GhlIntegrationCard';
+import FunnelWebhookIntegrationCard from '@/components/ui/FunnelWebhookIntegrationCard';
 import { useLoading } from '@/contexts/LoadingContext';
 import { canManageOrgIntegrations } from '@/lib/tabAccess';
 import { formatApiError } from '@/lib/apiError';
@@ -27,6 +28,7 @@ type IntegrationModal =
   | 'instagram'
   | 'discord'
   | 'ghl'
+  | 'funnel_webhook'
   | null;
 
 const MCP_RESOURCE_URL = `${(process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')}/mcp`;
@@ -68,6 +70,16 @@ function ChatGptTileMark() {
   return (
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80">
       <img src="/chatgpt.png" alt="" className="h-full w-full object-contain" />
+    </div>
+  );
+}
+
+function WebhookTileMark() {
+  return (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-indigo-600 p-3 text-white shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-full w-full" aria-hidden>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+      </svg>
     </div>
   );
 }
@@ -292,6 +304,20 @@ export default function IntegrationsPanel() {
       setDiscordSummary(null);
     }
   }, []);
+
+  const [funnelWebhooksActive, setFunnelWebhooksActive] = useState<number | null>(null);
+  const refreshFunnelWebhookSummary = useCallback(async () => {
+    try {
+      const data = (await apiClient.getFunnels()) as { webhook_enabled?: boolean }[];
+      setFunnelWebhooksActive((data || []).filter((f) => f.webhook_enabled).length);
+    } catch {
+      setFunnelWebhooksActive(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshFunnelWebhookSummary();
+  }, [refreshFunnelWebhookSummary]);
 
   const refreshGhlSummary = useCallback(async () => {
     try {
@@ -1034,6 +1060,25 @@ export default function IntegrationsPanel() {
             </p>
           </div>
         </button>
+
+        <button type="button" onClick={() => setModal('funnel_webhook')} className={tileBtn}>
+          <div className="flex h-full min-h-0 flex-col">
+            <WebhookTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Funnel webhooks</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Opt-ins from any form tool
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                funnelWebhooksActive ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {funnelWebhooksActive ? `${funnelWebhooksActive} active` : 'Not set up'}
+            </p>
+          </div>
+        </button>
       </div>
 
       {modal === 'discord' && (
@@ -1064,6 +1109,12 @@ export default function IntegrationsPanel() {
           <div className="flex min-h-0 flex-col space-y-5">
             <GhlIntegrationCard canManage={canManageIntegrations} embedded onConnectionChange={refreshGhlSummary} />
           </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'funnel_webhook' && (
+        <SquareModalShell title="Funnel webhooks" onClose={() => setModal(null)}>
+          <FunnelWebhookIntegrationCard canManage={canManageIntegrations} onChange={refreshFunnelWebhookSummary} />
         </SquareModalShell>
       )}
 
