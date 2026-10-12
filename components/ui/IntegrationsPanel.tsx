@@ -69,7 +69,7 @@ function BrandTileImage({ src, alt }: { src: string; alt: string }) {
 function ChatGptTileMark() {
   return (
     <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-white p-2 shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80">
-      <img src="/postcss.config.png" alt="" className="h-full w-full object-contain" />
+      <img src="/chatgpt.png" alt="" className="h-full w-full object-contain" />
     </div>
   );
 }
