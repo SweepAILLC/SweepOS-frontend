@@ -108,7 +108,7 @@ export default function TerminalBookingsTable() {
       <div className="glass-card p-6 min-w-0">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">Bookings</h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-          Connect Cal.com or Calendly to view synced bookings.
+          Connect Cal.com, Calendly, or GHL to view synced bookings.
         </p>
         <Link href="/?tab=settings&section=integrations" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">
           Go to Integrations
@@ -153,13 +153,15 @@ export default function TerminalBookingsTable() {
         <p className="text-sm text-red-600 dark:text-red-400 mb-2 shrink-0">{bookingsError}</p>
       )}
 
-      <CalendarEventTypeNodes
-        provider={connectedProvider}
-        refreshKey={eventTypesRefreshKey}
-        compact
-        onSalesCallChanged={() => void refreshSyncedCalendar({ force: true })}
-        className="mb-4 pb-4 border-b border-gray-200/80 dark:border-white/10 shrink-0"
-      />
+      {(connectedProvider === 'calcom' || connectedProvider === 'calendly') && (
+        <CalendarEventTypeNodes
+          provider={connectedProvider}
+          refreshKey={eventTypesRefreshKey}
+          compact
+          onSalesCallChanged={() => void refreshSyncedCalendar({ force: true })}
+          className="mb-4 pb-4 border-b border-gray-200/80 dark:border-white/10 shrink-0"
+        />
+      )}
 
       <div className="mb-4 border-b border-white/10 shrink-0">
         <div className="flex space-x-1">
@@ -210,17 +212,24 @@ export default function TerminalBookingsTable() {
             <tbody className="divide-y divide-white/10">
               {filteredBookings.map((row) => {
                 const loc = row.meeting_url || row.location || '';
+                // GHL bookings sync via webhook into client_check_ins, but the detail modal's
+                // live reschedule/cancel + sales-flag editing only talks to the Cal.com/Calendly
+                // APIs — so GHL rows display in the table but aren't clickable into that modal yet.
+                const isDetailable = row.provider === 'calcom' || row.provider === 'calendly';
                 return (
                   <tr
                     key={row.id}
-                    className="hover:bg-white/5 cursor-pointer"
-                    onClick={() =>
-                      setSelectedEvent({
-                        checkInId: row.id,
-                        provider: row.provider,
-                        id: row.event_id,
-                        uri: row.event_uri || undefined,
-                      })
+                    className={isDetailable ? 'hover:bg-white/5 cursor-pointer' : ''}
+                    onClick={
+                      isDetailable
+                        ? () =>
+                            setSelectedEvent({
+                              checkInId: row.id,
+                              provider: row.provider as 'calcom' | 'calendly',
+                              id: row.event_id,
+                              uri: row.event_uri || undefined,
+                            })
+                        : undefined
                     }
                   >
                     <td className="px-3 py-2 text-sm">{row.title || 'Untitled'}</td>
