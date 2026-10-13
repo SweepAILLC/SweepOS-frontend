@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/api';
 import type { GhlCalendar, GhlStatus } from '@/types/integration';
+import { ghlWebhookUrl, GHL_WEBHOOK_SECRET_HEADER } from '@/lib/funnelTracking';
 
 interface GhlIntegrationCardProps {
   canManage: boolean;
@@ -35,8 +36,41 @@ export default function GhlIntegrationCard({
   const [savingCalendarId, setSavingCalendarId] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [webhookSecret, setWebhookSecret] = useState<string | null>(null);
+  const [rotatingSecret, setRotatingSecret] = useState(false);
+  const [secretError, setSecretError] = useState<string | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const onConnectionChangeRef = useRef(onConnectionChange);
   onConnectionChangeRef.current = onConnectionChange;
+
+  const copyToClipboard = (field: string, value: string) => {
+    void navigator.clipboard?.writeText(value);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField((f) => (f === field ? null : f)), 1500);
+  };
+
+  const handleRotateWebhookSecret = async () => {
+    if (
+      status?.webhook_secret_set &&
+      !window.confirm(
+        'Rotating stops every GHL workflow using the old secret (calendar bookings AND funnel opt-ins) until you paste the new one. Continue?'
+      )
+    ) {
+      return;
+    }
+    setRotatingSecret(true);
+    setSecretError(null);
+    try {
+      const out = await apiClient.rotateGhlWebhookSecret();
+      setWebhookSecret(out.secret);
+      setStatus((s) => (s ? { ...s, webhook_secret_set: true } : s));
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { detail?: string } } };
+      setSecretError(err?.response?.data?.detail || 'Could not generate a secret.');
+    } finally {
+      setRotatingSecret(false);
+    }
+  };
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -231,6 +265,79 @@ export default function GhlIntegrationCard({
               )}
             </div>
           )}
+
+          {status.org_id ? (
+            <div className="space-y-2 rounded-md border border-white/10 p-3">
+              <p className="text-sm font-medium text-gray-800 dark:text-gray-200">Calendar bookings webhook</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                GHL private integrations can&apos;t push webhooks natively, so appointment sync needs a Workflow
+                built in GHL. This is separate from the funnel opt-in webhook on each funnel&apos;s setup page — build
+                it once here for calendar bookings.
+              </p>
+              <ol className="list-decimal pl-5 space-y-1 text-xs text-gray-700 dark:text-gray-200">
+                <li>In GoHighLevel open <span className="font-medium">Automation → Workflows</span> and create a workflow.</li>
+                <li>
+                  Trigger: <span className="font-medium">Appointment Created / Updated / Cancelled</span>, filtered
+                  to the calendars enabled above.
+                </li>
+                <li>Action: <span className="font-medium">Webhook</span>, method POST, with the URL and header below.</li>
+                <li>Save and publish the workflow.</li>
+              </ol>
+              <div className="flex items-center gap-2 min-w-0">
+                <code className="flex-1 min-w-0 truncate rounded bg-black/5 dark:bg-white/5 px-2 py-1 text-xs font-mono text-gray-900 dark:text-gray-100">
+                  {ghlWebhookUrl(status.org_id)}
+                </code>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard('url', ghlWebhookUrl(status.org_id as string))}
+                  className="shrink-0 px-2.5 py-1 text-xs rounded-md glass-button-secondary hover:bg-white/20"
+                >
+                  {copiedField === 'url' ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="space-y-1 min-w-0">
+                <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                  Header (only if a secret is set): {GHL_WEBHOOK_SECRET_HEADER}
+                </span>
+                <div className="flex items-center gap-2 min-w-0">
+                  {webhookSecret ? (
+                    <>
+                      <code className="flex-1 min-w-0 truncate rounded bg-amber-50 dark:bg-amber-900/30 px-2 py-1 text-xs font-mono text-gray-900 dark:text-gray-100">
+                        {webhookSecret}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard('secret', webhookSecret)}
+                        className="shrink-0 px-2.5 py-1 text-xs rounded-md glass-button-secondary hover:bg-white/20"
+                      >
+                        {copiedField === 'secret' ? 'Copied' : 'Copy'}
+                      </button>
+                    </>
+                  ) : (
+                    <span className="flex-1 text-xs text-gray-700 dark:text-gray-200">
+                      {status.webhook_secret_set
+                        ? 'Secret set (hidden) — shared with funnel opt-in webhooks for this org.'
+                        : 'No secret yet. Unset secret warns but still accepts the webhook.'}
+                    </span>
+                  )}
+                  {canManage ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleRotateWebhookSecret()}
+                      disabled={rotatingSecret}
+                      className="shrink-0 px-2.5 py-1 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
+                    >
+                      {rotatingSecret ? 'Generating…' : status.webhook_secret_set ? 'Rotate' : 'Generate secret'}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {webhookSecret ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">Copy it now. Sweep won&apos;t show this secret again.</p>
+              ) : null}
+              {secretError ? <p className="text-[11px] text-red-600 dark:text-red-400">{secretError}</p> : null}
+            </div>
+          ) : null}
 
           {canManage ? (
             <button
