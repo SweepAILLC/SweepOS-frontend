@@ -484,7 +484,7 @@ export interface CallLibraryListResponse {
 /** Row from GET /integrations/calendar/synced-bookings (DB-backed check-ins). */
 export interface CalendarSyncedBookingRow {
   id: string;
-  provider: 'calcom' | 'calendly';
+  provider: 'calcom' | 'calendly' | 'ghl';
   event_id: string;
   event_uri: string | null;
   client_id: string;
@@ -2086,7 +2086,7 @@ class ApiClient {
     past_since?: string;
     /** ISO instant — past rows ending before it (date-range filter end). */
     past_until?: string;
-    provider?: 'calcom' | 'calendly';
+    provider?: 'calcom' | 'calendly' | 'ghl';
   }) {
     // DB-backed read must stay under Postgres statement_timeout (see backend session); allow headroom
     // for pool wait + JSON when the API is busy right after check-in sync.

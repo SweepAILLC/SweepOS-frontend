@@ -1115,17 +1115,24 @@ export default function CalendarConsolePanel({
                   <tbody className="divide-y divide-white/10">
                     {(filteredBookings as CalendarSyncedBookingRow[]).map((row) => {
                       const loc = row.meeting_url || row.location || '';
+                      // GHL bookings sync via webhook into client_check_ins, but the detail modal's
+                      // live reschedule/cancel + sales-flag editing only talks to the Cal.com/Calendly
+                      // APIs — so GHL rows display in the table but aren't clickable into that modal yet.
+                      const isDetailable = row.provider === 'calcom' || row.provider === 'calendly';
                       return (
                         <tr
                           key={row.id}
-                          className="hover:bg-white/5 cursor-pointer"
-                          onClick={() =>
-                            setSelectedEvent({
-                              checkInId: row.id,
-                              provider: row.provider,
-                              id: row.event_id,
-                              uri: row.event_uri || undefined,
-                            })
+                          className={isDetailable ? 'hover:bg-white/5 cursor-pointer' : ''}
+                          onClick={
+                            isDetailable
+                              ? () =>
+                                  setSelectedEvent({
+                                    checkInId: row.id,
+                                    provider: row.provider as 'calcom' | 'calendly',
+                                    id: row.event_id,
+                                    uri: row.event_uri || undefined,
+                                  })
+                              : undefined
                           }
                         >
                           <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">

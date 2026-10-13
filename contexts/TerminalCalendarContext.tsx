@@ -33,9 +33,9 @@ import {
   checkCalendarWebhookAndRefresh,
   isTerminalSyncOnLoadPending,
 } from '@/lib/terminalRefresh';
-import type { CalComStatus, CalendlyStatus } from '@/types/integration';
+import type { CalComStatus, CalendlyStatus, GhlStatus } from '@/types/integration';
 
-export type CalendarProvider = 'calcom' | 'calendly' | null;
+export type CalendarProvider = 'calcom' | 'calendly' | 'ghl' | null;
 
 /** Terminal bookings table — smaller payload for faster first paint. */
 const TERMINAL_UPCOMING_LIMIT = 150;
@@ -101,6 +101,7 @@ function isProviderSyncStale(): boolean {
 interface TerminalCalendarContextValue {
   calcomStatus: CalComStatus | null;
   calendlyStatus: CalendlyStatus | null;
+  ghlStatus: GhlStatus | null;
   connectedProvider: CalendarProvider;
   statusLoading: boolean;
   syncedUpcoming: CalendarSyncedBookingRow[];
@@ -109,7 +110,7 @@ interface TerminalCalendarContextValue {
   bookingsLoading: boolean;
   bookingsError: string | null;
   refetchSyncedBookings: () => Promise<boolean>;
-  /** Pull from Cal.com/Calendly APIs into DB, then reload canonical rows. */
+  /** Pull from Cal.com/Calendly APIs into DB, then reload canonical rows. GHL is webhook-push only, so this is a no-op pull for it — it just reloads canonical rows. */
   refreshSyncedCalendar: (opts?: { silent?: boolean; force?: boolean }) => Promise<void>;
 }
 
@@ -118,6 +119,7 @@ const TerminalCalendarContext = createContext<TerminalCalendarContextValue | nul
 export function TerminalCalendarProvider({ children }: { children: ReactNode }) {
   const [calcomStatus, setCalcomStatus] = useState<CalComStatus | null>(null);
   const [calendlyStatus, setCalendlyStatus] = useState<CalendlyStatus | null>(null);
+  const [ghlStatus, setGhlStatus] = useState<GhlStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [syncedUpcoming, setSyncedUpcoming] = useState<CalendarSyncedBookingRow[]>([]);
   const [syncedPast, setSyncedPast] = useState<CalendarSyncedBookingRow[]>([]);
@@ -129,7 +131,9 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
     ? 'calcom'
     : calendlyStatus?.connected
       ? 'calendly'
-      : null;
+      : ghlStatus?.connected
+        ? 'ghl'
+        : null;
 
   const connectedProviderRef = useRef<CalendarProvider>(connectedProvider);
   connectedProviderRef.current = connectedProvider;
@@ -219,10 +223,14 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
           setBookingsError(null);
         }
         try {
-          await runCalendarCheckInSync({
-            applyPipelineRules: false,
-            force: opts?.force,
-          });
+          // GHL has no pull API for appointments — bookings land via webhook into client_check_ins
+          // already, so skip the Cal.com/Calendly-only pull sync and just reload canonical rows.
+          if (provider !== 'ghl') {
+            await runCalendarCheckInSync({
+              applyPipelineRules: false,
+              force: opts?.force,
+            });
+          }
           if (typeof sessionStorage !== 'undefined') {
             sessionStorage.setItem(storageKey('last_sync_ms'), String(Date.now()));
           }
@@ -270,13 +278,15 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
 
   const loadIntegrationStatus = useCallback(async () => {
     try {
-      const [calcom, calendly] = await Promise.all([
+      const [calcom, calendly, ghl] = await Promise.all([
         apiClient.getCalComStatus().catch(() => ({ connected: false })),
         apiClient.getCalendlyStatus().catch(() => ({ connected: false })),
+        apiClient.getGhlStatus().catch(() => ({ connected: false })),
       ]);
       setCalcomStatus(calcom as CalComStatus);
       setCalendlyStatus(calendly as CalendlyStatus);
-      return calcom?.connected ? 'calcom' : calendly?.connected ? 'calendly' : null;
+      setGhlStatus(ghl as GhlStatus);
+      return calcom?.connected ? 'calcom' : calendly?.connected ? 'calendly' : ghl?.connected ? 'ghl' : null;
     } catch {
       return null;
     }
@@ -379,6 +389,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
     () => ({
       calcomStatus,
       calendlyStatus,
+      ghlStatus,
       connectedProvider,
       statusLoading,
       syncedUpcoming,
@@ -392,6 +403,7 @@ export function TerminalCalendarProvider({ children }: { children: ReactNode }) 
     [
       calcomStatus,
       calendlyStatus,
+      ghlStatus,
       connectedProvider,
       statusLoading,
       syncedUpcoming,
