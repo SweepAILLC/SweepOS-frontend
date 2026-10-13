@@ -446,6 +446,7 @@ export interface DiscordStatus {
 
 export interface GhlStatus {
   connected: boolean;
+  org_id?: string | null;
   location_id?: string | null;
   last_sync_at?: string | null;
   needs_reconnect?: boolean;
