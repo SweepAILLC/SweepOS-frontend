@@ -231,6 +231,8 @@ export interface FunnelScorecardMetric {
   overridden?: boolean[];
   /** Per week: the computed value a hand edit replaced (null when not edited). */
   original?: Array<number | null>;
+  /** Per week: who wrote the override ("human_ui" | "mcp_agent"); null when not overridden. */
+  source?: Array<string | null>;
 }
 
 export interface FunnelScorecardWeek {

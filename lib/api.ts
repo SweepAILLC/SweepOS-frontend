@@ -1622,6 +1622,16 @@ class ApiClient {
     return response.data as { timezone: string };
   }
 
+  async getMcpScorecardWriteEnabled() {
+    const response = await this.client.get('/integrations/mcp/scorecard-write');
+    return response.data as { enabled: boolean };
+  }
+
+  async setMcpScorecardWriteEnabled(enabled: boolean) {
+    const response = await this.client.patch('/integrations/mcp/scorecard-write', { enabled });
+    return response.data as { enabled: boolean };
+  }
+
   // Instagram Performance Intel (Composio-backed)
   async getInstagramStatus() {
     const response = await this.client.get('/instagram/status');

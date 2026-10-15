@@ -45,6 +45,7 @@ function EditableValue({
   const value = metric.values[index];
   const overridden = metric.overridden?.[index] === true;
   const original = metric.original?.[index] ?? null;
+  const writtenByAgent = overridden && metric.source?.[index] === 'mcp_agent';
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
@@ -113,15 +114,28 @@ function EditableValue({
       onClick={start}
       title={
         overridden
-          ? `Edited by hand. Calculated: ${formatKpiValue(original, metric.format)}. Click to change; clear to revert.`
+          ? writtenByAgent
+            ? `Set by an automated agent. Calculated: ${formatKpiValue(original, metric.format)}. Click to change; clear to revert.`
+            : `Edited by hand. Calculated: ${formatKpiValue(original, metric.format)}. Click to change; clear to revert.`
           : 'Click to edit this week'
       }
       className={`rounded px-1 -mx-1 hover:bg-indigo-500/10 hover:underline decoration-dotted ${
-        overridden ? 'underline decoration-indigo-400 decoration-dotted' : ''
+        overridden
+          ? writtenByAgent
+            ? 'underline decoration-cyan-400 decoration-dotted'
+            : 'underline decoration-indigo-400 decoration-dotted'
+          : ''
       }`}
     >
       {formatKpiValue(value, metric.format)}
-      {overridden ? <span className="ml-0.5 align-super text-[9px] text-indigo-500" aria-label="edited">✎</span> : null}
+      {overridden ? (
+        <span
+          className={`ml-0.5 align-super text-[9px] ${writtenByAgent ? 'text-cyan-500' : 'text-indigo-500'}`}
+          aria-label={writtenByAgent ? 'set by an automated agent' : 'edited'}
+        >
+          {writtenByAgent ? '🤖' : '✎'}
+        </span>
+      ) : null}
     </button>
   );
 }

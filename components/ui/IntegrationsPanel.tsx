@@ -11,6 +11,7 @@ import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
 import DiscordIntegrationCard from '@/components/ui/DiscordIntegrationCard';
 import GhlIntegrationCard from '@/components/ui/GhlIntegrationCard';
 import FunnelWebhookIntegrationCard from '@/components/ui/FunnelWebhookIntegrationCard';
+import ToggleSwitch from '@/components/ui/ToggleSwitch';
 import { useLoading } from '@/contexts/LoadingContext';
 import { canManageOrgIntegrations } from '@/lib/tabAccess';
 import { formatApiError } from '@/lib/apiError';
@@ -282,6 +283,10 @@ export default function IntegrationsPanel() {
   const [whopBusy, setWhopBusy] = useState(false);
   const [whopErr, setWhopErr] = useState<string | null>(null);
   const [mcpUrlCopied, setMcpUrlCopied] = useState(false);
+  const [scorecardWriteEnabled, setScorecardWriteEnabled] = useState(false);
+  const [scorecardWriteLoading, setScorecardWriteLoading] = useState(false);
+  const [scorecardWriteSaving, setScorecardWriteSaving] = useState(false);
+  const [scorecardWriteError, setScorecardWriteError] = useState<string | null>(null);
   const [instagramStatus, setInstagramStatus] = useState<InstagramStatus | null>(null);
   const [instagramBusy, setInstagramBusy] = useState(false);
   const [composioApiKey, setComposioApiKey] = useState('');
@@ -318,6 +323,42 @@ export default function IntegrationsPanel() {
   useEffect(() => {
     void refreshFunnelWebhookSummary();
   }, [refreshFunnelWebhookSummary]);
+
+  useEffect(() => {
+    if (modal !== 'claude') return;
+    let cancelled = false;
+    (async () => {
+      setScorecardWriteLoading(true);
+      setScorecardWriteError(null);
+      try {
+        const data = await apiClient.getMcpScorecardWriteEnabled();
+        if (!cancelled) setScorecardWriteEnabled(data.enabled);
+      } catch (err) {
+        if (!cancelled) setScorecardWriteError(formatApiError(err, 'Failed to load setting'));
+      } finally {
+        if (!cancelled) setScorecardWriteLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [modal]);
+
+  const handleScorecardWriteToggle = async (next: boolean) => {
+    const previous = scorecardWriteEnabled;
+    setScorecardWriteEnabled(next);
+    setScorecardWriteSaving(true);
+    setScorecardWriteError(null);
+    try {
+      const data = await apiClient.setMcpScorecardWriteEnabled(next);
+      setScorecardWriteEnabled(data.enabled);
+    } catch (err) {
+      setScorecardWriteEnabled(previous);
+      setScorecardWriteError(formatApiError(err, 'Failed to save setting'));
+    } finally {
+      setScorecardWriteSaving(false);
+    }
+  };
 
   const refreshGhlSummary = useCallback(async () => {
     try {
@@ -1711,7 +1752,37 @@ export default function IntegrationsPanel() {
                 <li>Clients, call insights, Marketing Intel, Intelligence profile, Terminal, KPIs</li>
                 <li>Instagram performance (when connected)</li>
                 <li>Brevo email send (when connected; confirm before send)</li>
+                <li>Funnel scorecard writes (off by default; toggle below, and the connection needs the funnels:write scope)</li>
               </ul>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/50">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                    Allow automated scorecard writes
+                  </p>
+                  <p className="mt-0.5 text-xs text-zinc-600 dark:text-zinc-400">
+                    Lets an MCP agent (e.g. a scheduled Claude agent with ad-account access) write
+                    weekly ad spend and scorecard numbers for you. Off by default; a human edit in
+                    the grid always works regardless of this setting.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={scorecardWriteEnabled}
+                  onChange={(next) => void handleScorecardWriteToggle(next)}
+                  disabled={scorecardWriteLoading || scorecardWriteSaving || !canManageIntegrations}
+                  tone="violet"
+                />
+              </div>
+              {scorecardWriteError && (
+                <p className="mt-2 text-xs text-red-600 dark:text-red-400">{scorecardWriteError}</p>
+              )}
+              {!canManageIntegrations && (
+                <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  Only org admins and owners can change this setting.
+                </p>
+              )}
             </div>
           </div>
         </SquareModalShell>
