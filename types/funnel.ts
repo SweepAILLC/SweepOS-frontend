@@ -221,8 +221,10 @@ export interface FunnelScorecardMetric {
   better: 'up' | 'down' | 'neutral';
   /** One per FunnelScorecard.weeks entry. */
   values: Array<number | null>;
-  /** Average of the complete weeks' values. */
+  /** Average of the complete weeks' values — the compare range's average when compare is on. */
   benchmark: number | null;
+  /** This range's own complete-week average, regardless of compare — what a Model column falls back to. */
+  range_average: number | null;
   /** Count row that can be typed over per week (rates/costs recompute from it). */
   editable?: boolean;
   /** Per week: the value was hand-edited. */

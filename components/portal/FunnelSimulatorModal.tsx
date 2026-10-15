@@ -528,7 +528,7 @@ export default function FunnelSimulatorModal({
             disabled={!baselines || loadingBaselines}
             className="px-2.5 py-1.5 text-[11px] font-semibold rounded-md bg-violet-600/90 hover:bg-violet-500 text-white disabled:opacity-50"
           >
-            {loadingBaselines ? 'Loading…' : 'Use historic averages'}
+            {loadingBaselines ? 'Loading…' : 'Use averages'}
           </button>
           <select
             value={scenarioId}
@@ -590,7 +590,7 @@ export default function FunnelSimulatorModal({
           {saveError ? <p className="text-xs text-rose-400">{saveError}</p> : null}
           {baselines ? (
             <p className="text-[11px] text-gray-500">
-              Historic window {baselines.lookback_start} → {baselines.lookback_end}
+              Average window {baselines.lookback_start} → {baselines.lookback_end}
               {baselines.aov_basis === 'cash_collected'
                 ? ' · AOV from cash collected / closes'
                 : baselines.aov_basis === 'revenue'

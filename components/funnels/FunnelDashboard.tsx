@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  ComposedChart,
-  Line,
+  Cell,
+  Pie,
+  PieChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -48,11 +51,17 @@ const TRACKING: Record<FunnelTrackingStatus, { dot: string; label: string }> = {
 };
 
 // Chart palette: spend (cost) vs cash (return) must read as opposites at a glance.
-const SPEND_COLOR = '#6366f1';
+const SPEND_COLOR = '#ef4444';
 const CASH_COLOR = '#10b981';
 const STAGE_COLOR = '#8b5cf6';
 const GRID_STROKE = 'rgba(148, 163, 184, 0.2)';
 const AXIS_TICK = { fill: '#94a3b8', fontSize: 11 };
+const TOOLTIP_STYLE = {
+  contentStyle: { backgroundColor: 'rgba(17, 24, 39, 0.95)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: '#e5e7eb' },
+};
+// Same blue palette as Terminal's "Leads by Source" pie.
+const SOURCE_COLORS = ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8'];
 
 function toYmd(d: Date): string {
   const y = d.getFullYear();
@@ -370,8 +379,10 @@ export default function FunnelDashboard({
     const monthEnd = ymdOf(y, m, 0);
     return monthEnd > range.end ? monthEnd : range.end;
   }, [range.preset, range.end, start]);
-  const compareStart = range.compare?.start;
-  const compareEnd = range.compare?.end;
+  // The scorecard's Benchmark/Averages column is always this range's own average
+  // (never the page's "vs previous period" compare) — that compare range is often
+  // genuinely data-less, which read as a broken "$0 average" rather than a real
+  // comparison. Deliberately not wired into the dashboard fetch below.
   // A single funnel is paid by definition — the channel only applies without one.
   const effectiveChannel: FunnelChannelFilter = funnelId ? 'paid' : channel;
   // Organic has no landing page or spend: it's the daily-activity calendar, not the scorecard.
@@ -409,7 +420,6 @@ export default function FunnelDashboard({
         end,
         channel: effectiveChannel,
         funnel_id: funnelId,
-        ...(compareStart && compareEnd ? { compare_start: compareStart, compare_end: compareEnd } : {}),
       })
       .then((res) => {
         if (!cancelled) setData(res);
@@ -423,7 +433,7 @@ export default function FunnelDashboard({
     return () => {
       cancelled = true;
     };
-  }, [start, end, compareStart, compareEnd, effectiveChannel, funnelId, reloadKey, isOrganicView]);
+  }, [start, end, effectiveChannel, funnelId, reloadKey, isOrganicView]);
 
   const viewTitle = funnelId
     ? funnels.find((f) => f.id === funnelId)?.name ?? 'Funnel'
@@ -434,7 +444,6 @@ export default function FunnelDashboard({
         : 'All channels';
 
   const summary = data?.summary ?? null;
-  const showSpendGraph = Boolean(data?.money?.has_spend);
   const scorecard = data?.scorecard ?? null;
   const tracking = TRACKING[data?.tracking.status ?? 'no_funnels'];
 
@@ -461,6 +470,13 @@ export default function FunnelDashboard({
   const weekly = useMemo(
     () => (data?.weekly ?? []).map((w) => ({ ...w, label: weekLabel(w.week_start) })),
     [data?.weekly],
+  );
+
+  const { totalSpend, totalCash, roas } = useMemo(() => {
+    const spend = weekly.reduce((sum, w) => sum + (w.spend_usd ?? 0), 0);
+    const cash = weekly.reduce((sum, w) => sum + (w.cash_usd ?? 0), 0);
+    return { totalSpend: spend, totalCash: cash, roas: spend > 0 ? cash / spend : null };
+  }, [weekly],
   );
 
   return (
@@ -558,7 +574,7 @@ export default function FunnelDashboard({
                 key={funnelId ?? 'all-paid'}
                 mode="paid_vsl"
                 funnelId={funnelId}
-                noneLabel="Historic averages"
+                noneLabel="Averages"
                 onChange={setPaidSnapshot}
               />
             ) : null}
@@ -590,7 +606,6 @@ export default function FunnelDashboard({
         <FunnelScorecardGrid
           scorecard={scorecard}
           loading={loading}
-          compareLabel={range.compare ? formatRange(range.compare.start, range.compare.end) : null}
           model={scorecardModel}
           onEditCell={async (weekStart, metricKey, value) => {
             await apiClient.putFunnelScorecardOverride({
@@ -605,7 +620,69 @@ export default function FunnelDashboard({
         />
       </div>
 
-      {/* Two graphs, max */}
+      {/* Full width: weekly ad spend vs cash collected, same values as the scorecard grid */}
+      <Panel title="Paid ads vs. cash collected" subtitle="Weekly, from the scorecard's Ad Spend and Cash Collected rows · CAC on hover">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-xs text-gray-600 dark:text-gray-400">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: SPEND_COLOR }} />
+            Paid ads
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: CASH_COLOR }} />
+            Cash collected
+          </span>
+        </div>
+        <div className="flex flex-col lg:flex-row gap-4">
+          <div className="w-full lg:w-3/4 h-64">
+            {weekly.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={weekly} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={GRID_STROKE} />
+                  <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                  <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Number(v).toLocaleString()}`} width={64} />
+                  <Tooltip
+                    {...TOOLTIP_STYLE}
+                    formatter={(value: number, name: string) => [usd(value), name]}
+                    labelFormatter={(label, payload) => {
+                      const cac = payload?.[0]?.payload?.cac_usd as number | null | undefined;
+                      return `Week of ${label}${cac != null ? ` · CAC ${usd(cac)}` : ''}`;
+                    }}
+                  />
+                  <Area type="monotone" dataKey="spend_usd" name="Paid ads" stroke={SPEND_COLOR} fill={SPEND_COLOR} fillOpacity={0.15} strokeWidth={2} />
+                  <Area type="monotone" dataKey="cash_usd" name="Cash collected" stroke={CASH_COLOR} fill={CASH_COLOR} fillOpacity={0.15} strokeWidth={2} />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
+            )}
+          </div>
+
+          <div className="w-full lg:w-1/4 flex flex-col gap-2 lg:h-64">
+            <div className="glass-panel rounded-lg border-l-2 px-3 py-2 flex-1 flex flex-col justify-center min-w-0" style={{ borderLeftColor: CASH_COLOR }}>
+              <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                Total cash collected
+                <span title="Calculated from scorecard data, not directly editable" aria-hidden className="text-gray-400 dark:text-gray-500">🔒</span>
+              </div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums truncate">{usd(totalCash)}</div>
+            </div>
+            <div className="glass-panel rounded-lg border-l-2 px-3 py-2 flex-1 flex flex-col justify-center min-w-0" style={{ borderLeftColor: SPEND_COLOR }}>
+              <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                Total ad spend
+                <span title="Calculated from scorecard data, not directly editable" aria-hidden className="text-gray-400 dark:text-gray-500">🔒</span>
+              </div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums truncate">{usd(totalSpend)}</div>
+            </div>
+            <div className="glass-panel rounded-lg border-l-2 border-amber-500 px-3 py-2 flex-1 flex flex-col justify-center min-w-0">
+              <div className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-gray-600 dark:text-gray-300">
+                ROAS
+                <span title="Calculated from scorecard data, not directly editable" aria-hidden className="text-gray-400 dark:text-gray-500">🔒</span>
+              </div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white tabular-nums truncate">{roas != null ? `${roas.toFixed(2)}x` : '—'}</div>
+            </div>
+          </div>
+        </div>
+      </Panel>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Where it leaks" subtitle="People reaching each stage in this range">
           <div className="h-56">
@@ -625,43 +702,83 @@ export default function FunnelDashboard({
           </div>
         </Panel>
 
-        <Panel
-          title={showSpendGraph ? 'Is spend paying back' : 'Opt-ins vs closes'}
-          subtitle={showSpendGraph ? 'Weekly ad spend (bars) vs paid cash (line) · CAC on hover' : 'Weekly · log spend to compare against cash'}
-        >
-          <div className="h-56">
-            {weekly.length ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={weekly} margin={{ left: 0, right: 8, top: 4, bottom: 4 }}>
-                  <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                  <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
-                  {showSpendGraph ? (
-                    <>
-                      <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(v) => `$${Number(v).toLocaleString()}`} width={64} />
-                      <Tooltip
-                        formatter={(value: number, name: string) => [usd(value), name]}
-                        labelFormatter={(label, payload) => {
-                          const cac = payload?.[0]?.payload?.cac_usd as number | null | undefined;
-                          return `Week of ${label}${cac != null ? ` · CAC ${usd(cac)}` : ''}`;
-                        }}
-                      />
-                      <Bar dataKey="spend_usd" name="Ad spend" fill={SPEND_COLOR} radius={[4, 4, 0, 0]} barSize={22} />
-                      <Line dataKey="cash_usd" name="Paid cash" stroke={CASH_COLOR} strokeWidth={2} dot={{ r: 3 }} type="monotone" />
-                    </>
-                  ) : (
-                    <>
-                      <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} width={32} />
-                      <Tooltip labelFormatter={(label) => `Week of ${label}`} />
-                      <Bar dataKey="opt_ins" name="Opt-ins" fill={SPEND_COLOR} radius={[4, 4, 0, 0]} barSize={22} />
-                      <Line dataKey="closed" name="Closes" stroke={CASH_COLOR} strokeWidth={2} dot={{ r: 3 }} type="monotone" />
-                    </>
-                  )}
-                </ComposedChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
-            )}
-          </div>
+        <Panel title="UTM sources" subtitle="Grouped by utm_source on the lead">
+          {data?.sources.length ? (
+            <div className="flex flex-col gap-4 min-w-0">
+              <div className="w-full min-w-0 max-w-full h-56 overflow-hidden">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Tooltip
+                      content={({ payload }: any) => {
+                        const p0 = payload?.[0];
+                        if (!p0) return null;
+                        const s = p0.payload as { source: string; opt_ins: number; closed: number; cash_usd: number };
+                        return (
+                          <div className="glass-panel px-3 py-2 rounded-lg text-xs text-gray-900 dark:text-gray-100">
+                            <div className="font-semibold">{s.source}</div>
+                            <div className="text-gray-600 dark:text-gray-300">{s.opt_ins.toLocaleString()} opt-ins</div>
+                            <div className="text-gray-600 dark:text-gray-300">{s.closed} closed · {usd(s.cash_usd)}</div>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Pie
+                      data={data.sources}
+                      dataKey="opt_ins"
+                      nameKey="source"
+                      innerRadius={45}
+                      outerRadius={72}
+                      paddingAngle={2}
+                      cornerRadius={10}
+                      labelLine={false}
+                      label={({ percent }: any) => (percent != null && percent > 0.04 ? `${Math.round(percent * 100)}%` : '')}
+                    >
+                      {data.sources.map((s, i) => (
+                        <Cell key={`cell-${s.source}`} fill={SOURCE_COLORS[i % SOURCE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+
+              <details className="glass-panel rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+                <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-3 min-w-0">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">Sources</span>
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">▼</span>
+                </summary>
+                <div className="mt-3 max-h-40 overflow-y-auto overscroll-y-contain space-y-2 pr-1">
+                  {data.sources.map((s, i) => (
+                    <div
+                      key={s.source}
+                      className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2 min-w-0 max-w-full overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: SOURCE_COLORS[i % SOURCE_COLORS.length] }}
+                        />
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={s.source}>
+                          {s.source}
+                        </span>
+                      </div>
+                      <div className="text-right flex-shrink-0 min-w-0">
+                        <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate">
+                          {s.opt_ins.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {s.closed} closed · {usd(s.cash_usd)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {loading ? 'Loading…' : 'No leads in this range. UTM sources appear once funnels send utm with submitLead.'}
+            </p>
+          )}
         </Panel>
       </div>
 
@@ -671,40 +788,6 @@ export default function FunnelDashboard({
           <FunnelStepDropoff funnelId={funnelId} start={start} end={end} reloadKey={reloadKey} />
         </Panel>
       ) : null}
-
-      {/* One table */}
-      <Panel title="Top sources" subtitle="Grouped by utm_source on the lead">
-        {data?.sources.length ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                  <th className="py-1.5 pr-4 font-medium">Source</th>
-                  <th className="py-1.5 pr-4 font-medium text-right">Opt-ins</th>
-                  <th className="py-1.5 pr-4 font-medium text-right">Booked</th>
-                  <th className="py-1.5 pr-4 font-medium text-right">Closed</th>
-                  <th className="py-1.5 font-medium text-right">Cash</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {data.sources.map((s) => (
-                  <tr key={s.source} className="text-gray-800 dark:text-gray-200">
-                    <td className="py-1.5 pr-4 truncate max-w-[16rem]" title={s.source}>{s.source}</td>
-                    <td className="py-1.5 pr-4 text-right tabular-nums">{s.opt_ins}</td>
-                    <td className="py-1.5 pr-4 text-right tabular-nums">{s.booked}</td>
-                    <td className="py-1.5 pr-4 text-right tabular-nums">{s.closed}</td>
-                    <td className="py-1.5 text-right tabular-nums">{usd(s.cash_usd)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {loading ? 'Loading…' : 'No leads in this range. UTM sources appear once funnels send utm with submitLead.'}
-          </p>
-        )}
-      </Panel>
 
         </>
       )}
