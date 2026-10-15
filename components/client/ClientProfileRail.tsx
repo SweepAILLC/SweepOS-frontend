@@ -14,6 +14,8 @@ export type ClientProfileFormData = {
   phone: string;
   instagram: string;
   source_channel: '' | 'organic' | 'paid';
+  /** '' = no funnel attributed. Only meaningful when source_channel is 'paid'. */
+  source_funnel_id: string;
   program_start_date: string;
   program_end_date: string;
   follow_up_due_date: string;
@@ -21,9 +23,8 @@ export type ClientProfileFormData = {
 
 interface ClientProfileRailProps {
   client: Client;
-  /** Resolved name of client.source_funnel_id, when set — looked up by the drawer via the
-   * already-cached getFunnels() list, no per-client endpoint added. */
-  funnelName?: string | null;
+  /** The org's funnels, for the Channel editor's funnel picker (loaded once by the drawer). */
+  funnels?: { id: string; name: string }[];
   formData: ClientProfileFormData;
   setFormData: React.Dispatch<React.SetStateAction<ClientProfileFormData>>;
   fieldBlurSave: () => void;
@@ -55,7 +56,7 @@ interface ClientProfileRailProps {
 
 export default function ClientProfileRail({
   client,
-  funnelName,
+  funnels = [],
   formData,
   setFormData,
   fieldBlurSave,
@@ -211,7 +212,14 @@ export default function ClientProfileRail({
             <select
               value={formData.source_channel}
               onChange={(e) => {
-                const next = { ...formData, source_channel: e.target.value as ClientProfileFormData['source_channel'] };
+                const value = e.target.value as ClientProfileFormData['source_channel'];
+                // Leaving "paid" drops any funnel attribution — the backend does the same
+                // on save, so clear it here too rather than show a stale funnel.
+                const next = {
+                  ...formData,
+                  source_channel: value,
+                  ...(value !== 'paid' ? { source_funnel_id: '' } : {}),
+                };
                 setFormData(next);
                 void saveClientFields(next);
               }}
@@ -221,10 +229,23 @@ export default function ClientProfileRail({
               <option value="organic">Organic</option>
               <option value="paid">Paid</option>
             </select>
-            {formData.source_channel === 'paid' && funnelName && (
-              <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">
-                via <span className="font-medium text-gray-700 dark:text-gray-300">{funnelName}</span>
-              </p>
+            {formData.source_channel === 'paid' && (
+              <select
+                value={formData.source_funnel_id}
+                onChange={(e) => {
+                  const next = { ...formData, source_funnel_id: e.target.value };
+                  setFormData(next);
+                  void saveClientFields(next);
+                }}
+                className="mt-1 block w-full rounded-md glass-input focus:border-blue-500 focus:ring-blue-500 text-[11px]"
+              >
+                <option value="">No funnel</option>
+                {funnels.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.name}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
         </dl>

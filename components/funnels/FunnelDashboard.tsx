@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/router';
 import {
   Bar,
   BarChart,
@@ -12,10 +11,9 @@ import {
   YAxis,
 } from 'recharts';
 import { apiClient } from '@/lib/api';
-import { setPipelineGridIntent } from '@/lib/pipelineStore';
 import PageDateRange from '@/components/ui/PageDateRange';
 import { useDateRange } from '@/contexts/DateRangeContext';
-import { formatRange } from '@/lib/dateRange';
+import { formatRange, ymdOf } from '@/lib/dateRange';
 import KpiCommandCenterPanel from '@/components/kpi/KpiCommandCenterPanel';
 import TeamSettingsView from '@/components/team/TeamSettingsView';
 import FunnelScorecardGrid from '@/components/funnels/FunnelScorecardGrid';
@@ -341,7 +339,6 @@ export default function FunnelDashboard({
   initialChannel = null,
   onBack,
 }: FunnelDashboardProps) {
-  const router = useRouter();
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [funnelId, setFunnelId] = useState<string | null>(initialFunnelId);
   // The Funnels tab's one date range (header picker) drives everything below.
@@ -363,7 +360,16 @@ export default function FunnelDashboard({
 
   // Funnels never offer "All time" (the scorecard needs a start), so start is always set.
   const start = range.start ?? range.end;
-  const end = range.end;
+  // "This month" rolls its end to today everywhere else in the app, but the weekly
+  // scorecard is a month-shaped grid (docs: every Monday in the month gets a column,
+  // including ones that haven't happened yet) — so on this tab only, extend through
+  // the end of the calendar month instead of stopping the fetch window at today.
+  const end = useMemo(() => {
+    if (range.preset !== 'this_month') return range.end;
+    const [y, m] = start.split('-').map(Number);
+    const monthEnd = ymdOf(y, m, 0);
+    return monthEnd > range.end ? monthEnd : range.end;
+  }, [range.preset, range.end, start]);
   const compareStart = range.compare?.start;
   const compareEnd = range.compare?.end;
   // A single funnel is paid by definition — the channel only applies without one.
@@ -418,15 +424,6 @@ export default function FunnelDashboard({
       cancelled = true;
     };
   }, [start, end, compareStart, compareEnd, effectiveChannel, funnelId, reloadKey, isOrganicView]);
-
-  const openInPipelineGrid = () => {
-    let sourceKeys: string[] | undefined;
-    if (funnelId) sourceKeys = [`funnel:${funnelId}`];
-    else if (effectiveChannel === 'organic') sourceKeys = ['organic'];
-    else if (effectiveChannel === 'paid') sourceKeys = [...funnels.map((f) => `funnel:${f.id}`), 'paid'];
-    setPipelineGridIntent({ sourceKeys });
-    void router.push({ pathname: '/', query: { tab: 'pipeline' } }, undefined, { shallow: true });
-  };
 
   const viewTitle = funnelId
     ? funnels.find((f) => f.id === funnelId)?.name ?? 'Funnel'
@@ -565,13 +562,6 @@ export default function FunnelDashboard({
                 onChange={setPaidSnapshot}
               />
             ) : null}
-            <button
-              type="button"
-              onClick={openInPipelineGrid}
-              className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
-            >
-              View these leads in Pipeline Grid →
-            </button>
             {effectiveChannel !== 'organic' ? (
               <div className="relative">
                 <button
