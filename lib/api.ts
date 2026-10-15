@@ -1622,6 +1622,16 @@ class ApiClient {
     return response.data as { timezone: string };
   }
 
+  async getMcpScorecardWriteEnabled() {
+    const response = await this.client.get('/integrations/mcp/scorecard-write');
+    return response.data as { enabled: boolean };
+  }
+
+  async setMcpScorecardWriteEnabled(enabled: boolean) {
+    const response = await this.client.patch('/integrations/mcp/scorecard-write', { enabled });
+    return response.data as { enabled: boolean };
+  }
+
   // Instagram Performance Intel (Composio-backed)
   async getInstagramStatus() {
     const response = await this.client.get('/instagram/status');
@@ -2753,6 +2763,7 @@ class ApiClient {
     funnel_id?: string | null;
     compare_start?: string;
     compare_end?: string;
+    utm_group_by?: 'source' | 'medium' | 'campaign' | 'content';
   }): Promise<import('@/types/funnel').FunnelDashboardResponse> {
     const { funnel_id, ...rest } = params;
     const response = await this.client.get('/funnels/dashboard', {
