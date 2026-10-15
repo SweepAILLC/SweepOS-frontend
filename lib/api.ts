@@ -2763,6 +2763,7 @@ class ApiClient {
     funnel_id?: string | null;
     compare_start?: string;
     compare_end?: string;
+    utm_group_by?: 'source' | 'medium' | 'campaign' | 'content';
   }): Promise<import('@/types/funnel').FunnelDashboardResponse> {
     const { funnel_id, ...rest } = params;
     const response = await this.client.get('/funnels/dashboard', {

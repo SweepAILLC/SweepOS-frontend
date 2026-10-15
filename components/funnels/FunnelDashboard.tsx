@@ -63,6 +63,13 @@ const TOOLTIP_STYLE = {
 // Same blue palette as Terminal's "Leads by Source" pie.
 const SOURCE_COLORS = ['#93c5fd', '#60a5fa', '#3b82f6', '#2563eb', '#1d4ed8'];
 
+const UTM_GROUP_OPTIONS: { value: 'source' | 'medium' | 'campaign' | 'content'; label: string }[] = [
+  { value: 'source', label: 'Source' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'campaign', label: 'Campaign' },
+  { value: 'content', label: 'Ad' },
+];
+
 function toYmd(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -88,12 +95,25 @@ function weekLabel(ymd: string): string {
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  subtitle,
+  action,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 min-w-0">
-      <div className="mb-3">
-        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</div>
-        {subtitle ? <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</div> : null}
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</div>
+          {subtitle ? <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">{subtitle}</div> : null}
+        </div>
+        {action ? <div className="flex-shrink-0">{action}</div> : null}
       </div>
       {children}
     </div>
@@ -363,6 +383,7 @@ export default function FunnelDashboard({
   const [spendOpen, setSpendOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [utmGroupBy, setUtmGroupBy] = useState<'source' | 'medium' | 'campaign' | 'content'>('source');
   // Snapshot each view compares against (null = historic averages / no model).
   const [paidSnapshot, setPaidSnapshot] = useState<FunnelSimulatorScenario | null>(null);
   const [organicSnapshot, setOrganicSnapshot] = useState<FunnelSimulatorScenario | null>(null);
@@ -420,6 +441,7 @@ export default function FunnelDashboard({
         end,
         channel: effectiveChannel,
         funnel_id: funnelId,
+        utm_group_by: utmGroupBy,
       })
       .then((res) => {
         if (!cancelled) setData(res);
@@ -433,7 +455,7 @@ export default function FunnelDashboard({
     return () => {
       cancelled = true;
     };
-  }, [start, end, effectiveChannel, funnelId, reloadKey, isOrganicView]);
+  }, [start, end, effectiveChannel, funnelId, reloadKey, isOrganicView, utmGroupBy]);
 
   const viewTitle = funnelId
     ? funnels.find((f) => f.id === funnelId)?.name ?? 'Funnel'
@@ -702,7 +724,24 @@ export default function FunnelDashboard({
           </div>
         </Panel>
 
-        <Panel title="UTM sources" subtitle="Grouped by utm_source on the lead">
+        <Panel
+          title="UTM sources"
+          subtitle={`Grouped by utm_${utmGroupBy} on the lead`}
+          action={
+            <select
+              value={utmGroupBy}
+              onChange={(e) => setUtmGroupBy(e.target.value as typeof utmGroupBy)}
+              className="text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-gray-900 dark:text-gray-100"
+              aria-label="Group UTM sources by"
+            >
+              {UTM_GROUP_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          }
+        >
           {data?.sources.length ? (
             <div className="flex flex-col gap-4 min-w-0">
               <div className="w-full min-w-0 max-w-full h-56 overflow-hidden">
