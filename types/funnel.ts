@@ -233,8 +233,10 @@ export interface FunnelScorecardMetric {
 
 export interface FunnelScorecardWeek {
   week_start: string;
-  /** Current week: shown, but excluded from the benchmark and gets no arrow. */
+  /** Not a complete week yet (current or future): shown, but excluded from the benchmark and gets no arrow. */
   in_progress: boolean;
+  /** Monday is still in the future: no data exists for it yet. Always shown as a column regardless. */
+  not_started: boolean;
 }
 
 export interface FunnelScorecard {
