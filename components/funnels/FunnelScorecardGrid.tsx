@@ -200,10 +200,17 @@ function GroupTable({
           <tbody>
             {rows.map((m) => {
               const modeled = modelValue(m.key);
-              const benchmark = modeled ?? m.benchmark;
-              const fellBack = model != null && modeled == null && m.benchmark != null;
-              const rowDim = !m.editable;
-              const rowTitle = rowDim ? 'Calculated from other rows' : undefined;
+              // Priority: the snapshot's own number, else the usual benchmark (the compare
+              // range's average when the date filter's compare is on), else — when that's
+              // undefined (e.g. the compare period logged no spend) — this range's own
+              // complete-week average, so a metric with real current data never shows blank.
+              const usedModelFallback = model != null && modeled == null && m.benchmark != null;
+              const usedRangeFallback = modeled == null && m.benchmark == null && m.range_average != null;
+              const benchmark = modeled ?? m.benchmark ?? m.range_average;
+              const fellBack = usedModelFallback || usedRangeFallback;
+              const rowDim = !m.editable && group !== 'economics';
+              const rowReadOnly = !m.editable;
+              const rowTitle = rowReadOnly ? 'Calculated from other rows — not directly editable' : undefined;
               return (
                 <tr
                   key={m.key}
@@ -219,9 +226,18 @@ function GroupTable({
                     }`}
                   >
                     {m.label}
+                    {rowReadOnly && !rowDim ? (
+                      <span aria-hidden className="ml-1 text-[9px] text-gray-400 dark:text-gray-500">🔒</span>
+                    ) : null}
                   </th>
                   <td
-                    title={fellBack ? 'Not in the snapshot — historic average shown' : rowTitle}
+                    title={
+                      usedModelFallback
+                        ? "Not in the snapshot — benchmark shown"
+                        : usedRangeFallback
+                          ? "No data in the compare period — this range's average shown"
+                          : rowTitle
+                    }
                     className={`text-right py-1 px-2 tabular-nums font-medium border-t border-white/5 ${benchmarkTint} ${
                       fellBack ? 'italic opacity-70' : rowDim ? 'opacity-70' : ''
                     }`}
