@@ -32,7 +32,15 @@ const FIELD_LABELS: Record<string, string> = {
   notes: 'Notes',
   visitor_id: 'Sweep visitor id',
   session_id: 'Sweep session id',
+  utm_source: 'UTM source',
+  utm_medium: 'UTM medium',
+  utm_campaign: 'UTM campaign',
+  utm_term: 'UTM term',
+  utm_content: 'UTM content',
 };
+
+const LEAD_TARGETS = ['email', 'phone', 'name', 'first_name', 'last_name', 'instagram', 'notes', 'visitor_id', 'session_id'];
+const UTM_TARGETS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
 
 function FieldMapEditor({
   state,
@@ -62,12 +70,16 @@ function FieldMapEditor({
     }
   };
 
+  const availableTargets = new Set(state.map_targets);
+  const leadRows = LEAD_TARGETS.filter((t) => availableTargets.has(t));
+  const utmRows = UTM_TARGETS.filter((t) => availableTargets.has(t));
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-gray-600 dark:text-gray-300">
-          Email, phone, name, Instagram and UTMs are detected automatically. Every other field is saved as the
-          lead&apos;s answers.{mapped ? ` ${mapped} field(s) mapped by hand.` : ''}
+          Email, phone, name, Instagram and UTMs are usually detected automatically from common field names. Every
+          other field is saved as the lead&apos;s answers.{mapped ? ` ${mapped} field(s) mapped by hand.` : ''}
         </p>
         {!open ? (
           <button
@@ -83,24 +95,66 @@ function FieldMapEditor({
         ) : null}
       </div>
       {open ? (
-        <div className="space-y-2">
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            Only needed when detection misses a field. Use the field&apos;s key from your tool, with dots for nested
-            data (e.g. <code>contact.email</code> or <code>answers.0.text</code>).
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {state.map_targets.map((target) => (
-              <label key={target} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
-                <span className="w-28 shrink-0">{FIELD_LABELS[target] ?? target}</span>
-                <input
-                  value={draft[target] ?? ''}
-                  onChange={(e) => setDraft((d) => ({ ...d, [target]: e.target.value }))}
-                  placeholder="auto"
-                  className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
-                />
-              </label>
-            ))}
+        <div className="space-y-3">
+          <div className="space-y-1.5 rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-white/5 p-3 text-xs text-gray-600 dark:text-gray-300">
+            <p>
+              Only fill in a field below if Sweep isn&apos;t picking it up automatically. For each one, type the exact
+              JSON key your tool sends it under — not a label you see on your form, but the key in the raw
+              submission data.
+            </p>
+            <p>
+              <strong>Not sure what the key is?</strong> Open &quot;Recent deliveries&quot; below and look at the
+              &quot;Other fields&quot; column on a submission — it lists the exact keys we couldn&apos;t match, ready to
+              paste in here.
+            </p>
+            <p>
+              <strong>Nested data:</strong> join keys with a dot to drill into the payload. If your tool sends{' '}
+              <code className="rounded bg-black/5 dark:bg-white/10 px-1">{'{ "contact": { "email": "..." } }'}</code>,
+              map Email to <code className="rounded bg-black/5 dark:bg-white/10 px-1">contact.email</code>. For a
+              list of answers, use the index: <code className="rounded bg-black/5 dark:bg-white/10 px-1">answers.0.text</code>{' '}
+              is the first answer&apos;s text.
+            </p>
+            <p>Leave a field blank (&quot;auto&quot;) to keep automatic detection for it.</p>
           </div>
+
+          {leadRows.length ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Lead info</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {leadRows.map((target) => (
+                  <label key={target} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
+                    <span className="w-28 shrink-0">{FIELD_LABELS[target] ?? target}</span>
+                    <input
+                      value={draft[target] ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, [target]: e.target.value }))}
+                      placeholder="auto"
+                      className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {utmRows.length ? (
+            <div>
+              <p className="text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1">Campaign (UTM)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {utmRows.map((target) => (
+                  <label key={target} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
+                    <span className="w-28 shrink-0">{FIELD_LABELS[target] ?? target}</span>
+                    <input
+                      value={draft[target] ?? ''}
+                      onChange={(e) => setDraft((d) => ({ ...d, [target]: e.target.value }))}
+                      placeholder="auto"
+                      className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
           <div className="flex gap-2">
             <button type="button" onClick={() => void save()} disabled={saving} className={buttonPrimary}>
