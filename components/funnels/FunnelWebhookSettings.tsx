@@ -41,6 +41,79 @@ const FIELD_LABELS: Record<string, string> = {
 
 const LEAD_TARGETS = ['email', 'phone', 'name', 'first_name', 'last_name', 'instagram', 'notes', 'visitor_id', 'session_id'];
 const UTM_TARGETS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'];
+const CUSTOM_KEY = '__custom__';
+
+/** One field-map row. Shows a dropdown of keys seen in recent deliveries when there are
+ *  any (pick, don't type); falls back to a plain text input otherwise or for a one-off key. */
+function FieldKeyInput({
+  value,
+  candidates,
+  onChange,
+}: {
+  value: string;
+  candidates: string[];
+  onChange: (v: string) => void;
+}) {
+  const inCandidates = value !== '' && candidates.includes(value);
+  const [customMode, setCustomMode] = useState(value !== '' && !inCandidates);
+
+  if (!candidates.length) {
+    return (
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="auto"
+        className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+      />
+    );
+  }
+
+  if (customMode) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center gap-1">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="auto"
+          className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+        />
+        <button
+          type="button"
+          onClick={() => {
+            setCustomMode(false);
+            onChange('');
+          }}
+          className="shrink-0 text-[11px] text-gray-500 dark:text-gray-400 underline"
+        >
+          Pick
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === CUSTOM_KEY) {
+          setCustomMode(true);
+          onChange('');
+        } else {
+          onChange(e.target.value);
+        }
+      }}
+      className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+    >
+      <option value="">auto</option>
+      {candidates.map((k) => (
+        <option key={k} value={k}>
+          {k}
+        </option>
+      ))}
+      <option value={CUSTOM_KEY}>Type a key…</option>
+    </select>
+  );
+}
 
 function FieldMapEditor({
   state,
@@ -73,6 +146,7 @@ function FieldMapEditor({
   const availableTargets = new Set(state.map_targets);
   const leadRows = LEAD_TARGETS.filter((t) => availableTargets.has(t));
   const utmRows = UTM_TARGETS.filter((t) => availableTargets.has(t));
+  const candidateKeys = Array.from(new Set(state.recent.flatMap((d) => d.extra_fields))).sort();
 
   return (
     <div className="space-y-2">
@@ -102,19 +176,26 @@ function FieldMapEditor({
               JSON key your tool sends it under — not a label you see on your form, but the key in the raw
               submission data.
             </p>
+            {candidateKeys.length ? (
+              <p>
+                <strong>Pick, don&apos;t type:</strong> each dropdown below is filled with the exact keys seen in
+                recent deliveries (the same ones listed under &quot;Other fields&quot;), so you can just choose the
+                right one. Use &quot;Type a key…&quot; only for a key that hasn&apos;t shown up in a delivery yet.
+              </p>
+            ) : (
+              <p>
+                <strong>Not sure what the key is?</strong> Send a test submission first — once a delivery shows up
+                below, its unmatched keys appear in a dropdown here so you can just pick the right one instead of
+                typing it.
+              </p>
+            )}
             <p>
-              <strong>Not sure what the key is?</strong> Open &quot;Recent deliveries&quot; below and look at the
-              &quot;Other fields&quot; column on a submission — it lists the exact keys we couldn&apos;t match, ready to
-              paste in here.
+              <strong>Nested data:</strong> a key like <code className="rounded bg-black/5 dark:bg-white/10 px-1">contact.email</code>{' '}
+              means the payload had <code className="rounded bg-black/5 dark:bg-white/10 px-1">{'{ "contact": { "email": "..." } }'}</code>;{' '}
+              <code className="rounded bg-black/5 dark:bg-white/10 px-1">answers.0.text</code> means the first item
+              in an <code className="rounded bg-black/5 dark:bg-white/10 px-1">answers</code> list.
             </p>
-            <p>
-              <strong>Nested data:</strong> join keys with a dot to drill into the payload. If your tool sends{' '}
-              <code className="rounded bg-black/5 dark:bg-white/10 px-1">{'{ "contact": { "email": "..." } }'}</code>,
-              map Email to <code className="rounded bg-black/5 dark:bg-white/10 px-1">contact.email</code>. For a
-              list of answers, use the index: <code className="rounded bg-black/5 dark:bg-white/10 px-1">answers.0.text</code>{' '}
-              is the first answer&apos;s text.
-            </p>
-            <p>Leave a field blank (&quot;auto&quot;) to keep automatic detection for it.</p>
+            <p>Leave a field as &quot;auto&quot; to keep automatic detection for it.</p>
           </div>
 
           {leadRows.length ? (
@@ -124,11 +205,10 @@ function FieldMapEditor({
                 {leadRows.map((target) => (
                   <label key={target} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
                     <span className="w-28 shrink-0">{FIELD_LABELS[target] ?? target}</span>
-                    <input
+                    <FieldKeyInput
                       value={draft[target] ?? ''}
-                      onChange={(e) => setDraft((d) => ({ ...d, [target]: e.target.value }))}
-                      placeholder="auto"
-                      className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+                      candidates={candidateKeys}
+                      onChange={(v) => setDraft((d) => ({ ...d, [target]: v }))}
                     />
                   </label>
                 ))}
@@ -143,11 +223,10 @@ function FieldMapEditor({
                 {utmRows.map((target) => (
                   <label key={target} className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-200">
                     <span className="w-28 shrink-0">{FIELD_LABELS[target] ?? target}</span>
-                    <input
+                    <FieldKeyInput
                       value={draft[target] ?? ''}
-                      onChange={(e) => setDraft((d) => ({ ...d, [target]: e.target.value }))}
-                      placeholder="auto"
-                      className="min-w-0 flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1 font-mono"
+                      candidates={candidateKeys}
+                      onChange={(v) => setDraft((d) => ({ ...d, [target]: v }))}
                     />
                   </label>
                 ))}
