@@ -106,7 +106,7 @@ export default function FunnelOverviewTab({ funnel, onReload }: FunnelOverviewTa
               />
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Used to auto-match new incoming events to this funnel. Switching domains (e.g. to run tests
-                on a staging URL) won't affect leads or events already recorded.
+                on a staging URL) won&apos;t affect leads or events already recorded.
               </p>
             </div>
             <div>
