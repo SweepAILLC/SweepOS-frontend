@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { FunnelWithSteps } from '@/types/funnel';
 import GhlFunnelSettings from '@/components/funnels/GhlFunnelSettings';
+import FunnelVideoTrackingCard from '@/components/funnels/FunnelVideoTrackingCard';
 import { apiClient } from '@/lib/api';
 
 interface FunnelOverviewTabProps {
@@ -163,6 +164,8 @@ export default function FunnelOverviewTab({ funnel, onReload }: FunnelOverviewTa
           </div>
         )}
       </div>
+
+      <FunnelVideoTrackingCard funnel={funnel} />
 
       {/* Quick Stats */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

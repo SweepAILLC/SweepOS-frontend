@@ -202,6 +202,7 @@ export interface FunnelDashboardResponse {
   funnel_id: string | null;
   tracking: { status: FunnelTrackingStatus; last_event_at: string | null; errors_24h: number };
   visitors: number | null;
+  vsl_watch: { avg_seconds: number; sessions: number } | null;
   summary: import('@/types/kpi').KpiFunnelSummaryResponse;
   money: FunnelDashboardMoney | null;
   weekly: FunnelDashboardWeek[];

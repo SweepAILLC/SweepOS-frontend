@@ -90,6 +90,12 @@ function usd(v: number | null | undefined, digits = 0): string {
   return `$${v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
+function watchTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
 function weekLabel(ymd: string): string {
   const [y, m, d] = ymd.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
@@ -468,6 +474,7 @@ export default function FunnelDashboard({
   const summary = data?.summary ?? null;
   const scorecard = data?.scorecard ?? null;
   const tracking = TRACKING[data?.tracking.status ?? 'no_funnels'];
+  const vslWatch = data?.vsl_watch ?? null;
 
   const stageBars = useMemo(() => {
     if (!summary) return [];
@@ -706,7 +713,18 @@ export default function FunnelDashboard({
       </Panel>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Panel title="Where it leaks" subtitle="People reaching each stage in this range">
+        <Panel
+          title="Where it leaks"
+          subtitle="People reaching each stage in this range"
+          action={
+            vslWatch ? (
+              <div className="text-right" title={`Avg across ${vslWatch.sessions} watch session${vslWatch.sessions === 1 ? '' : 's'}`}>
+                <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Avg VSL watch</div>
+                <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">{watchTime(vslWatch.avg_seconds)}</div>
+              </div>
+            ) : undefined
+          }
+        >
           <div className="h-56">
             {stageBars.length ? (
               <ResponsiveContainer width="100%" height="100%">
