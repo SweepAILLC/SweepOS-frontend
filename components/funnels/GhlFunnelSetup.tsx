@@ -373,6 +373,8 @@ function ImportCard({
 /**
  * Setup for a GoHighLevel-paired funnel: visitor snippet, optional real-time
  * webhook, and lead import status. Shown after create and in funnel settings.
+ * Video tracking is GHL-agnostic — see `FunnelVideoTrackingCard`, rendered once per
+ * funnel from `FunnelOverviewTab` regardless of GHL pairing, not duplicated here.
  */
 export default function GhlFunnelSetup({
   funnel,
