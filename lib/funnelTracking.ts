@@ -51,9 +51,9 @@ export function ghlWebhookUrl(orgId: string, apiBase: string = API_BASE_URL): st
  * `timeupdate`/`play`/`pause`/`ended` events — not a timer guess — so play, percent
  * milestones, and accumulated watched-seconds are accurate even through pause/seek.
  *
- * Milestone/play/complete event_name strings must match rows in the funnel's Steps
- * tab (same rule as the rest of this file) — rename via `eventPrefix` if your step
- * names differ from the `${eventPrefix}_*` default.
+ * Events post to `/funnels/events` without requiring Steps-tab rows. Dashboard
+ * aggregates avg watch time + play rate as KPIs; video names are omitted from
+ * step drop-off. Rename via `eventPrefix` if you already fire `${eventPrefix}_*`.
  *
  * Shares the same visitor_id/session_id keys as `buildVisitorSnippet` so video events
  * attribute to the same session/UTM.

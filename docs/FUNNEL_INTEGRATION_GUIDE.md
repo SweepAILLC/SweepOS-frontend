@@ -780,7 +780,7 @@ For a VSL or any `<video>` element (local mp4 or direct src) on the funnel. Gene
 | `video_watch_heartbeat` | Every `heartbeatSeconds` (default 15) of accumulated watch time |
 | `video_complete` | `ended` event |
 
-Same rule as every other tracked step: **these `video_*` names must exist as rows in the funnel's Steps tab** or they won't surface on the dashboard. Rename via `eventPrefix` if your Steps tab uses different names.
+Do **not** add `video_*` (or `vsl_*`) names as Steps-tab rows. Ingest still stores the events; the dashboard shows **avg VSL watch time** and **play rate** as KPIs. Video event names are excluded from step drop-off. Rename via `eventPrefix` if your page already fires a different prefix.
 
 `metadata` on every event: `video_src`, `video_index` (position if multiple videos on one page), `current_time`, `duration`, `percent`, `watched_seconds`.
 
@@ -791,7 +791,7 @@ import { buildVideoTrackingSnippet } from '../../lib/funnelTracking'; // adjust 
 
 const snippetHtml = buildVideoTrackingSnippet(FUNNEL_ID, {
   videoSelector: 'video',   // CSS selector; querySelectorAll, so multiple videos on one page all get tracked
-  eventPrefix: 'video',     // must match your Steps tab naming, e.g. 'vsl' → vsl_play, vsl_25, ...
+  eventPrefix: 'video',     // optional; 'vsl' → vsl_play, vsl_25, … (still not a funnel step)
   heartbeatSeconds: 15,
   apiBase: API_BASE_URL,
 });
