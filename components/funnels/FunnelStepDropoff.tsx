@@ -21,6 +21,11 @@ function pct(v: number | null | undefined): string {
   return v == null ? '—' : `${v.toFixed(0)}%`;
 }
 
+/** Snippet events (video_play, vsl_50, …) are dashboard KPIs, not drop-off steps. */
+function isVideoTrackingStep(eventName: string | undefined): boolean {
+  return /_(?:play|pause|watch_heartbeat|complete|25|50|75|90|100)$/i.test(eventName ?? '');
+}
+
 export default function FunnelStepDropoff({ funnelId, start, end, reloadKey = 0 }: FunnelStepDropoffProps) {
   const [steps, setSteps] = useState<StepCount[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,12 +52,13 @@ export default function FunnelStepDropoff({ funnelId, start, end, reloadKey = 0 
   }, [funnelId, start, end, reloadKey]);
 
   const view = useMemo(() => {
-    if (!steps?.length) return null;
-    const byVisitor = steps.some((s) => (s.unique_visitors ?? 0) > 0);
+    const funnelSteps = (steps ?? []).filter((s) => !isVideoTrackingStep(s.event_name));
+    if (!funnelSteps.length) return null;
+    const byVisitor = funnelSteps.some((s) => (s.unique_visitors ?? 0) > 0);
     const valueOf = (s: StepCount) => (byVisitor ? s.unique_visitors ?? 0 : s.count);
-    const rows = steps.map((s, i) => {
+    const rows = funnelSteps.map((s, i) => {
       const value = valueOf(s);
-      const prev = i > 0 ? valueOf(steps[i - 1]) : null;
+      const prev = i > 0 ? valueOf(funnelSteps[i - 1]) : null;
       const kept = prev ? (value / prev) * 100 : null;
       return { step: s, value, kept, lost: kept == null ? null : Math.max(0, 100 - kept) };
     });

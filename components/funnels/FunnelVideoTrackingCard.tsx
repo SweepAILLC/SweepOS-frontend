@@ -36,8 +36,8 @@ export default function FunnelVideoTrackingCard({ funnel }: { funnel: Funnel }) 
       </p>
       <div className="space-y-1">
         <label htmlFor={`video-event-prefix-${funnel.id}`} className="block text-xs text-gray-500 dark:text-gray-400">
-          Event name prefix — must match the Steps tab (e.g. <code>{prefix}_play</code>, <code>{prefix}_50</code>,{' '}
-          <code>{prefix}_complete</code>)
+          Event name prefix (e.g. <code>{prefix}_play</code>, <code>{prefix}_50</code>,{' '}
+          <code>{prefix}_complete</code>) — do not add these as Steps
         </label>
         <input
           id={`video-event-prefix-${funnel.id}`}
@@ -60,10 +60,8 @@ export default function FunnelVideoTrackingCard({ funnel }: { funnel: Funnel }) 
         </button>
       </div>
       <p className="text-xs text-gray-500 dark:text-gray-400">
-        Add rows <code>{prefix}_play</code>, <code>{prefix}_25</code>, <code>{prefix}_50</code>,{' '}
-        <code>{prefix}_75</code>, <code>{prefix}_90</code>, <code>{prefix}_100</code>,{' '}
-        <code>{prefix}_watch_heartbeat</code>, <code>{prefix}_complete</code> to this funnel&apos;s Steps tab or
-        they won&apos;t show up in analytics.
+        Events ingest without Steps rows. Dashboard shows avg watch time and play rate as KPIs.
+        Leave <code>{prefix}_*</code> off the Steps tab so they do not pollute drop-off.
       </p>
     </div>
   );

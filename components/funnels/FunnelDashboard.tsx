@@ -712,18 +712,44 @@ export default function FunnelDashboard({
         </div>
       </Panel>
 
+      {vslWatch ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="glass-card rounded-xl border border-white/10 px-4 py-3">
+            <div
+              className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
+              title={`Average across ${vslWatch.sessions} watch session${vslWatch.sessions === 1 ? '' : 's'}`}
+            >
+              Avg VSL watch time
+            </div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+              {watchTime(vslWatch.avg_seconds)}
+            </div>
+            <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+              {vslWatch.sessions} session{vslWatch.sessions === 1 ? '' : 's'} with video
+            </div>
+          </div>
+          <div className="glass-card rounded-xl border border-white/10 px-4 py-3">
+            <div
+              className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400"
+              title="Share of landing visitors who hit play on the VSL"
+            >
+              Play rate
+            </div>
+            <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-gray-100 tabular-nums">
+              {vslWatch.play_rate != null ? `${Math.round(vslWatch.play_rate * 100)}%` : '—'}
+            </div>
+            <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
+              {vslWatch.plays != null ? `${vslWatch.plays} play${vslWatch.plays === 1 ? '' : 's'}` : 'Visitors who started the video'}
+              {data?.visitors != null ? ` · ${data.visitors} visitors` : ''}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel
           title="Where it leaks"
           subtitle="People reaching each stage in this range"
-          action={
-            vslWatch ? (
-              <div className="text-right" title={`Avg across ${vslWatch.sessions} watch session${vslWatch.sessions === 1 ? '' : 's'}`}>
-                <div className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">Avg VSL watch</div>
-                <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums">{watchTime(vslWatch.avg_seconds)}</div>
-              </div>
-            ) : undefined
-          }
         >
           <div className="h-56">
             {stageBars.length ? (
