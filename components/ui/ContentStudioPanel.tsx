@@ -2,17 +2,34 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import {
   apiClient,
   ContentStudioBootstrap,
   ContentStudioBundle,
 } from '@/lib/api';
+import { DateRangeProvider } from '@/contexts/DateRangeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import { formatApiError } from '@/lib/apiError';
+import AdsTab from '@/components/marketing/AdsTab';
 import IdeasTab from '@/components/marketing/IdeasTab';
 import PerformanceTab from '@/components/marketing/PerformanceTab';
 
+type SubTab = 'organic' | 'ads';
+
+const SUB_TABS: { id: SubTab; label: string }[] = [
+  { id: 'organic', label: 'Organic' },
+  { id: 'ads', label: 'Ads' },
+];
+
+function parseSub(raw: string | string[] | undefined): SubTab {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value === 'ads' ? 'ads' : 'organic';
+}
+
 export default function ContentStudioPanel() {
+  const router = useRouter();
+  const sub = parseSub(router.query.sub);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { setLoading: setGlobalLoading } = useLoading();
@@ -113,8 +130,19 @@ export default function ContentStudioPanel() {
     });
   };
 
-  const headerBlurb = useMemo(
-    () => (
+  const setSub = (next: SubTab) => {
+    void router.replace(
+      { pathname: router.pathname, query: { ...router.query, tab: 'content_studio', sub: next } },
+      undefined,
+      { shallow: true }
+    );
+  };
+
+  const headerBlurb = useMemo(() => {
+    if (sub === 'ads') {
+      return 'Fatigue, messaging ceiling, and scale signals from synced Meta Ads. Alerts recommend. Pause is the only write.';
+    }
+    return (
       <>
         Instagram period metrics, top posts, and underperformers — then video concepts grounded in that performance
         and your{' '}
@@ -123,9 +151,8 @@ export default function ContentStudioPanel() {
         </Link>{' '}
         ICP.
       </>
-    ),
-    []
-  );
+    );
+  }, [sub]);
 
   return (
     <div className="max-w-6xl mx-auto w-full px-1 pb-12 space-y-6">
@@ -134,6 +161,28 @@ export default function ContentStudioPanel() {
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{headerBlurb}</p>
       </div>
 
+      <div className="flex gap-1 p-1 rounded-xl bg-gray-100/80 dark:bg-gray-800/60 w-fit">
+        {SUB_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setSub(tab.id)}
+            className={`px-3 py-1.5 text-sm font-medium rounded-lg ${
+              sub === tab.id
+                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {sub === 'ads' ? (
+        <DateRangeProvider storageKey="marketing-intel-ads" defaultPreset="last_28" defaultCompare="previous_period">
+          <AdsTab />
+        </DateRangeProvider>
+      ) : (
       <div className="space-y-10">
         <PerformanceTab />
         <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 space-y-4">
@@ -163,6 +212,7 @@ export default function ContentStudioPanel() {
           />
         </div>
       </div>
+      )}
     </div>
   );
 }

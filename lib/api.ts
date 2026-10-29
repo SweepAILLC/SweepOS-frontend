@@ -228,6 +228,168 @@ export interface StripeConnectionStatus {
   last_webhook_processed_at?: string | null;
 }
 
+// --- Meta Ads Performance Intel (direct Marketing API — no Composio) ---
+
+export interface MetaAdsStatus {
+  connected: boolean;
+  app_configured: boolean;
+  meta_ad_account_id?: string | null;
+  token_expires_at?: string | null;
+  last_sync_at?: string | null;
+  message?: string | null;
+}
+
+export interface AdsKpiWindow {
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  cpm_cents: number | null;
+  frequency: number | null;
+}
+
+export interface AdsSeriesPoint {
+  date: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  cpm_cents: number | null;
+  frequency: number | null;
+}
+
+export interface AdsAlert {
+  id: string;
+  level: string;
+  entity_id: string;
+  alert_type: string;
+  severity: string;
+  status: string;
+  recommended_action: string;
+  playbook?: string | null;
+  entity_name?: string | null;
+  metrics: Record<string, unknown>;
+  first_detected_at?: string | null;
+}
+
+export interface AdsCampaignRow {
+  id: string;
+  meta_campaign_id: string;
+  name?: string | null;
+  objective?: string | null;
+  status?: string | null;
+  sweep_status?: string | null;
+  daily_budget_cents?: number | null;
+  pill: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  series: AdsSeriesPoint[];
+  ceiling_daily_spend_cents?: number | null;
+  funnel_id?: string | null;
+}
+
+export interface AdsDashboard {
+  connected: boolean;
+  app_configured: boolean;
+  last_sync_at?: string | null;
+  currency?: string | null;
+  settings: { target_cpr_cents?: number | null; min_roas?: number | null };
+  kpis: { recent: AdsKpiWindow; prior: AdsKpiWindow; delta: Record<string, number | null> };
+  campaigns: AdsCampaignRow[];
+  alerts: AdsAlert[];
+  days: number;
+}
+
+export interface AdsBreakdownAd {
+  id: string;
+  meta_ad_id: string;
+  name?: string | null;
+  thumbnail_url?: string | null;
+  effective_status?: string | null;
+  spend_cents: number;
+  spend_share: number;
+  results: number;
+  cpr_cents: number | null;
+  frequency: number | null;
+  ctr: number | null;
+  fatigued: boolean;
+}
+
+export interface AdsBreakdownAdSet {
+  id: string;
+  meta_adset_id: string;
+  name?: string | null;
+  optimization_goal?: string | null;
+  effective_status?: string | null;
+  learning_stage?: string | null;
+  daily_budget_cents?: number | null;
+  results_7: number;
+  active_ads: number;
+  bench_target: number;
+  series: AdsSeriesPoint[];
+  ads: AdsBreakdownAd[];
+}
+
+export interface FunnelCreativeAd {
+  id: string;
+  meta_ad_id: string;
+  name?: string | null;
+  thumbnail_url?: string | null;
+  effective_status?: string | null;
+  ad_set_id?: string | null;
+  ad_set_name?: string | null;
+  campaign_name?: string | null;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  prior_spend_cents?: number | null;
+  prior_results?: number | null;
+  fatigued: boolean;
+  series: AdsSeriesPoint[];
+}
+
+export interface FunnelCreativeGrid {
+  ads: FunnelCreativeAd[];
+  currency?: string | null;
+  days: number;
+  start?: string | null;
+  end: string;
+}
+
+export interface AdsBreakdown {
+  campaign: {
+    id: string;
+    meta_campaign_id: string;
+    name?: string | null;
+    sweep_status?: string | null;
+    status?: string | null;
+    series: AdsSeriesPoint[];
+    ceiling_daily_spend_cents?: number | null;
+  };
+  ad_sets: AdsBreakdownAdSet[];
+  days: number;
+}
+
+export interface MetaAdsLinkedCampaign {
+  id: string;
+  meta_campaign_id: string;
+  name: string | null;
+}
+
+export interface MetaAdsFunnelMapping {
+  funnel_id: string;
+  funnel_name: string;
+  linked_campaigns: MetaAdsLinkedCampaign[];
+}
+
+export interface MetaAdsCampaignOption {
+  id: string;
+  name: string;
+  funnel_id: string | null;
+}
+
 // --- Portal shared pads (consulting-tier multi-tab live notepad) ---
 
 export const MAX_PORTAL_SHARED_PADS = 10;
@@ -1677,6 +1839,144 @@ class ApiClient {
     return response.data as { ok: boolean; composio_configured: boolean; deleted: boolean };
   }
 
+  // Meta Ads Performance Intel (direct Marketing API — no Composio)
+  async getMetaAdsStatus() {
+    const response = await this.client.get('/marketing-intel/ads/status');
+    return response.data as MetaAdsStatus;
+  }
+
+  async connectMetaAds() {
+    const response = await this.client.post('/marketing-intel/ads/connect');
+    return response.data as { redirect_url: string };
+  }
+
+  async syncMetaAds(full = false) {
+    const response = await this.client.post('/marketing-intel/ads/sync', null, { params: { full } });
+    return response.data as {
+      ok: boolean;
+      queued: boolean;
+      message: string;
+      cooldown_seconds: number;
+      last_sync_at?: string | null;
+    };
+  }
+
+  async disconnectMetaAds() {
+    const response = await this.client.delete('/marketing-intel/ads/disconnect');
+    return response.data as { ok: boolean; disconnected: boolean };
+  }
+
+  async createMetaAdsCampaign(body: { name: string; objective: string }) {
+    const response = await this.client.post('/marketing-intel/ads/campaigns', body);
+    return response.data as { ok: boolean; id?: string };
+  }
+
+  async setMetaAdsEntityStatus(entityId: string, status: string) {
+    const response = await this.client.post(`/marketing-intel/ads/entities/${entityId}/status`, { status });
+    return response.data as { ok: boolean; id: string; status: string };
+  }
+
+  async getMetaAdsPages() {
+    const response = await this.client.get('/marketing-intel/ads/pages');
+    return response.data as { pages: Array<{ id: string; name: string }> };
+  }
+
+  async getMetaAdsPageEngagement(pageId: string) {
+    const response = await this.client.get(`/marketing-intel/ads/pages/${pageId}/engagement`);
+    return response.data as {
+      id: string;
+      name: string;
+      engagement?: { count: number; social_sentence?: string };
+      fan_count?: number;
+    };
+  }
+
+  async getAdsDashboard(range: {
+    start?: string;
+    end: string;
+    compare_start?: string;
+    compare_end?: string;
+    funnelId?: string;
+  }) {
+    const response = await this.client.get('/marketing-intel/ads/dashboard', {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.compare_start && range.compare_end
+          ? { compare_start: range.compare_start, compare_end: range.compare_end }
+          : {}),
+        ...(range.funnelId ? { funnel_id: range.funnelId } : {}),
+      },
+    });
+    return response.data as AdsDashboard;
+  }
+
+  async getFunnelCreativeGrid(
+    funnelId: string,
+    range: { start?: string; end: string; campaignId?: string | null }
+  ) {
+    const response = await this.client.get(`/marketing-intel/ads/funnels/${funnelId}/creative-grid`, {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.campaignId ? { campaign_id: range.campaignId } : {}),
+      },
+    });
+    return response.data as FunnelCreativeGrid;
+  }
+
+  async getAdsCampaignBreakdown(campaignId: string, range: { start?: string; end: string }) {
+    const response = await this.client.get(`/marketing-intel/ads/campaigns/${campaignId}/breakdown`, {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+      },
+    });
+    return response.data as AdsBreakdown;
+  }
+
+  async ackAdsAlert(alertId: string) {
+    const response = await this.client.post(`/marketing-intel/ads/alerts/${alertId}/ack`);
+    return response.data as AdsAlert;
+  }
+
+  async setAdsCampaignSweepStatus(campaignId: string, sweepStatus: string | null) {
+    const response = await this.client.put(`/marketing-intel/ads/campaigns/${campaignId}/sweep-status`, {
+      sweep_status: sweepStatus,
+    });
+    return response.data as { ok: boolean; id: string; sweep_status: string | null };
+  }
+
+  async putAdsSettings(body: { target_cpr_cents: number | null; min_roas: number | null }) {
+    const response = await this.client.put('/marketing-intel/ads/settings', body);
+    return response.data as { ok: boolean; target_cpr_cents: number | null; min_roas: number | null };
+  }
+
+  async getMetaAdsAdAccounts() {
+    const response = await this.client.get('/marketing-intel/ads/ad-accounts');
+    return response.data as { accounts: { id: string; name: string | null; current: boolean }[] };
+  }
+
+  async setMetaAdsAdAccount(adAccountId: string) {
+    const response = await this.client.put('/marketing-intel/ads/ad-account', { ad_account_id: adAccountId });
+    return response.data as { ok: boolean; ad_account_id: string };
+  }
+
+  async getMetaAdsFunnelMappings() {
+    const response = await this.client.get('/marketing-intel/ads/funnel-mappings');
+    return response.data as { funnels: MetaAdsFunnelMapping[]; campaigns: MetaAdsCampaignOption[] };
+  }
+
+  async setCampaignFunnelLink(metaCampaignId: string, body: { funnel_id: string | null; auto_suggested?: boolean }) {
+    const response = await this.client.put(`/marketing-intel/ads/campaigns/${metaCampaignId}/funnel-link`, body);
+    return response.data as {
+      ok: boolean;
+      meta_campaign_id: string;
+      funnel_id: string | null;
+      weeks_synced: number;
+    };
+  }
+
   async getCloseSurveyEntryLink(regenerate = false) {
     const response = await this.client.get('/close-survey/entry-link', { params: { regenerate } });
     return response.data as CloseSurveyEntryLinkResponse;
@@ -2764,10 +3064,15 @@ class ApiClient {
     compare_start?: string;
     compare_end?: string;
     utm_group_by?: 'source' | 'medium' | 'campaign' | 'content';
+    campaign_id?: string | null;
   }): Promise<import('@/types/funnel').FunnelDashboardResponse> {
-    const { funnel_id, ...rest } = params;
+    const { funnel_id, campaign_id, ...rest } = params;
     const response = await this.client.get('/funnels/dashboard', {
-      params: funnel_id ? { ...rest, funnel_id } : rest,
+      params: {
+        ...rest,
+        ...(funnel_id ? { funnel_id } : {}),
+        ...(campaign_id ? { campaign_id } : {}),
+      },
       // Scans events for visitors; same headroom as funnel analytics.
       timeout: 120000,
     });

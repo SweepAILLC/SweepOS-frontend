@@ -3,11 +3,14 @@ import { formatKpiValue, trendClass, trendOf } from '@/lib/kpiFormat';
 import type { FunnelScorecard, FunnelScorecardGroup, FunnelScorecardMetric } from '@/types/funnel';
 
 /**
- * The Google Sheet, in the app: one self-contained table per group (Ads, Funnel, Close,
- * Economics), laid out 2x2 to use the page's width instead of one long vertical stack.
- * Each table has its own Metric/Benchmark/week header. Weeks are Mon-Sun columns, and the
- * Benchmark column (average of the range's complete weeks, or of the compare range's weeks
- * when the date filter's compare is on) sits next to each title.
+ * The Google Sheet, in the app: one unified table, no group-header divider rows —
+ * every metric is a plain row, in the backend's fixed order, sharing one
+ * Metric/Benchmark/week header. The ad-performance breakdown (creatives, campaign
+ * toggle) is a separate slide-in drawer (FunnelAdPerformanceDrawer) overlaying this
+ * table on open, not rows inside it.
+ * Weeks are Mon-Sun columns, and the Benchmark column (average of the range's
+ * complete weeks, or of the compare range's weeks when the date filter's compare
+ * is on) sits next to the header.
  * Every week cell carries a green/red arrow against that benchmark; the current
  * week is shown muted, with no arrow, since its counts are still partial. Weeks that
  * haven't started yet still get a column (muted, labeled "upcoming") so the grid's
@@ -15,14 +18,6 @@ import type { FunnelScorecard, FunnelScorecardGroup, FunnelScorecardMetric } fro
  * Count rows (leads, calls, cash, spend...) can be clicked and typed over per week;
  * rates and costs recompute from the edited counts on reload.
  */
-
-const GROUP_TITLES: Record<FunnelScorecardGroup, string> = {
-  ads: 'Ads',
-  funnel: 'Funnel',
-  close: 'Close',
-  economics: 'Economics',
-};
-const GROUP_ORDER: FunnelScorecardGroup[] = ['ads', 'funnel', 'close', 'economics'];
 
 function weekHeader(mondayYmd: string): string {
   const [y, m, d] = mondayYmd.split('-').map(Number);
@@ -140,38 +135,147 @@ function EditableValue({
   );
 }
 
-/** One group's self-contained table (own Metric/Benchmark/week header) — one of the 2x2 panels. */
-function GroupTable({
+/** One metric row within the shared table — same row shape whether it's a sheet metric or a folded-in per-campaign row. */
+function MetricRow({
+  metric: m,
   group,
-  rows,
   weeks,
   modelValue,
   benchmarkTint,
   model,
-  fromCompare,
-  compareLabel,
-  benchmarkWeeks,
   onEditCell,
 }: {
+  metric: FunnelScorecardMetric;
   group: FunnelScorecardGroup;
-  rows: FunnelScorecardMetric[];
   weeks: FunnelScorecard['weeks'];
   modelValue: (key: string) => number | null;
   benchmarkTint: string;
   model: { name: string; values: Record<string, number | null> } | null;
-  fromCompare: boolean;
-  compareLabel: string | null;
-  benchmarkWeeks: number;
   onEditCell?: (weekStart: string, metricKey: string, value: number | null) => Promise<void>;
 }) {
-  const stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-950';
+  const modeled = modelValue(m.key);
+  // Priority: the snapshot's own number, else the usual benchmark (the compare
+  // range's average when the date filter's compare is on), else — when that's
+  // undefined (e.g. the compare period logged no spend) — this range's own
+  // complete-week average, so a metric with real current data never shows blank.
+  const usedModelFallback = model != null && modeled == null && m.benchmark != null;
+  const usedRangeFallback = modeled == null && m.benchmark == null && m.range_average != null;
+  const benchmark = modeled ?? m.benchmark ?? m.range_average;
+  const fellBack = usedModelFallback || usedRangeFallback;
+  const rowDim = !m.editable && group !== 'economics';
+  const rowReadOnly = !m.editable;
+  const rowTitle = rowReadOnly ? 'Calculated from other rows — not directly editable' : undefined;
   return (
-    <div className="rounded-lg border border-black/5 dark:border-white/10 p-3 min-w-0">
-      <h3 className="text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-300 mb-1.5 pl-1">
-        {GROUP_TITLES[group]}
-      </h3>
-      <div className="overflow-x-auto">
-        <table className="w-auto text-sm border-separate border-spacing-0">
+    <tr
+      className={rowDim ? 'bg-black/[0.035] dark:bg-white/[0.035] hover:bg-black/[0.06] dark:hover:bg-white/[0.06]' : 'hover:bg-white/[0.03]'}
+    >
+      <th
+        scope="row"
+        title={rowTitle}
+        className={`sticky left-0 z-10 text-left font-normal py-1 pr-3 pl-1 border-t border-white/5 whitespace-nowrap ${
+          rowDim
+            ? 'bg-gray-50 dark:bg-gray-900/70 text-gray-400 dark:text-gray-600'
+            : 'bg-white dark:bg-gray-950 text-gray-800 dark:text-gray-200'
+        }`}
+      >
+        {m.label}
+        {rowReadOnly && !rowDim ? (
+          <span aria-hidden className="ml-1 text-[9px] text-gray-400 dark:text-gray-500">🔒</span>
+        ) : null}
+      </th>
+      <td
+        title={
+          usedModelFallback
+            ? "Not in the snapshot — benchmark shown"
+            : usedRangeFallback
+              ? "No data in the compare period — this range's average shown"
+              : rowTitle
+        }
+        className={`text-right py-1 px-2 tabular-nums font-medium border-t border-white/5 ${benchmarkTint} ${
+          fellBack ? 'italic opacity-70' : rowDim ? 'opacity-70' : ''
+        }`}
+      >
+        {formatKpiValue(benchmark, m.format)}
+      </td>
+      {weeks.map((w, i) => {
+        const value = m.values[i];
+        const trend = w.in_progress ? null : trendOf(value, benchmark);
+        const arrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : null;
+        return (
+          <td
+            key={w.week_start}
+            title={rowTitle}
+            className={`text-right py-1 px-2 tabular-nums border-t border-white/5 whitespace-nowrap ${
+              rowDim
+                ? 'text-gray-400 dark:text-gray-600'
+                : w.in_progress
+                ? 'text-gray-400 dark:text-gray-500'
+                : 'text-gray-900 dark:text-gray-100'
+            }`}
+          >
+            {onEditCell && m.editable ? (
+              <EditableValue metric={m} index={i} onSave={(next) => onEditCell(w.week_start, m.key, next)} />
+            ) : (
+              formatKpiValue(value, m.format)
+            )}
+            {arrow && trend ? (
+              <span
+                className={`ml-1 text-[10px] ${trendClass(trend, m.better)}`}
+                aria-label={trend === 'up' ? 'above benchmark' : 'below benchmark'}
+              >
+                {arrow}
+              </span>
+            ) : (
+              <span className="ml-1 inline-block w-[0.7em]" aria-hidden />
+            )}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+interface FunnelScorecardGridProps {
+  scorecard: FunnelScorecard | null;
+  loading: boolean;
+  /** Compare range label when the date filter's compare is on (benchmark = its average week). */
+  compareLabel?: string | null;
+  /**
+   * A funnel snapshot standing in for the averages: one modeled week per metric key.
+   * Metrics the model leaves null keep their historic benchmark.
+   */
+  model?: { name: string; values: Record<string, number | null> } | null;
+  /** Save a hand edit for one count-row cell (null reverts it). Omit to make the grid read-only. */
+  onEditCell?: (weekStart: string, metricKey: string, value: number | null) => Promise<void>;
+}
+
+export default function FunnelScorecardGrid({
+  scorecard,
+  loading,
+  compareLabel = null,
+  model = null,
+  onEditCell,
+}: FunnelScorecardGridProps) {
+  if (!scorecard || scorecard.weeks.length === 0) {
+    return (
+      <p className="px-1 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
+        {loading ? 'Loading…' : 'No complete or in-progress weeks start in this date range.'}
+      </p>
+    );
+  }
+
+  const { weeks, metrics, benchmark_weeks: benchmarkWeeks } = scorecard;
+  const fromCompare = scorecard.benchmark_source === 'compare';
+  const modelValue = (key: string): number | null => (model ? model.values[key] ?? null : null);
+  const benchmarkTint = model
+    ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
+    : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300';
+  const stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-950';
+
+  return (
+    <div className={loading ? 'opacity-60 transition-opacity' : ''}>
+      <div className="overflow-x-auto rounded-lg border border-black/5 dark:border-white/10">
+        <table className="w-full text-sm border-separate border-spacing-0">
           <thead>
             <tr className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
               <th scope="col" className={`${stickyCell} text-left font-medium py-1.5 pr-3 pl-1 whitespace-nowrap`}>
@@ -212,153 +316,20 @@ function GroupTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((m) => {
-              const modeled = modelValue(m.key);
-              // Priority: the snapshot's own number, else the usual benchmark (the compare
-              // range's average when the date filter's compare is on), else — when that's
-              // undefined (e.g. the compare period logged no spend) — this range's own
-              // complete-week average, so a metric with real current data never shows blank.
-              const usedModelFallback = model != null && modeled == null && m.benchmark != null;
-              const usedRangeFallback = modeled == null && m.benchmark == null && m.range_average != null;
-              const benchmark = modeled ?? m.benchmark ?? m.range_average;
-              const fellBack = usedModelFallback || usedRangeFallback;
-              const rowDim = !m.editable && group !== 'economics';
-              const rowReadOnly = !m.editable;
-              const rowTitle = rowReadOnly ? 'Calculated from other rows — not directly editable' : undefined;
-              return (
-                <tr
-                  key={m.key}
-                  className={rowDim ? 'bg-black/[0.035] dark:bg-white/[0.035] hover:bg-black/[0.06] dark:hover:bg-white/[0.06]' : 'hover:bg-white/[0.03]'}
-                >
-                  <th
-                    scope="row"
-                    title={rowTitle}
-                    className={`sticky left-0 z-10 text-left font-normal py-1 pr-3 pl-1 border-t border-white/5 whitespace-nowrap ${
-                      rowDim
-                        ? 'bg-gray-50 dark:bg-gray-900/70 text-gray-400 dark:text-gray-600'
-                        : 'bg-white dark:bg-gray-950 text-gray-800 dark:text-gray-200'
-                    }`}
-                  >
-                    {m.label}
-                    {rowReadOnly && !rowDim ? (
-                      <span aria-hidden className="ml-1 text-[9px] text-gray-400 dark:text-gray-500">🔒</span>
-                    ) : null}
-                  </th>
-                  <td
-                    title={
-                      usedModelFallback
-                        ? "Not in the snapshot — benchmark shown"
-                        : usedRangeFallback
-                          ? "No data in the compare period — this range's average shown"
-                          : rowTitle
-                    }
-                    className={`text-right py-1 px-2 tabular-nums font-medium border-t border-white/5 ${benchmarkTint} ${
-                      fellBack ? 'italic opacity-70' : rowDim ? 'opacity-70' : ''
-                    }`}
-                  >
-                    {formatKpiValue(benchmark, m.format)}
-                  </td>
-                  {weeks.map((w, i) => {
-                    const value = m.values[i];
-                    const trend = w.in_progress ? null : trendOf(value, benchmark);
-                    const arrow = trend === 'up' ? '▲' : trend === 'down' ? '▼' : null;
-                    return (
-                      <td
-                        key={w.week_start}
-                        title={rowTitle}
-                        className={`text-right py-1 px-2 tabular-nums border-t border-white/5 whitespace-nowrap ${
-                          rowDim
-                            ? 'text-gray-400 dark:text-gray-600'
-                            : w.in_progress
-                            ? 'text-gray-400 dark:text-gray-500'
-                            : 'text-gray-900 dark:text-gray-100'
-                        }`}
-                      >
-                        {onEditCell && m.editable ? (
-                          <EditableValue metric={m} index={i} onSave={(next) => onEditCell(w.week_start, m.key, next)} />
-                        ) : (
-                          formatKpiValue(value, m.format)
-                        )}
-                        {arrow && trend ? (
-                          <span
-                            className={`ml-1 text-[10px] ${trendClass(trend, m.better)}`}
-                            aria-label={trend === 'up' ? 'above benchmark' : 'below benchmark'}
-                          >
-                            {arrow}
-                          </span>
-                        ) : (
-                          <span className="ml-1 inline-block w-[0.7em]" aria-hidden />
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
+            {metrics.map((m) => (
+              <MetricRow
+                key={m.key}
+                metric={m}
+                group={m.group}
+                weeks={weeks}
+                modelValue={modelValue}
+                benchmarkTint={benchmarkTint}
+                model={model}
+                onEditCell={onEditCell}
+              />
+            ))}
           </tbody>
         </table>
-      </div>
-    </div>
-  );
-}
-
-interface FunnelScorecardGridProps {
-  scorecard: FunnelScorecard | null;
-  loading: boolean;
-  /** Compare range label when the date filter's compare is on (benchmark = its average week). */
-  compareLabel?: string | null;
-  /**
-   * A funnel snapshot standing in for the averages: one modeled week per metric key.
-   * Metrics the model leaves null keep their historic benchmark.
-   */
-  model?: { name: string; values: Record<string, number | null> } | null;
-  /** Save a hand edit for one count-row cell (null reverts it). Omit to make the grid read-only. */
-  onEditCell?: (weekStart: string, metricKey: string, value: number | null) => Promise<void>;
-}
-
-export default function FunnelScorecardGrid({
-  scorecard,
-  loading,
-  compareLabel = null,
-  model = null,
-  onEditCell,
-}: FunnelScorecardGridProps) {
-  if (!scorecard || scorecard.weeks.length === 0) {
-    return (
-      <p className="px-1 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-        {loading ? 'Loading…' : 'No complete or in-progress weeks start in this date range.'}
-      </p>
-    );
-  }
-
-  const { weeks, metrics, benchmark_weeks: benchmarkWeeks } = scorecard;
-  const fromCompare = scorecard.benchmark_source === 'compare';
-  const modelValue = (key: string): number | null => (model ? model.values[key] ?? null : null);
-  const benchmarkTint = model
-    ? 'bg-violet-500/10 text-violet-700 dark:text-violet-300'
-    : 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300';
-  const groups = GROUP_ORDER.map((group) => ({ group, rows: metrics.filter((m) => m.group === group) })).filter(
-    (g) => g.rows.length > 0,
-  );
-
-  return (
-    <div className={loading ? 'opacity-60 transition-opacity' : ''}>
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {groups.map(({ group, rows }) => (
-          <GroupTable
-            key={group}
-            group={group}
-            rows={rows}
-            weeks={weeks}
-            modelValue={modelValue}
-            benchmarkTint={benchmarkTint}
-            model={model}
-            fromCompare={fromCompare}
-            compareLabel={compareLabel}
-            benchmarkWeeks={benchmarkWeeks}
-            onEditCell={onEditCell}
-          />
-        ))}
       </div>
       <p className="mt-3 text-[10px] text-gray-500 dark:text-gray-400">
         {model

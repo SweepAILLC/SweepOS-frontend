@@ -5,6 +5,9 @@ import {
   apiClient,
   type FathomStatusResponse,
   type InstagramStatus,
+  type MetaAdsStatus,
+  type MetaAdsFunnelMapping,
+  type MetaAdsCampaignOption,
   type StripeConnectionStatus,
 } from '@/lib/api';
 import BrevoIntegrationCard from '@/components/ui/BrevoIntegrationCard';
@@ -27,6 +30,7 @@ type IntegrationModal =
   | 'claude'
   | 'chatgpt'
   | 'instagram'
+  | 'meta_ads'
   | 'discord'
   | 'ghl'
   | 'funnel_webhook'
@@ -97,6 +101,21 @@ function InstagramTileMark() {
     >
       <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="currentColor">
         <path d="M12 7.2A4.8 4.8 0 1 0 12 16.8 4.8 4.8 0 0 0 12 7.2Zm0 7.9a3.1 3.1 0 1 1 0-6.2 3.1 3.1 0 0 1 0 6.2Zm5.3-8.1a1.12 1.12 0 1 1-2.24 0 1.12 1.12 0 0 1 2.24 0ZM21.5 7.5c-.05-1.14-.25-1.92-.53-2.6a5.24 5.24 0 0 0-1.2-1.9 5.24 5.24 0 0 0-1.9-1.2c-.68-.28-1.46-.48-2.6-.53C14.13 1.2 13.77 1.2 12 1.2s-2.13 0-2.87.07c-1.14.05-1.92.25-2.6.53a5.24 5.24 0 0 0-1.9 1.2 5.24 5.24 0 0 0-1.2 1.9c-.28.68-.48 1.46-.53 2.6C2.83 8.24 2.83 8.6 2.83 10.37v3.26c0 1.77 0 2.13.07 2.87.05 1.14.25 1.92.53 2.6a5.24 5.24 0 0 0 1.2 1.9 5.24 5.24 0 0 0 1.9 1.2c.68.28 1.46.48 2.6.53.74.07 1.1.07 2.87.07s2.13 0 2.87-.07c1.14-.05 1.92-.25 2.6-.53a5.24 5.24 0 0 0 1.9-1.2 5.24 5.24 0 0 0 1.2-1.9c.28-.68.48-1.46.53-2.6.07-.74.07-1.1.07-2.87V10.37c0-1.77 0-2.13-.07-2.87Zm-1.7 6.3c0 1.73-.01 1.94-.07 2.63-.06 1.04-.22 1.6-.37 1.98-.19.5-.42.85-.8 1.23-.38.38-.73.61-1.23.8-.38.15-.94.31-1.98.37-.69.06-.9.07-2.63.07s-1.94-.01-2.63-.07c-1.04-.06-1.6-.22-1.98-.37a3.32 3.32 0 0 1-1.23-.8 3.32 3.32 0 0 1-.8-1.23c-.15-.38-.31-.94-.37-1.98-.06-.69-.07-.9-.07-2.63V10.2c0-1.73.01-1.94.07-2.63.06-1.04.22-1.6.37-1.98.19-.5.42-.85.8-1.23.38-.38.73-.61 1.23-.8.38-.15.94-.31 1.98-.37.69-.06.9-.07 2.63-.07s1.94.01 2.63.07c1.04.06 1.6.22 1.98.37.5.19.85.42 1.23.8.38.38.61.73.8 1.23.15.38.31.94.37 1.98.06.69.07.9.07 2.63v3.6Z" />
+      </svg>
+    </div>
+  );
+}
+
+function MetaAdsTileMark() {
+  return (
+    <div
+      className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl shadow-inner ring-1 ring-zinc-200/80 dark:ring-zinc-600/80"
+      style={{ background: '#0866FF' }}
+      aria-hidden
+    >
+      <svg viewBox="0 0 24 24" className="h-8 w-8 text-white" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 17l5-5 4 4 8-8" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14 8h6v6" />
       </svg>
     </div>
   );
@@ -289,6 +308,73 @@ export default function IntegrationsPanel() {
   const [scorecardWriteError, setScorecardWriteError] = useState<string | null>(null);
   const [instagramStatus, setInstagramStatus] = useState<InstagramStatus | null>(null);
   const [instagramBusy, setInstagramBusy] = useState(false);
+  const [metaAdsStatus, setMetaAdsStatus] = useState<MetaAdsStatus | null>(null);
+  const [metaAdsBusy, setMetaAdsBusy] = useState(false);
+  const [metaAdsAdAccounts, setMetaAdsAdAccounts] = useState<{ id: string; name: string | null; current: boolean }[]>(
+    []
+  );
+  const [metaAdsAdAccountBusy, setMetaAdsAdAccountBusy] = useState(false);
+  const [metaAdsFunnelMappings, setMetaAdsFunnelMappings] = useState<MetaAdsFunnelMapping[]>([]);
+  const [metaAdsCampaignOptions, setMetaAdsCampaignOptions] = useState<MetaAdsCampaignOption[]>([]);
+  const [metaAdsMappingsLoading, setMetaAdsMappingsLoading] = useState(false);
+  const [metaAdsMappingBusyId, setMetaAdsMappingBusyId] = useState<string | null>(null);
+  const [metaAdsCampaignName, setMetaAdsCampaignName] = useState('');
+  const [metaAdsCampaignObjective, setMetaAdsCampaignObjective] = useState('OUTCOME_TRAFFIC');
+  const [metaAdsManageCampaignId, setMetaAdsManageCampaignId] = useState('');
+  const [metaAdsManageBusy, setMetaAdsManageBusy] = useState(false);
+  const [metaAdsPages, setMetaAdsPages] = useState<Array<{ id: string; name: string }>>([]);
+  const [metaAdsPagesBusy, setMetaAdsPagesBusy] = useState(false);
+  const [metaAdsSelectedPageId, setMetaAdsSelectedPageId] = useState('');
+  const [metaAdsPageEngagement, setMetaAdsPageEngagement] = useState<{
+    name: string;
+    engagement?: { count: number; social_sentence?: string };
+    fan_count?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (modal !== 'meta_ads' || metaAdsStatus?.connected !== true) return;
+    let cancelled = false;
+    setMetaAdsMappingsLoading(true);
+    apiClient
+      .getMetaAdsFunnelMappings()
+      .then((data) => {
+        if (cancelled) return;
+        setMetaAdsFunnelMappings(data.funnels);
+        setMetaAdsCampaignOptions(data.campaigns);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMetaAdsFunnelMappings([]);
+          setMetaAdsCampaignOptions([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setMetaAdsMappingsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modal, metaAdsStatus?.connected]);
+
+  useEffect(() => {
+    if (modal !== 'meta_ads' || metaAdsStatus?.connected !== true) {
+      setMetaAdsAdAccounts([]);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .getMetaAdsAdAccounts()
+      .then((data) => {
+        if (!cancelled) setMetaAdsAdAccounts(data.accounts);
+      })
+      .catch(() => {
+        if (!cancelled) setMetaAdsAdAccounts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [modal, metaAdsStatus?.connected]);
   const [composioApiKey, setComposioApiKey] = useState('');
   const [composioAuthConfigId, setComposioAuthConfigId] = useState('');
 
@@ -371,12 +457,13 @@ export default function IntegrationsPanel() {
 
   const refreshIntegrationSummaries = useCallback(async () => {
     try {
-      const [stripeSt, calcom, calendly, whop, ig] = await Promise.all([
+      const [stripeSt, calcom, calendly, whop, ig, metaAds] = await Promise.all([
         apiClient.getStripeStatus(true).catch(() => null),
         apiClient.getCalComStatus().catch(() => null),
         apiClient.getCalendlyStatus().catch(() => null),
         apiClient.getWhopStatus(true).catch(() => null),
         apiClient.getInstagramStatus().catch(() => null),
+        apiClient.getMetaAdsStatus().catch(() => null),
       ]);
       const s = stripeSt as StripeConnectionStatus | null;
       if (s) {
@@ -395,6 +482,7 @@ export default function IntegrationsPanel() {
         });
       }
       setInstagramStatus(ig);
+      setMetaAdsStatus(metaAds);
     } catch {
       setStripeConnected(false);
       setStripeStatus(null);
@@ -402,6 +490,7 @@ export default function IntegrationsPanel() {
       setCalendlySummary(null);
       setWhopSummary({ connected: false });
       setInstagramStatus(null);
+      setMetaAdsStatus(null);
     }
   }, []);
 
@@ -504,6 +593,17 @@ export default function IntegrationsPanel() {
           s ? { ...s, connected: true } : ({ connected: true } as InstagramStatus)
         );
       }, refreshIntegrationSummaries);
+    }
+    if (params.get('meta_ads') === 'connected') {
+      consumedOauthReturnRef.current = true;
+      finishConnect('Meta Ads connected.', () => {
+        setMetaAdsStatus((s) =>
+          s ? { ...s, connected: true } : ({ connected: true, app_configured: true } as MetaAdsStatus)
+        );
+      }, refreshIntegrationSummaries);
+    } else if (params.get('meta_ads') === 'error') {
+      consumedOauthReturnRef.current = true;
+      setError(`Meta Ads connect failed${params.get('reason') ? `: ${params.get('reason')}` : '.'}`);
     }
   }, [finishConnect, refreshBrevoSummary, refreshDiscordSummary, refreshIntegrationSummaries]);
 
@@ -869,6 +969,7 @@ export default function IntegrationsPanel() {
   const calendlyConnected = calendlySummary?.connected === true;
   const whopConnected = whopSummary?.connected === true;
   const instagramConnected = instagramStatus?.connected === true;
+  const metaAdsConnected = metaAdsStatus?.connected === true;
 
   const tileBtn =
     'group aspect-square w-full rounded-2xl border-2 border-zinc-200 bg-white p-3 text-left shadow-sm transition hover:border-zinc-400 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 dark:border-zinc-700 dark:bg-zinc-900/80 dark:hover:border-zinc-500';
@@ -1060,6 +1161,25 @@ export default function IntegrationsPanel() {
               }`}
             >
               {instagramConnected ? 'Connected' : 'Not connected'}
+            </p>
+          </div>
+        </button>
+
+        <button type="button" onClick={() => setModal('meta_ads')} className={tileBtn}>
+          <div className="flex h-full min-h-0 flex-col">
+            <MetaAdsTileMark />
+            <div className="mt-2 min-w-0 flex-1">
+              <p className="text-sm font-semibold leading-tight text-gray-900 dark:text-gray-100">Meta Ads</p>
+              <p className="text-[10px] leading-snug text-gray-600 dark:text-gray-400 mt-0.5 line-clamp-2">
+                Ad performance &amp; campaigns (Sweep app)
+              </p>
+            </div>
+            <p
+              className={`mt-auto text-[10px] font-semibold uppercase tracking-wide ${
+                metaAdsConnected ? 'text-emerald-700 dark:text-emerald-400' : 'text-zinc-500 dark:text-zinc-400'
+              }`}
+            >
+              {metaAdsConnected ? 'Connected' : 'Not connected'}
             </p>
           </div>
         </button>
@@ -2164,6 +2284,441 @@ export default function IntegrationsPanel() {
                 {!canManageIntegrations ? (
                   <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200">
                     Only admins and owners can connect Instagram.
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </SquareModalShell>
+      )}
+
+      {modal === 'meta_ads' && (
+        <SquareModalShell title="Meta Ads" onClose={() => setModal(null)}>
+          <div className="flex min-h-0 flex-col space-y-5">
+            <p className={mutedClass}>
+              Connects your Meta (Facebook) Ads account directly through Meta&apos;s Marketing API — no Composio.
+              Pulls campaign/ad set/ad structure and daily spend &amp; performance insights, and can auto-populate a
+              funnel&apos;s weekly ad spend below.
+            </p>
+
+            <div className="space-y-3 rounded-xl border-2 border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">Status</p>
+              {metaAdsConnected ? (
+                <div className="space-y-1">
+                  <p className="text-sm text-emerald-800 dark:text-emerald-200">
+                    Connected{metaAdsStatus?.meta_ad_account_id ? ` · ${metaAdsStatus.meta_ad_account_id}` : ''}
+                  </p>
+                  <p className={mutedClass}>
+                    {metaAdsStatus?.token_expires_at
+                      ? `Token expires: ${new Date(metaAdsStatus.token_expires_at).toLocaleString()}`
+                      : 'Non-expiring token (Business Manager System User)'}
+                  </p>
+                  {metaAdsStatus?.last_sync_at ? (
+                    <p className={mutedClass}>Last sync: {new Date(metaAdsStatus.last_sync_at).toLocaleString()}</p>
+                  ) : null}
+                </div>
+              ) : (
+                <p className={mutedClass}>
+                  {metaAdsStatus?.app_configured
+                    ? 'Not connected yet.'
+                    : 'META_ADS_APP_ID/SECRET are not configured on the server — contact an admin.'}
+                </p>
+              )}
+            </div>
+
+            {metaAdsConnected && metaAdsAdAccounts.length > 1 ? (
+              <div className="space-y-2 rounded-xl border-2 border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                  Ad account
+                </p>
+                <p className={mutedClass}>
+                  Connect picked one automatically — switch here if it&apos;s the wrong business/portfolio.
+                  Campaigns from the account you leave stay synced but stop showing until you switch back.
+                </p>
+                <select
+                  className={`${fieldInputClass} w-full`}
+                  value={metaAdsAdAccounts.find((a) => a.current)?.id || ''}
+                  disabled={!canManageIntegrations || metaAdsAdAccountBusy}
+                  onChange={async (e) => {
+                    const adAccountId = e.target.value;
+                    setMetaAdsAdAccountBusy(true);
+                    setError(null);
+                    try {
+                      await apiClient.setMetaAdsAdAccount(adAccountId);
+                      setMetaAdsAdAccounts((rows) => rows.map((a) => ({ ...a, current: a.id === adAccountId })));
+                      setSuccess('Ad account switched — syncing now, numbers will update shortly.');
+                      await refreshIntegrationSummaries();
+                    } catch (e2) {
+                      setError(formatApiError(e2, 'Switch ad account failed'));
+                    } finally {
+                      setMetaAdsAdAccountBusy(false);
+                    }
+                  }}
+                >
+                  {metaAdsAdAccounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name || a.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+
+            {metaAdsConnected ? (
+              <>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || metaAdsBusy}
+                    className="glass-button rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                    onClick={async () => {
+                      setMetaAdsBusy(true);
+                      setError(null);
+                      try {
+                        const res = await apiClient.syncMetaAds(false);
+                        setSuccess(res.message || 'Meta Ads sync queued');
+                        await refreshIntegrationSummaries();
+                      } catch (e) {
+                        setError(formatApiError(e, 'Sync failed'));
+                      } finally {
+                        setMetaAdsBusy(false);
+                      }
+                    }}
+                  >
+                    {metaAdsBusy ? 'Working…' : 'Sync now'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canManageIntegrations || metaAdsBusy}
+                    className="rounded-lg border-2 border-red-300 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-50 dark:border-red-700 dark:text-red-300"
+                    onClick={async () => {
+                      if (!window.confirm('Disconnect Meta Ads?')) return;
+                      setMetaAdsBusy(true);
+                      setError(null);
+                      try {
+                        await apiClient.disconnectMetaAds();
+                        await refreshIntegrationSummaries();
+                        setSuccess('Meta Ads disconnected.');
+                      } catch (e) {
+                        setError(formatApiError(e, 'Disconnect failed'));
+                      } finally {
+                        setMetaAdsBusy(false);
+                      }
+                    }}
+                  >
+                    Disconnect
+                  </button>
+                </div>
+
+                <div className="space-y-2 rounded-xl border-2 border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                    Auto-populate funnel spend
+                  </p>
+                  <p className={mutedClass}>
+                    Map a funnel to its Meta campaign and its weekly ad spend fills in on its scorecard
+                    automatically from synced insights — no more typing it in by hand. A week you edit directly
+                    on the scorecard always wins over the auto-synced number.
+                  </p>
+                  {metaAdsMappingsLoading ? (
+                    <p className={mutedClass}>Loading funnels…</p>
+                  ) : metaAdsFunnelMappings.length === 0 ? (
+                    <p className={mutedClass}>No funnels in this org yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {metaAdsFunnelMappings.map((fm) => {
+                        const linkedIds = new Set(fm.linked_campaigns.map((c) => c.meta_campaign_id));
+                        const busy = metaAdsMappingBusyId === fm.funnel_id;
+                        return (
+                          <div
+                            key={fm.funnel_id}
+                            className="rounded-lg border-2 border-zinc-200 bg-white px-3 py-3 dark:border-zinc-700 dark:bg-zinc-950"
+                          >
+                            <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                              Funnel
+                            </p>
+                            <p className="mt-0.5 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                              {fm.funnel_name}
+                            </p>
+
+                            <p className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                              Campaigns feeding this funnel (pick any number)
+                            </p>
+                            <div className="mt-1 max-h-36 space-y-1 overflow-y-auto">
+                              {metaAdsCampaignOptions.length === 0 ? (
+                                <p className={mutedClass}>No synced campaigns yet.</p>
+                              ) : (
+                                metaAdsCampaignOptions.map((c) => {
+                                  const checked = linkedIds.has(c.id);
+                                  const linkedElsewhere = !checked && c.funnel_id != null && c.funnel_id !== fm.funnel_id;
+                                  return (
+                                    <label
+                                      key={c.id}
+                                      className="flex items-center gap-2 text-xs text-zinc-700 dark:text-zinc-300"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        disabled={!canManageIntegrations || busy}
+                                        onChange={async (e) => {
+                                          const nowChecked = e.target.checked;
+                                          setMetaAdsMappingBusyId(fm.funnel_id);
+                                          setError(null);
+                                          try {
+                                            const res = await apiClient.setCampaignFunnelLink(c.id, {
+                                              funnel_id: nowChecked ? fm.funnel_id : null,
+                                            });
+                                            setMetaAdsCampaignOptions((rows) =>
+                                              rows.map((r) => (r.id === c.id ? { ...r, funnel_id: res.funnel_id } : r))
+                                            );
+                                            setMetaAdsFunnelMappings((rows) =>
+                                              rows.map((r) => {
+                                                if (nowChecked && r.funnel_id === fm.funnel_id) {
+                                                  return {
+                                                    ...r,
+                                                    // id isn't available from this list (MetaAdsCampaignOption
+                                                    // only carries the Meta string id); never read for rendering
+                                                    // in this checkbox UI, only by the Funnels-tab campaign
+                                                    // toggle, which always refetches fresh from the server.
+                                                    linked_campaigns: [
+                                                      ...r.linked_campaigns,
+                                                      { id: c.id, meta_campaign_id: c.id, name: c.name },
+                                                    ],
+                                                  };
+                                                }
+                                                return {
+                                                  ...r,
+                                                  linked_campaigns: r.linked_campaigns.filter(
+                                                    (lc) => lc.meta_campaign_id !== c.id
+                                                  ),
+                                                };
+                                              })
+                                            );
+                                            setSuccess(
+                                              nowChecked
+                                                ? `${c.name || c.id} linked to ${fm.funnel_name} — ${res.weeks_synced} week(s) of spend synced.`
+                                                : `${c.name || c.id} unlinked from ${fm.funnel_name}.`
+                                            );
+                                          } catch (e2) {
+                                            setError(formatApiError(e2, 'Link failed'));
+                                          } finally {
+                                            setMetaAdsMappingBusyId(null);
+                                          }
+                                        }}
+                                      />
+                                      <span className="truncate">
+                                        {c.name || c.id}
+                                        {linkedElsewhere ? (
+                                          <span className="text-zinc-400"> (linked to another funnel)</span>
+                                        ) : null}
+                                      </span>
+                                    </label>
+                                  );
+                                })
+                              )}
+                            </div>
+
+                            <p
+                              className={`mt-2 text-xs font-medium ${
+                                linkedIds.size
+                                  ? 'text-emerald-700 dark:text-emerald-400'
+                                  : 'text-zinc-500 dark:text-zinc-400'
+                              }`}
+                            >
+                              {busy
+                                ? 'Saving…'
+                                : linkedIds.size
+                                  ? `✓ Spend auto-syncs from ${linkedIds.size} campaign${linkedIds.size === 1 ? '' : 's'}`
+                                  : 'Spend is entered manually on this funnel’s scorecard'}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-3 rounded-xl border-2 border-zinc-200 bg-zinc-50/80 px-4 py-3 dark:border-zinc-700 dark:bg-zinc-900/40">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                    Create &amp; manage ads (admin)
+                  </p>
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      value={metaAdsCampaignName}
+                      onChange={(e) => setMetaAdsCampaignName(e.target.value)}
+                      placeholder="Campaign name"
+                      disabled={!canManageIntegrations || metaAdsManageBusy}
+                      className={`${fieldInputClass} w-full`}
+                    />
+                    <select
+                      value={metaAdsCampaignObjective}
+                      onChange={(e) => setMetaAdsCampaignObjective(e.target.value)}
+                      disabled={!canManageIntegrations || metaAdsManageBusy}
+                      className={`${fieldInputClass} w-full`}
+                    >
+                      <option value="OUTCOME_TRAFFIC">Traffic</option>
+                      <option value="OUTCOME_LEADS">Leads</option>
+                      <option value="OUTCOME_ENGAGEMENT">Engagement</option>
+                      <option value="OUTCOME_AWARENESS">Awareness</option>
+                      <option value="OUTCOME_SALES">Sales</option>
+                    </select>
+                    <button
+                      type="button"
+                      disabled={!canManageIntegrations || metaAdsManageBusy || !metaAdsCampaignName.trim()}
+                      className="glass-button rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                      onClick={async () => {
+                        setMetaAdsManageBusy(true);
+                        setError(null);
+                        try {
+                          const res = await apiClient.createMetaAdsCampaign({
+                            name: metaAdsCampaignName.trim(),
+                            objective: metaAdsCampaignObjective,
+                          });
+                          setSuccess(`Campaign created (PAUSED)${res.id ? ` — ${res.id}` : ''}.`);
+                          setMetaAdsCampaignName('');
+                          const mappings = await apiClient.getMetaAdsFunnelMappings();
+                          setMetaAdsCampaignOptions(mappings.campaigns);
+                        } catch (e) {
+                          setError(formatApiError(e, 'Create campaign failed'));
+                        } finally {
+                          setMetaAdsManageBusy(false);
+                        }
+                      }}
+                    >
+                      {metaAdsManageBusy ? 'Working…' : 'Create campaign (PAUSED)'}
+                    </button>
+                  </div>
+
+                  <div className="space-y-2 border-t-2 border-zinc-200 pt-3 dark:border-zinc-700">
+                    <select
+                      value={metaAdsManageCampaignId}
+                      onChange={(e) => setMetaAdsManageCampaignId(e.target.value)}
+                      disabled={!canManageIntegrations || metaAdsManageBusy}
+                      className={`${fieldInputClass} w-full`}
+                    >
+                      <option value="">— Select a campaign to manage —</option>
+                      {metaAdsCampaignOptions.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex flex-wrap gap-2">
+                      {(['ACTIVE', 'PAUSED'] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          disabled={!canManageIntegrations || metaAdsManageBusy || !metaAdsManageCampaignId}
+                          className="rounded-lg border-2 border-zinc-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-50 dark:border-zinc-600"
+                          onClick={async () => {
+                            setMetaAdsManageBusy(true);
+                            setError(null);
+                            try {
+                              await apiClient.setMetaAdsEntityStatus(metaAdsManageCampaignId, s);
+                              setSuccess(`Campaign set to ${s}.`);
+                            } catch (e) {
+                              setError(formatApiError(e, 'Status update failed'));
+                            } finally {
+                              setMetaAdsManageBusy(false);
+                            }
+                          }}
+                        >
+                          {s === 'ACTIVE' ? 'Activate' : 'Pause'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 border-t-2 border-zinc-200 pt-3 dark:border-zinc-700">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-zinc-700 dark:text-zinc-300">
+                      Facebook Page engagement
+                    </p>
+                    <div className="flex gap-2">
+                      <select
+                        value={metaAdsSelectedPageId}
+                        onChange={async (e) => {
+                          const pageId = e.target.value;
+                          setMetaAdsSelectedPageId(pageId);
+                          setMetaAdsPageEngagement(null);
+                          if (!pageId) return;
+                          setMetaAdsPagesBusy(true);
+                          setError(null);
+                          try {
+                            const data = await apiClient.getMetaAdsPageEngagement(pageId);
+                            setMetaAdsPageEngagement(data);
+                          } catch (err) {
+                            setError(formatApiError(err, 'Failed to load Page engagement'));
+                          } finally {
+                            setMetaAdsPagesBusy(false);
+                          }
+                        }}
+                        disabled={!canManageIntegrations || metaAdsPagesBusy}
+                        className={`${fieldInputClass} w-full`}
+                      >
+                        <option value="">— Select a Page —</option>
+                        {metaAdsPages.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!canManageIntegrations || metaAdsPagesBusy}
+                        className="rounded-lg border-2 border-zinc-300 px-3 py-1.5 text-xs font-semibold disabled:opacity-50 dark:border-zinc-600"
+                        onClick={async () => {
+                          setMetaAdsPagesBusy(true);
+                          setError(null);
+                          try {
+                            const res = await apiClient.getMetaAdsPages();
+                            setMetaAdsPages(res.pages);
+                          } catch (err) {
+                            setError(formatApiError(err, 'Failed to load Pages'));
+                          } finally {
+                            setMetaAdsPagesBusy(false);
+                          }
+                        }}
+                      >
+                        {metaAdsPagesBusy ? 'Loading…' : 'Load Pages'}
+                      </button>
+                    </div>
+                    {metaAdsPageEngagement && (
+                      <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                        <strong>{metaAdsPageEngagement.name}</strong>
+                        {': '}
+                        {metaAdsPageEngagement.engagement?.social_sentence ||
+                          `${metaAdsPageEngagement.engagement?.count ?? 0} engagements`}
+                        {typeof metaAdsPageEngagement.fan_count === 'number'
+                          ? ` · ${metaAdsPageEngagement.fan_count} followers`
+                          : ''}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  disabled={!canManageIntegrations || metaAdsBusy || !metaAdsStatus?.app_configured}
+                  className="glass-button rounded-lg px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                  onClick={async () => {
+                    setMetaAdsBusy(true);
+                    setError(null);
+                    try {
+                      const { redirect_url } = await apiClient.connectMetaAds();
+                      window.location.href = redirect_url;
+                    } catch (e) {
+                      setError(formatApiError(e, 'Connect failed'));
+                      setMetaAdsBusy(false);
+                    }
+                  }}
+                >
+                  {metaAdsBusy ? 'Redirecting…' : 'Connect Meta Ads'}
+                </button>
+                {!canManageIntegrations ? (
+                  <p className="text-[11px] font-medium text-amber-800 dark:text-amber-200">
+                    Only admins and owners can connect Meta Ads.
                   </p>
                 ) : null}
               </div>

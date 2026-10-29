@@ -377,7 +377,7 @@ export default function Dashboard() {
         } else if (tabValue === 'funnels' && router.query.channel) {
           // Keep ?tab=funnels&channel=… for FunnelDashboard's channel preselect.
         } else if (tabValue === 'content_studio') {
-          // Keep ?tab=content_studio&sub=… for Marketing Intel (Overview | Signals).
+          // Keep ?tab=content_studio&sub=… for Marketing Intel (Organic | Ads).
           // Stripping the query here snapped every sub-tab click back to Overview.
         } else {
           lastConsumedDeepLinkRef.current = null;
