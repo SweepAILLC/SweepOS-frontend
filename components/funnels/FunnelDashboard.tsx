@@ -24,7 +24,9 @@ import FunnelOverviewTab from '@/components/funnels/FunnelOverviewTab';
 import GhlBadge from '@/components/funnels/GhlBadge';
 import FunnelStepsTab from '@/components/funnels/FunnelStepsTab';
 import FunnelStepDropoff from '@/components/funnels/FunnelStepDropoff';
+import FunnelAdPerformanceDrawer from '@/components/funnels/FunnelAdPerformanceDrawer';
 import FunnelSnapshotPicker from '@/components/funnels/FunnelSnapshotPicker';
+import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
 import { paidSnapshotWeeklyBenchmarks, scenarioInputs } from '@/lib/funnelSimulator';
 import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 import type {
@@ -70,21 +72,6 @@ const UTM_GROUP_OPTIONS: { value: 'source' | 'medium' | 'campaign' | 'content'; 
   { value: 'content', label: 'Ad' },
 ];
 
-function toYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-
-function mondayOf(d: Date): string {
-  const copy = new Date(d);
-  const offset = (copy.getDay() + 6) % 7; // Mon=0 .. Sun=6
-  copy.setDate(copy.getDate() - offset);
-  return toYmd(copy);
-}
-
 function usd(v: number | null | undefined, digits = 0): string {
   if (v == null) return '—';
   return `$${v.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -126,158 +113,47 @@ function Panel({
   );
 }
 
-interface LogSpendPopoverProps {
-  funnels: Funnel[];
-  defaultFunnelId: string | null;
+function DashboardModal({
+  label,
+  title,
+  onClose,
+  wide,
+  children,
+}: {
+  label: string;
+  title: string;
   onClose: () => void;
-  onSaved: () => void;
-}
-
-function LogSpendPopover({ funnels, defaultFunnelId, onClose, onSaved }: LogSpendPopoverProps) {
-  const [funnelId, setFunnelId] = useState<string>(defaultFunnelId ?? '');
-  const [week, setWeek] = useState<string>(mondayOf(new Date()));
-  const [amount, setAmount] = useState<string>('');
-  const [ads, setAds] = useState<string>('');
-  const [angles, setAngles] = useState<string>('');
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Prefill with what's already logged for this funnel + week, so edits don't start from blank.
-  useEffect(() => {
-    let cancelled = false;
-    apiClient
-      .getFunnelAdSpend({ start: week, end: week, funnel_id: funnelId || null })
-      .then((rows) => {
-        if (cancelled) return;
-        const match = rows.find((r) => (r.funnel_id ?? '') === funnelId);
-        setAmount(match ? String(match.amount_usd) : '');
-        setAds(match?.ads_deployed != null ? String(match.ads_deployed) : '');
-        setAngles(match?.angles_deployed != null ? String(match.angles_deployed) : '');
-      })
-      .catch(() => {
-        /* leave blank */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [funnelId, week]);
-
-  const save = async () => {
-    const value = Number(amount || 0);
-    if (!Number.isFinite(value) || value < 0) {
-      setError('Enter a dollar amount (0 clears the week).');
-      return;
-    }
-    const toCount = (raw: string): number | null => {
-      if (raw.trim() === '') return null;
-      const n = Number(raw);
-      return Number.isInteger(n) && n >= 0 ? n : NaN;
-    };
-    const adsCount = toCount(ads);
-    const anglesCount = toCount(angles);
-    if (Number.isNaN(adsCount) || Number.isNaN(anglesCount)) {
-      setError('Ads and angles deployed must be whole numbers.');
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      await apiClient.putFunnelAdSpend({
-        funnel_id: funnelId || null,
-        week_start: week,
-        amount_usd: value,
-        ads_deployed: adsCount,
-        angles_deployed: anglesCount,
-      });
-      onSaved();
-    } catch {
-      setError('Could not save spend. Try again.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
+  wide?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="absolute right-0 top-full z-30 mt-2 w-72 rounded-xl border border-white/10 bg-white dark:bg-gray-900 p-3 shadow-xl">
-      <div className="text-xs font-semibold text-gray-900 dark:text-gray-100 mb-2">Log this week&apos;s ads</div>
-      <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Funnel</label>
-      <select
-        value={funnelId}
-        onChange={(e) => setFunnelId(e.target.value)}
-        className="w-full mb-2 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1.5 text-sm"
+    <div
+      className="fixed inset-y-0 right-0 left-0 lg:left-[var(--app-sidebar-width,14rem)] z-[55] flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={label}
+    >
+      <button type="button" aria-label={`Close ${label}`} className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div
+        className={`relative w-full ${wide ? 'max-w-3xl' : 'max-w-2xl'} max-h-[85vh] overflow-y-auto rounded-xl border border-white/10 bg-white dark:bg-gray-950 shadow-xl p-4 sm:p-6 space-y-6`}
       >
-        {funnels.map((f) => (
-          <option key={f.id} value={f.id}>
-            {f.name}
-          </option>
-        ))}
-        <option value="">Unassigned (can&apos;t split by funnel)</option>
-      </select>
-      <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Week of (any day, saved to its Monday)</label>
-      <input
-        type="date"
-        value={week}
-        onChange={(e) => e.target.value && setWeek(mondayOf(new Date(`${e.target.value}T12:00:00`)))}
-        className="w-full mb-2 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1.5 text-sm"
-      />
-      <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">Amount (USD)</label>
-      <input
-        type="number"
-        inputMode="decimal"
-        min={0}
-        step="0.01"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        placeholder="0.00"
-        className="w-full mb-2 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1.5 text-sm tabular-nums"
-      />
-      <div className="grid grid-cols-2 gap-2 mb-2">
-        <div>
-          <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">New ads deployed</label>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={ads}
-            onChange={(e) => setAds(e.target.value)}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1.5 text-sm tabular-nums"
-          />
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md px-2 py-1 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            Close
+          </button>
         </div>
-        <div>
-          <label className="block text-[11px] text-gray-500 dark:text-gray-400 mb-1">New angles deployed</label>
-          <input
-            type="number"
-            min={0}
-            step={1}
-            value={angles}
-            onChange={(e) => setAngles(e.target.value)}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent px-2 py-1.5 text-sm tabular-nums"
-          />
-        </div>
-      </div>
-      {error ? <p className="text-[11px] text-red-600 dark:text-red-400 mb-2">{error}</p> : null}
-      <div className="flex justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-3 py-1.5 text-xs rounded-md text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={saving}
-          className="px-3 py-1.5 text-xs rounded-md bg-indigo-600 text-white hover:bg-indigo-500 disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
+        {children}
       </div>
     </div>
   );
 }
 
-function SettingsDrawer({ funnelId, onClose }: { funnelId: string; onClose: () => void }) {
+function SettingsModal({ funnelId, onClose }: { funnelId: string; onClose: () => void }) {
   const [funnel, setFunnel] = useState<FunnelWithSteps | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -295,35 +171,22 @@ function SettingsDrawer({ funnelId, onClose }: { funnelId: string; onClose: () =
   }, [load]);
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label="Funnel settings">
-      <button type="button" aria-label="Close settings" className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative h-full w-full max-w-2xl overflow-y-auto bg-white dark:bg-gray-950 border-l border-white/10 p-4 sm:p-6 space-y-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">{funnel?.name ?? 'Funnel'} settings</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            Close
-          </button>
-        </div>
-        {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
-        {funnel ? (
-          <>
-            <FunnelOverviewTab funnel={funnel} onReload={() => void load()} />
-            <FunnelStepsTab funnel={funnel} onReload={() => void load()} />
-          </>
-        ) : !error ? (
-          <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
-        ) : null}
-      </div>
-    </div>
+    <DashboardModal label="Funnel settings" title={`${funnel?.name ?? 'Funnel'} settings`} onClose={onClose}>
+      {error ? <p className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+      {funnel ? (
+        <>
+          <FunnelOverviewTab funnel={funnel} onReload={() => void load()} />
+          <FunnelStepsTab funnel={funnel} onReload={() => void load()} />
+        </>
+      ) : !error ? (
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+      ) : null}
+    </DashboardModal>
   );
 }
 
 /** Org KPI % targets, the same from every funnel view. */
-function TargetsDrawer({ onClose }: { onClose: () => void }) {
+function TargetsModal({ onClose }: { onClose: () => void }) {
   const [canEdit, setCanEdit] = useState(false);
   useEffect(() => {
     let cancelled = false;
@@ -341,22 +204,9 @@ function TargetsDrawer({ onClose }: { onClose: () => void }) {
     };
   }, []);
   return (
-    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label="Targets">
-      <button type="button" aria-label="Close targets" className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative h-full w-full max-w-3xl overflow-y-auto bg-white dark:bg-gray-950 border-l border-white/10 p-4 sm:p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Targets</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md px-2 py-1 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            Close
-          </button>
-        </div>
-        <TeamSettingsView canEdit={canEdit} part="targets" />
-      </div>
-    </div>
+    <DashboardModal label="Targets" title="Targets" onClose={onClose} wide>
+      <TeamSettingsView canEdit={canEdit} part="targets" />
+    </DashboardModal>
   );
 }
 
@@ -376,6 +226,33 @@ export default function FunnelDashboard({
 }: FunnelDashboardProps) {
   const [funnels, setFunnels] = useState<Funnel[]>([]);
   const [funnelId, setFunnelId] = useState<string | null>(initialFunnelId);
+  // Campaigns linked to the selected funnel (MetaCampaign.funnel_id) — drives the
+  // campaign toggle. Its selection narrows both the aggregate scorecard's Ad Spend
+  // row and the creative grid below it to one campaign instead of all of them.
+  const [linkedCampaigns, setLinkedCampaigns] = useState<{ id: string; name: string | null }[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
+  const hasLinkedCampaigns = linkedCampaigns.length > 0;
+  useEffect(() => {
+    setSelectedCampaignId(null);
+    if (!funnelId) {
+      setLinkedCampaigns([]);
+      return;
+    }
+    let cancelled = false;
+    apiClient
+      .getMetaAdsFunnelMappings()
+      .then((data) => {
+        if (cancelled) return;
+        const fm = data.funnels.find((f) => f.funnel_id === funnelId);
+        setLinkedCampaigns((fm?.linked_campaigns || []).map((c) => ({ id: c.id, name: c.name })));
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedCampaigns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [funnelId]);
   // The Funnels tab's one date range (header picker) drives everything below.
   const { range } = useDateRange();
   const [channel, setChannel] = useState<FunnelChannelFilter>(initialChannel ?? 'all');
@@ -386,13 +263,13 @@ export default function FunnelDashboard({
   const [data, setData] = useState<FunnelDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [spendOpen, setSpendOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [utmGroupBy, setUtmGroupBy] = useState<'source' | 'medium' | 'campaign' | 'content'>('source');
   // Snapshot each view compares against (null = historic averages / no model).
   const [paidSnapshot, setPaidSnapshot] = useState<FunnelSimulatorScenario | null>(null);
   const [organicSnapshot, setOrganicSnapshot] = useState<FunnelSimulatorScenario | null>(null);
+  const [snapshotTick, setSnapshotTick] = useState(0);
 
   // Funnels never offer "All time" (the scorecard needs a start), so start is always set.
   const start = range.start ?? range.end;
@@ -448,6 +325,7 @@ export default function FunnelDashboard({
         channel: effectiveChannel,
         funnel_id: funnelId,
         utm_group_by: utmGroupBy,
+        campaign_id: selectedCampaignId,
       })
       .then((res) => {
         if (!cancelled) setData(res);
@@ -461,7 +339,7 @@ export default function FunnelDashboard({
     return () => {
       cancelled = true;
     };
-  }, [start, end, effectiveChannel, funnelId, reloadKey, isOrganicView, utmGroupBy]);
+  }, [start, end, effectiveChannel, funnelId, reloadKey, isOrganicView, utmGroupBy, selectedCampaignId]);
 
   const viewTitle = funnelId
     ? funnels.find((f) => f.id === funnelId)?.name ?? 'Funnel'
@@ -509,7 +387,11 @@ export default function FunnelDashboard({
   );
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 py-6 space-y-4 min-w-0">
+    <div
+      className={`px-4 sm:px-6 lg:px-8 py-6 space-y-4 min-w-0 ${
+        funnelId && hasLinkedCampaigns ? 'lg:pr-[3.75rem]' : ''
+      }`}
+    >
       {/* Header: the only controls on the page */}
       <div className="flex flex-wrap items-center gap-2">
         {onBack ? (
@@ -542,7 +424,11 @@ export default function FunnelDashboard({
           <button
             type="button"
             onClick={() => setTargetsOpen(true)}
-            title="Org KPI targets and closer targets — the same from every view"
+            title={
+              funnelId
+                ? 'This funnel’s snapshot (model) — Compare dropdown picks which one the scorecard uses'
+                : 'Org KPI targets and closer targets — the same from every view'
+            }
             className="rounded-lg border border-indigo-400/40 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-medium text-indigo-700 dark:text-indigo-300 hover:bg-indigo-500/20"
           >
             🎯 Targets
@@ -569,7 +455,7 @@ export default function FunnelDashboard({
               <span className="font-semibold uppercase tracking-wide">Financial model</span>
               {organicSnapshot
                 ? ' · targets show under each month in Grid view'
-                : ' · pick or create an Organic DM snapshot to compare actuals against'}
+                : ' · pick a snapshot in Compare to'}
             </div>
             <FunnelSnapshotPicker
               mode="organic_dm"
@@ -591,8 +477,126 @@ export default function FunnelDashboard({
         </div>
       ) : null}
 
-      {/* Scorecard: the sheet, week by week, with a benchmark next to each metric */}
-      <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4">
+      {/* Left: leak + UTM stacked. Right: scorecard fills through to the Ad Performance rail. */}
+      <div className="flex flex-col xl:flex-row gap-4 items-stretch">
+      <div className="w-full xl:w-[22rem] xl:flex-shrink-0 space-y-4 order-2 xl:order-1 min-w-0">
+        <Panel
+          title="Where it leaks"
+          subtitle="People reaching each stage in this range"
+        >
+          <div className="h-56">
+            {stageBars.length ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={stageBars} layout="vertical" margin={{ left: 8, right: 24, top: 4, bottom: 4 }}>
+                  <CartesianGrid horizontal={false} stroke={GRID_STROKE} />
+                  <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="stage" width={84} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{ fill: 'rgba(148,163,184,0.08)' }} />
+                  <Bar dataKey="count" name="People" fill={STAGE_COLOR} radius={[0, 4, 4, 0]} barSize={18} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-gray-500">{loading ? 'Loading…' : 'No data'}</div>
+            )}
+          </div>
+        </Panel>
+        <Panel
+          title="UTM sources"
+          subtitle={`Grouped by utm_${utmGroupBy} on the lead`}
+          action={
+            <select
+              value={utmGroupBy}
+              onChange={(e) => setUtmGroupBy(e.target.value as typeof utmGroupBy)}
+              className="text-xs rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 px-2 py-1 text-gray-900 dark:text-gray-100"
+              aria-label="Group UTM sources by"
+            >
+              {UTM_GROUP_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          }
+        >
+          {data?.sources.length ? (
+            <div className="flex flex-col gap-4 min-w-0">
+              <div className="w-full min-w-0 max-w-full h-40 overflow-hidden">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Tooltip
+                      content={({ payload }: any) => {
+                        const p0 = payload?.[0];
+                        if (!p0) return null;
+                        const s = p0.payload as { source: string; opt_ins: number; closed: number; cash_usd: number };
+                        return (
+                          <div className="glass-panel px-3 py-2 rounded-lg text-xs text-gray-900 dark:text-gray-100">
+                            <div className="font-semibold">{s.source}</div>
+                            <div className="text-gray-600 dark:text-gray-300">{s.opt_ins.toLocaleString()} opt-ins</div>
+                            <div className="text-gray-600 dark:text-gray-300">{s.closed} closed · {usd(s.cash_usd)}</div>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Pie
+                      data={data.sources}
+                      dataKey="opt_ins"
+                      nameKey="source"
+                      innerRadius={36}
+                      outerRadius={58}
+                      paddingAngle={2}
+                      cornerRadius={10}
+                      labelLine={false}
+                      label={({ percent }: any) => (percent != null && percent > 0.04 ? `${Math.round(percent * 100)}%` : '')}
+                    >
+                      {data.sources.map((s, i) => (
+                        <Cell key={`cell-${s.source}`} fill={SOURCE_COLORS[i % SOURCE_COLORS.length]} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <details className="glass-panel rounded-lg px-3 py-2 min-w-0 overflow-hidden">
+                <summary className="cursor-pointer select-none list-none flex items-center justify-between gap-3 min-w-0">
+                  <span className="text-sm font-semibold text-gray-900 dark:text-gray-100 truncate min-w-0">Sources</span>
+                  <span className="text-gray-500 dark:text-gray-400 text-xs">▼</span>
+                </summary>
+                <div className="mt-3 max-h-40 overflow-y-auto overscroll-y-contain space-y-2 pr-1">
+                  {data.sources.map((s, i) => (
+                    <div
+                      key={s.source}
+                      className="flex items-center justify-between gap-3 glass-panel rounded-lg px-3 py-2 min-w-0 max-w-full overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="inline-block w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: SOURCE_COLORS[i % SOURCE_COLORS.length]} }
+                        />
+                        <span className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate" title={s.source}>
+                          {s.source}
+                        </span>
+                      </div>
+                      <div className="text-right flex-shrink-0 min-w-0">
+                        <div className="text-sm font-bold text-gray-900 dark:text-gray-100 tabular-nums truncate">
+                          {s.opt_ins.toLocaleString()}
+                        </div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {s.closed} closed · {usd(s.cash_usd)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {loading ? 'Loading…' : 'No leads in this range. UTM sources appear once funnels send utm with submitLead.'}
+            </p>
+          )}
+        </Panel>
+      </div>
+      <div className="min-w-0 flex-1 order-1 xl:order-2">
+      <div className="glass-card rounded-xl border border-white/10 p-3 sm:p-4 h-full">
         <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
             Weekly scorecard · {formatRange(start, end)}
@@ -607,47 +611,47 @@ export default function FunnelDashboard({
                 onChange={setPaidSnapshot}
               />
             ) : null}
-            {effectiveChannel !== 'organic' ? (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setSpendOpen((o) => !o)}
-                  aria-expanded={spendOpen}
-                  className="rounded-lg bg-indigo-600 px-2.5 py-1 text-[11px] font-medium text-white hover:bg-indigo-500"
-                >
-                  + Log spend &amp; ads
-                </button>
-                {spendOpen ? (
-                  <LogSpendPopover
-                    funnels={funnels}
-                    defaultFunnelId={funnelId ?? funnels[0]?.id ?? null}
-                    onClose={() => setSpendOpen(false)}
-                    onSaved={() => {
-                      setSpendOpen(false);
-                      setReloadKey((k) => k + 1);
-                    }}
-                  />
-                ) : null}
-              </div>
-            ) : null}
           </div>
         </div>
+        {selectedCampaignId ? (
+          <p className="mb-2 text-[11px] text-gray-500 dark:text-gray-400">
+            Scoped to one campaign (via the Ad performance tab, far right) — read-only; hand edits apply to the
+            funnel-wide total, so switch back to &quot;All linked campaigns&quot; there to edit.
+          </p>
+        ) : null}
         <FunnelScorecardGrid
           scorecard={scorecard}
           loading={loading}
           model={scorecardModel}
-          onEditCell={async (weekStart, metricKey, value) => {
-            await apiClient.putFunnelScorecardOverride({
-              funnel_id: funnelId ?? null,
-              channel: effectiveChannel,
-              week_start: weekStart,
-              metric_key: metricKey,
-              value,
-            });
-            setReloadKey((k) => k + 1);
-          }}
+          onEditCell={
+            selectedCampaignId
+              ? undefined
+              : async (weekStart, metricKey, value) => {
+                  await apiClient.putFunnelScorecardOverride({
+                    funnel_id: funnelId ?? null,
+                    channel: effectiveChannel,
+                    week_start: weekStart,
+                    metric_key: metricKey,
+                    value,
+                  });
+                  setReloadKey((k) => k + 1);
+                }
+          }
         />
       </div>
+      </div>
+      </div>
+
+      {funnelId && hasLinkedCampaigns ? (
+        <FunnelAdPerformanceDrawer
+          funnelId={funnelId}
+          linkedCampaigns={linkedCampaigns}
+          selectedCampaignId={selectedCampaignId}
+          onSelectedCampaignIdChange={setSelectedCampaignId}
+          start={start}
+          end={end}
+        />
+      ) : null}
 
       {/* Full width: weekly ad spend vs cash collected, same values as the scorecard grid */}
       <Panel title="Paid ads vs. cash collected" subtitle="Weekly, from the scorecard's Ad Spend and Cash Collected rows · CAC on hover">
@@ -864,7 +868,6 @@ export default function FunnelDashboard({
           )}
         </Panel>
       </div>
-
       {/* Steps belong to one funnel, so the drop-off view needs a funnel selected */}
       {funnelId ? (
         <Panel title="Step drop-off" subtitle="Unique visitors reaching each tracked step in this range">
@@ -875,8 +878,24 @@ export default function FunnelDashboard({
         </>
       )}
 
-      {settingsOpen && funnelId ? <SettingsDrawer funnelId={funnelId} onClose={() => setSettingsOpen(false)} /> : null}
-      {targetsOpen ? <TargetsDrawer onClose={() => setTargetsOpen(false)} /> : null}
+      {settingsOpen && funnelId ? <SettingsModal funnelId={funnelId} onClose={() => setSettingsOpen(false)} /> : null}
+      {targetsOpen && funnelId ? (
+        <FunnelSimulatorModal
+          scope={{ mode: 'paid_vsl', funnelId }}
+          initialScenarioId={paidSnapshot?.id}
+          startFresh={!paidSnapshot}
+          onSaved={(row) => {
+            setPaidSnapshot(row);
+            setSnapshotTick((n) => n + 1);
+          }}
+          onDeleted={(id) => {
+            if (paidSnapshot?.id === id) setPaidSnapshot(null);
+            setSnapshotTick((n) => n + 1);
+          }}
+          onClose={() => setTargetsOpen(false)}
+        />
+      ) : null}
+      {targetsOpen && !funnelId ? <TargetsModal onClose={() => setTargetsOpen(false)} /> : null}
     </div>
   );
 }
