@@ -93,8 +93,14 @@ export default function NewFunnelPage() {
     if (picked && !formData.name.trim()) setFormData((d) => ({ ...d, name: picked.name }));
   };
 
-  const goToDashboard = (funnelId: string) =>
-    router.push({ pathname: '/', query: { tab: 'funnels', funnelId } }, undefined, { shallow: true });
+  const goToDashboard = (funnelId: string) => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('activeTab', 'funnels');
+    }
+    // Full navigation. Shallow push from /funnels/new does not stay on this page,
+    // and the dashboard must receive tab + funnelId together.
+    void router.push({ pathname: '/', query: { tab: 'funnels', funnelId } });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

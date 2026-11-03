@@ -95,6 +95,23 @@ export default function Dashboard() {
   // Read tab from localStorage only after mount. Loading shell is shown until auth
   // finishes, so useEffect is enough and avoids SSR useLayoutEffect hydration warnings.
   useEffect(() => {
+    // A URL tab (funnel create lands on /?tab=funnels&funnelId=) beats the last
+    // saved tab. Reading localStorage first sent the new funnel back to Terminal.
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const urlFunnel = params.get('funnelId');
+      const urlTab = params.get('tab');
+      if (urlFunnel || urlTab === 'funnels') {
+        setActiveTab('funnels');
+        return;
+      }
+      if (urlTab && VALID_TAB_IDS.includes(urlTab as TabId)) {
+        const resolved = (urlTab === 'kpi_command_center' ? 'funnels' : urlTab) as DashboardTabId;
+        setActiveTab(resolved);
+        setPipelineMounted(resolved === 'pipeline');
+        return;
+      }
+    }
     const tab = getInitialTab();
     setActiveTab(tab);
     setPipelineMounted(tab === 'pipeline');
@@ -396,11 +413,14 @@ export default function Dashboard() {
 
   useEffect(() => {
     if (!router.isReady) return;
+    // URL is the source of truth until the deep-link effect applies tab=funnels.
+    // activeTab is still the saved tab on that first pass and used to strip funnelId.
+    if (router.query.tab === 'funnels') return;
     if (activeTab === 'funnels') return;
     if (router.query.funnelId) {
       router.replace({ pathname: '/', query: { tab: activeTab } }, undefined, { shallow: true });
     }
-  }, [activeTab, router.isReady, router.query.funnelId, router.replace]);
+  }, [activeTab, router.isReady, router.query.tab, router.query.funnelId, router.replace]);
 
   // Clear sticky KPI deep-link when leaving the KPI tab so it cannot override later navigation.
   useEffect(() => {
