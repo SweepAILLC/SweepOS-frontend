@@ -14,6 +14,15 @@ import type {
   CloseSurveySubmitPayload,
   CloseSurveySubmitResponse,
 } from '@/types/closeSurvey';
+import type {
+  OnboardingSurveyDashboardResponse,
+  OnboardingSurveyEntryLinkResponse,
+  OnboardingSurveyMetaResponse,
+  OnboardingSurveyOptionsResponse,
+  OnboardingSurveyOptionsUpdatePayload,
+  OnboardingSurveySubmitPayload,
+  OnboardingSurveySubmitResponse,
+} from '@/types/onboardingSurvey';
 import {
   cache,
   CACHE_KEYS,
@@ -1980,6 +1989,39 @@ class ApiClient {
   async getCloseSurveyEntryLink(regenerate = false) {
     const response = await this.client.get('/close-survey/entry-link', { params: { regenerate } });
     return response.data as CloseSurveyEntryLinkResponse;
+  }
+
+  async getOnboardingSurveyEntryLink(regenerate = false) {
+    const response = await this.client.get('/onboarding-survey/entry-link', {
+      params: { regenerate },
+    });
+    return response.data as OnboardingSurveyEntryLinkResponse;
+  }
+
+  async getOnboardingSurveyDashboard() {
+    const response = await this.client.get('/onboarding-survey/dashboard');
+    return response.data as OnboardingSurveyDashboardResponse;
+  }
+
+  async getOnboardingSurveyOptions() {
+    const response = await this.client.get('/onboarding-survey/options');
+    return response.data as OnboardingSurveyOptionsResponse;
+  }
+
+  async updateOnboardingSurveyOptions(body: OnboardingSurveyOptionsUpdatePayload) {
+    const response = await this.client.put('/onboarding-survey/options', body);
+    return response.data as OnboardingSurveyOptionsResponse;
+  }
+
+  // Public post-sale onboarding survey (no auth — org-wide tokenized link)
+  async getOnboardingSurveyMeta(token: string) {
+    const response = await this.client.get(`/onboarding-survey/public/${token}/meta`);
+    return response.data as OnboardingSurveyMetaResponse;
+  }
+
+  async submitOnboardingSurvey(token: string, body: OnboardingSurveySubmitPayload) {
+    const response = await this.client.post(`/onboarding-survey/public/${token}/submit`, body);
+    return response.data as OnboardingSurveySubmitResponse;
   }
 
   // Public post-sales close survey (no auth — tokenized link)
