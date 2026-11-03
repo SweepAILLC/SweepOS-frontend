@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {
   ContentStudioBundle,
+  ContentStudioPriorityReference,
   ContentStudioStage,
   ContentStudioStageId,
 } from '@/lib/api';
@@ -73,6 +74,22 @@ function FormatBadge({ format }: { format: string }) {
     >
       {isLong ? 'Long-form' : 'Short-form'}
     </span>
+  );
+}
+
+function PriorityReferenceBadge({ reference }: { reference: ContentStudioPriorityReference }) {
+  const clientCount = reference.selection_count ?? 0;
+  return (
+    <a
+      href={reference.permalink}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-400/15 text-amber-700 dark:text-amber-300 hover:underline"
+      title="Based on a post clients told you (via the onboarding survey) made them want to work with you"
+    >
+      Based on your #{reference.rank} most-selected onboarding video ({clientCount} client
+      {clientCount === 1 ? '' : 's'})
+    </a>
   );
 }
 
@@ -225,7 +242,12 @@ export default function IdeasTab({
                               aria-label="Mark concept produced"
                             />
                             <div className="min-w-0 flex-1 space-y-2">
-                              <FormatBadge format={concept.format} />
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <FormatBadge format={concept.format} />
+                                {concept.priority_reference ? (
+                                  <PriorityReferenceBadge reference={concept.priority_reference} />
+                                ) : null}
+                              </div>
                               <p
                                 className={`text-sm font-semibold leading-snug text-gray-900 dark:text-gray-100 ${
                                   isDone ? 'line-through' : ''
