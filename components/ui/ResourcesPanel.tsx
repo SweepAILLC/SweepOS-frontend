@@ -970,6 +970,260 @@ export function OrgLibraryItemModal({
 
 
 // ---------------------------------------------------------------------------
+// Onboarding survey — one global, org-wide link (not a per-client form)
+// ---------------------------------------------------------------------------
+
+function OnboardingSurveyLinkCard() {
+  const [url, setUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+
+  const load = useCallback(async (regenerate = false) => {
+    if (regenerate) setRegenerating(true);
+    else setLoading(true);
+    setError(null);
+    try {
+      const res = await apiClient.getOnboardingSurveyEntryLink(regenerate);
+      setUrl(res.url);
+    } catch {
+      setError('Failed to load survey link.');
+    } finally {
+      setLoading(false);
+      setRegenerating(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const handleCopy = async () => {
+    if (!url) return;
+    await copyToClipboard(url);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200/60 dark:border-white/10 bg-white/60 dark:bg-gray-900/30 p-5 space-y-3">
+      <div>
+        <h3 className="text-sm font-bold text-gray-900 dark:text-gray-100">Onboarding survey link</h3>
+        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+          One link for every new client — they fill in their own name and business name. Share it
+          however you like; nothing sends it automatically. Responses show up in Marketing Intel →
+          Content Engine.
+        </p>
+      </div>
+      {error ? (
+        <p className="text-xs text-rose-400">{error}</p>
+      ) : (
+        <div className="flex items-center gap-2 flex-wrap">
+          <code className="flex-1 min-w-0 truncate text-xs bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-200">
+            {loading ? 'Loading…' : url}
+          </code>
+          <button
+            type="button"
+            onClick={() => void handleCopy()}
+            disabled={loading || !url}
+            className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void load(true)}
+            disabled={loading || regenerating}
+            className="px-3 py-2 rounded-lg bg-gray-700/60 hover:bg-gray-600/60 text-gray-200 text-xs font-semibold transition-colors disabled:opacity-50"
+            title="Invalidate the old link and issue a new one"
+          >
+            {regenerating ? 'Regenerating…' : 'Regenerate'}
+          </button>
+        </div>
+      )}
+
+      <div className="pt-2 border-t border-gray-200/60 dark:border-white/10">
+        <button
+          type="button"
+          onClick={() => setCustomizeOpen((v) => !v)}
+          className="flex w-full items-center justify-between text-xs font-semibold text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100 transition-colors"
+        >
+          Customize survey questions
+          <span className={`transition-transform ${customizeOpen ? 'rotate-180' : ''}`}>▾</span>
+        </button>
+        {customizeOpen ? (
+          <div className="mt-3">
+            <OnboardingSurveyOptionsEditor />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding survey — org-editable choice lists for the three multi-choice steps
+// ---------------------------------------------------------------------------
+
+function ChoiceListEditor({
+  label,
+  values,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState('');
+
+  const addValue = () => {
+    const trimmed = draft.trim();
+    if (!trimmed || values.includes(trimmed)) {
+      setDraft('');
+      return;
+    }
+    onChange([...values, trimmed]);
+    setDraft('');
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">{label}</p>
+      <div className="flex flex-wrap gap-1.5">
+        {values.map((v, i) => (
+          <span
+            key={`${v}-${i}`}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-400/30 text-xs text-violet-700 dark:text-violet-300"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+              className="text-violet-500 hover:text-violet-300"
+              aria-label={`Remove ${v}`}
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        {values.length === 0 ? (
+          <span className="text-xs text-gray-500 dark:text-gray-400 italic">
+            No choices yet — respondents will see a free-text box instead.
+          </span>
+        ) : null}
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              addValue();
+            }
+          }}
+          placeholder="Add a choice…"
+          className="flex-1 min-w-0 px-3 py-1.5 text-xs rounded-lg bg-white/60 dark:bg-gray-800/60 border border-gray-200/60 dark:border-white/10 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+        />
+        <button
+          type="button"
+          onClick={addValue}
+          className="px-2.5 py-1.5 rounded-lg bg-gray-700/60 hover:bg-gray-600/60 text-gray-200 text-xs font-semibold transition-colors"
+        >
+          Add
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function OnboardingSurveyOptionsEditor() {
+  const [referralOptions, setReferralOptions] = useState<string[]>([]);
+  const [problemOptions, setProblemOptions] = useState<string[]>([]);
+  const [triggerOptions, setTriggerOptions] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await apiClient.getOnboardingSurveyOptions();
+        setReferralOptions(res.referral_source_options);
+        setProblemOptions(res.problem_to_solve_options);
+        setTriggerOptions(res.conversion_trigger_options);
+      } catch {
+        setError('Failed to load survey choices.');
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await apiClient.updateOnboardingSurveyOptions({
+        referral_source_options: referralOptions,
+        problem_to_solve_options: problemOptions,
+        conversion_trigger_options: triggerOptions,
+      });
+      setReferralOptions(res.referral_source_options);
+      setProblemOptions(res.problem_to_solve_options);
+      setTriggerOptions(res.conversion_trigger_options);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1600);
+    } catch {
+      setError('Failed to save survey choices.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return <p className="text-xs text-gray-500 dark:text-gray-400">Loading…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-gray-500 dark:text-gray-400">
+        Give respondents tappable choices for these questions instead of a free-text box. Leave a
+        list empty to keep it free text.
+      </p>
+      <ChoiceListEditor
+        label="How did you first hear about us?"
+        values={referralOptions}
+        onChange={setReferralOptions}
+      />
+      <ChoiceListEditor
+        label="What's the #1 problem you're hoping to solve?"
+        values={problemOptions}
+        onChange={setProblemOptions}
+      />
+      <ChoiceListEditor
+        label="What pushed you over the line to convert?"
+        values={triggerOptions}
+        onChange={setTriggerOptions}
+      />
+      {error ? <p className="text-xs text-rose-400">{error}</p> : null}
+      <button
+        type="button"
+        onClick={() => void handleSave()}
+        disabled={saving}
+        className="px-3 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+      >
+        {saving ? 'Saving…' : saved ? 'Saved' : 'Save choices'}
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel — org library only (platform SOPs live in consulting portal)
 // ---------------------------------------------------------------------------
 
@@ -1082,6 +1336,8 @@ export default function ResourcesPanel() {
             />
           </div>
         </div>
+
+        <OnboardingSurveyLinkCard />
 
         {(availableLibraryTags.length > 0 || libraryTagFilter !== 'All') && (
           <div className="flex items-center gap-2 flex-wrap">
