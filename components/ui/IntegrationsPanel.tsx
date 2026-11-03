@@ -593,6 +593,10 @@ export default function IntegrationsPanel() {
           s ? { ...s, connected: true } : ({ connected: true } as InstagramStatus)
         );
       }, refreshIntegrationSummaries);
+    } else if (params.get('instagram') === 'error') {
+      consumedOauthReturnRef.current = true;
+      const reason = params.get('reason');
+      setError(reason ? `Instagram connect failed: ${reason.replace(/_/g, ' ')}` : 'Instagram connect failed.');
     }
     if (params.get('meta_ads') === 'connected') {
       consumedOauthReturnRef.current = true;

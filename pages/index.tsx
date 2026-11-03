@@ -346,7 +346,12 @@ export default function Dashboard() {
         setActiveTab('settings');
         const nextQuery: Record<string, string> = { tab: 'settings', section: 'integrations' };
         if (router.query.instagram === 'connected') nextQuery.instagram = 'connected';
-        if (router.query.instagram === 'error') nextQuery.instagram = 'error';
+        if (router.query.instagram === 'error') {
+          nextQuery.instagram = 'error';
+          if (typeof router.query.reason === 'string' && router.query.reason) {
+            nextQuery.reason = router.query.reason;
+          }
+        }
         router.replace({ pathname: '/', query: nextQuery }, undefined, { shallow: true });
         return;
       }
