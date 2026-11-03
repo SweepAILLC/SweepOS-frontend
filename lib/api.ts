@@ -163,6 +163,8 @@ export interface InstagramStatus {
 }
 
 export interface InstagramPostCard {
+  /** instagram_media.id (UUID) — target for the transcribe endpoint, not ig_media_id. */
+  id?: string;
   ig_media_id: string;
   permalink?: string | null;
   thumbnail_url?: string | null;
@@ -173,6 +175,16 @@ export interface InstagramPostCard {
   reach?: number | null;
   saved?: number | null;
   views?: number | null;
+  transcript?: string | null;
+  /** 'unavailable' | 'ok' | 'failed' */
+  transcript_status?: string | null;
+}
+
+export interface InstagramTranscriptResponse {
+  media_id: string;
+  status: string; // ok | failed | unavailable
+  transcript?: string | null;
+  error?: string | null;
 }
 
 export interface InstagramTrendPoint {
@@ -571,6 +583,12 @@ export interface PerformanceEmailDraftsResponse {
  */
 export type ContentStudioStageId = 'TOF' | 'MOF' | 'BOF';
 
+export interface ContentStudioPriorityReference {
+  rank: number;
+  selection_count: number | null;
+  permalink: string;
+}
+
 export interface ContentStudioStageConcept {
   id: string;
   format: 'long' | 'short';
@@ -579,6 +597,9 @@ export interface ContentStudioStageConcept {
   bullets: string[];
   why_for_icp: string;
   funnel_path_to_sale: string;
+  // Set when this concept replicates a post clients picked most in the onboarding survey's
+  // content-gallery step — see content_conversion_service.get_top_selected_content.
+  priority_reference?: ContentStudioPriorityReference | null;
 }
 
 export interface ContentStudioStage {
@@ -1812,6 +1833,11 @@ class ApiClient {
   async getInstagramPerformance(days = 90) {
     const response = await this.client.get('/instagram/performance', { params: { days } });
     return response.data as InstagramPerformance;
+  }
+
+  async postInstagramTranscribeMedia(mediaId: string) {
+    const response = await this.client.post(`/instagram/media/${mediaId}/transcript`);
+    return response.data as InstagramTranscriptResponse;
   }
 
   async postInstagramConnect() {

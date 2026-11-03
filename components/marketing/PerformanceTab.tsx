@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent } from 'react';
 import Link from 'next/link';
 import {
   apiClient,
@@ -48,6 +48,8 @@ function Delta({ value }: { value?: number | null }) {
   );
 }
 
+const TRANSCRIBABLE_FORMATS = new Set(['reel', 'reels', 'video']);
+
 function PostMediaCard({
   post,
   tone = 'default',
@@ -56,11 +58,68 @@ function PostMediaCard({
   tone?: 'default' | 'under';
 }) {
   const [imgFailed, setImgFailed] = useState(false);
+  const [transcript, setTranscript] = useState<string | null>(post.transcript ?? null);
+  const [transcriptStatus, setTranscriptStatus] = useState<string | null | undefined>(
+    post.transcript_status
+  );
+  const [transcribing, setTranscribing] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [transcriptNote, setTranscriptNote] = useState<string | null>(null);
   const border =
     tone === 'under'
       ? 'border-rose-400/25 hover:ring-rose-400/30'
       : 'border-gray-200/40 dark:border-gray-700/40 hover:ring-violet-400/30';
   const showImg = Boolean(post.thumbnail_url) && !imgFailed;
+  const canTranscribe = Boolean(post.id) && TRANSCRIBABLE_FORMATS.has((post.format_bucket || '').toLowerCase());
+
+  const copyText = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setTranscriptNote('Could not copy — select manually');
+      setTimeout(() => setTranscriptNote(null), 3000);
+    }
+  };
+
+  const handleTranscriptClick = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (transcript && transcriptStatus === 'ok') {
+      await copyText(transcript);
+      return;
+    }
+    if (!post.id || transcribing) return;
+    setTranscribing(true);
+    setTranscriptNote(null);
+    try {
+      const res = await apiClient.postInstagramTranscribeMedia(post.id);
+      setTranscriptStatus(res.status);
+      setTranscript(res.transcript ?? null);
+      if (res.status === 'ok' && res.transcript) {
+        await copyText(res.transcript);
+      } else {
+        setTranscriptNote(res.error || 'Could not transcribe this reel');
+        setTimeout(() => setTranscriptNote(null), 3000);
+      }
+    } catch {
+      setTranscriptNote('Transcription failed');
+      setTimeout(() => setTranscriptNote(null), 3000);
+    } finally {
+      setTranscribing(false);
+    }
+  };
+
+  const transcriptLabel = copied
+    ? 'Copied!'
+    : transcribing
+      ? 'Transcribing…'
+      : transcriptNote
+        ? transcriptNote
+        : transcript && transcriptStatus === 'ok'
+          ? 'Copy transcript'
+          : 'Transcribe';
 
   return (
     <a
@@ -101,6 +160,16 @@ function PostMediaCard({
         <p className="text-[11px] text-gray-500">
           {fmtNum(post.reach)} reach · {fmtNum(post.saved)} saves · {fmtNum(post.views)} views
         </p>
+        {canTranscribe && (
+          <button
+            type="button"
+            onClick={handleTranscriptClick}
+            disabled={transcribing}
+            className="mt-1 w-full truncate rounded-md border border-gray-300/50 dark:border-white/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-600 dark:text-gray-300 hover:bg-gray-100/60 dark:hover:bg-white/5 disabled:opacity-50"
+          >
+            {transcriptLabel}
+          </button>
+        )}
       </div>
     </a>
   );

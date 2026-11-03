@@ -12,19 +12,22 @@ import { DateRangeProvider } from '@/contexts/DateRangeContext';
 import { useLoading } from '@/contexts/LoadingContext';
 import { formatApiError } from '@/lib/apiError';
 import AdsTab from '@/components/marketing/AdsTab';
-import IdeasTab from '@/components/marketing/IdeasTab';
+import ContentEngineTab from '@/components/marketing/ContentEngineTab';
 import PerformanceTab from '@/components/marketing/PerformanceTab';
 
-type SubTab = 'organic' | 'ads';
+type SubTab = 'organic' | 'ads' | 'content_engine';
 
 const SUB_TABS: { id: SubTab; label: string }[] = [
   { id: 'organic', label: 'Organic' },
   { id: 'ads', label: 'Ads' },
+  { id: 'content_engine', label: 'Content Engine' },
 ];
 
 function parseSub(raw: string | string[] | undefined): SubTab {
   const value = Array.isArray(raw) ? raw[0] : raw;
-  return value === 'ads' ? 'ads' : 'organic';
+  if (value === 'ads') return 'ads';
+  if (value === 'content_engine') return 'content_engine';
+  return 'organic';
 }
 
 export default function ContentStudioPanel() {
@@ -142,16 +145,19 @@ export default function ContentStudioPanel() {
     if (sub === 'ads') {
       return 'Fatigue, messaging ceiling, and scale signals from synced Meta Ads. Alerts recommend. Pause is the only write.';
     }
-    return (
-      <>
-        Instagram period metrics, top posts, and underperformers — then video concepts grounded in that performance
-        and your{' '}
-        <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
-          Intelligence
-        </Link>{' '}
-        ICP.
-      </>
-    );
+    if (sub === 'content_engine') {
+      return (
+        <>
+          Your top-converting content, every post-sale onboarding survey response, and video concepts grounded in
+          that performance and your{' '}
+          <Link href="/?tab=intelligence" className="text-violet-600 dark:text-violet-400 underline">
+            Intelligence
+          </Link>{' '}
+          ICP — nothing here is sent automatically.
+        </>
+      );
+    }
+    return 'Instagram period metrics, top posts, and underperformers.';
   }, [sub]);
 
   return (
@@ -182,36 +188,22 @@ export default function ContentStudioPanel() {
         <DateRangeProvider storageKey="marketing-intel-ads" defaultPreset="last_28" defaultCompare="previous_period">
           <AdsTab />
         </DateRangeProvider>
+      ) : sub === 'content_engine' ? (
+        <ContentEngineTab
+          ideasError={error}
+          contentBundle={contentBundle}
+          batchId={batchId}
+          completed={completed}
+          salesPlaybookSource={salesPlaybookSource}
+          reanalyzeBusy={reanalyzeBusy}
+          conceptRegenPending={conceptRegenPending}
+          reanalyzeMessage={reanalyzeMessage}
+          loading={loading}
+          onReanalyze={() => void handleReanalyze()}
+          onToggleCompleted={toggleCompleted}
+        />
       ) : (
-      <div className="space-y-10">
         <PerformanceTab />
-        <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 space-y-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Ideas</h3>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              TOF / MOF / BOF concepts mined from calls and grounded in your top Instagram posts — not advice
-              labels.
-            </p>
-          </div>
-          {error ? (
-            <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm">
-              {error}
-            </div>
-          ) : null}
-          <IdeasTab
-            contentBundle={contentBundle}
-            batchId={batchId}
-            completed={completed}
-            salesPlaybookSource={salesPlaybookSource}
-            reanalyzeBusy={reanalyzeBusy}
-            conceptRegenPending={conceptRegenPending}
-            reanalyzeMessage={reanalyzeMessage}
-            loading={loading}
-            onReanalyze={() => void handleReanalyze()}
-            onToggleCompleted={toggleCompleted}
-          />
-        </div>
-      </div>
       )}
     </div>
   );
