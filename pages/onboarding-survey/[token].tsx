@@ -210,6 +210,7 @@ function OnboardingSurveyClient() {
   const [interestSpark, setInterestSpark] = useState('');
   const [contentContribution, setContentContribution] = useState('');
   const [contentSelectedIds, setContentSelectedIds] = useState<string[]>([]);
+  const [failedThumbIds, setFailedThumbIds] = useState<Set<string>>(new Set());
   const [problemToSolve, setProblemToSolve] = useState('');
   const [offerFitReason, setOfferFitReason] = useState('');
   const [investmentReason, setInvestmentReason] = useState('');
@@ -459,9 +460,10 @@ function OnboardingSurveyClient() {
                 Which of these posts specifically contributed to you starting with us?
               </span>
               <p className="mt-1 text-sm text-gray-400">Select as many as apply.</p>
-              <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="mt-3 grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {meta.instagram_gallery.map((item) => {
                   const selected = contentSelectedIds.includes(item.id);
+                  const showImg = Boolean(item.thumbnail_url) && !failedThumbIds.has(item.id);
                   return (
                     <button
                       key={item.id}
@@ -475,18 +477,27 @@ function OnboardingSurveyClient() {
                         selected ? 'border-cyan-400' : 'border-white/10 hover:border-white/30'
                       }`}
                     >
-                      {item.thumbnail_url ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={item.thumbnail_url}
-                          alt=""
-                          className={`w-full h-28 object-cover ${selected ? '' : 'opacity-70'}`}
-                        />
-                      ) : (
-                        <div className="w-full h-28 flex items-center justify-center bg-white/5 text-xs text-gray-400 p-2">
-                          {item.caption_excerpt || 'Post'}
-                        </div>
-                      )}
+                      <div className="relative w-full aspect-[4/5] bg-white/5">
+                        {showImg ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={item.thumbnail_url!}
+                            alt=""
+                            loading="lazy"
+                            decoding="async"
+                            onError={() =>
+                              setFailedThumbIds((prev) => new Set(prev).add(item.id))
+                            }
+                            className={`absolute inset-0 w-full h-full object-cover ${
+                              selected ? '' : 'opacity-70'
+                            }`}
+                          />
+                        ) : (
+                          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-400 p-2 text-center line-clamp-4">
+                            {item.caption_excerpt || 'Post'}
+                          </div>
+                        )}
+                      </div>
                       {selected ? (
                         <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-cyan-400 text-gray-900 text-xs flex items-center justify-center">
                           ✓

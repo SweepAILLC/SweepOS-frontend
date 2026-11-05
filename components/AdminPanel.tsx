@@ -254,6 +254,11 @@ export default function AdminPanel() {
     
     try {
       await apiClient.deleteOrganization(orgId);
+      setOrganizations((prev) => prev.filter((o) => o.id !== orgId));
+      if (viewingDashboard === orgId) {
+        setViewingDashboard(null);
+        setDashboardData(null);
+      }
       loadData();
     } catch (err: any) {
       setError(err.response?.data?.detail || err.message || 'Failed to delete organization');

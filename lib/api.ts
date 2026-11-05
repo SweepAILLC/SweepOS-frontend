@@ -352,6 +352,63 @@ export interface AdsBreakdownAdSet {
   ads: AdsBreakdownAd[];
 }
 
+export interface AdsAdSetRow {
+  id: string;
+  meta_adset_id: string;
+  name?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  optimization_goal?: string | null;
+  effective_status?: string | null;
+  learning_stage?: string | null;
+  daily_budget_cents?: number | null;
+  pill: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  frequency: number | null;
+  active_ads: number;
+  bench_target: number;
+  series: AdsSeriesPoint[];
+}
+
+export interface AdsAdSetList {
+  ad_sets: AdsAdSetRow[];
+  currency?: string | null;
+  days: number;
+  start?: string | null;
+  end: string;
+}
+
+export interface AdsAdRow {
+  id: string;
+  meta_ad_id: string;
+  name?: string | null;
+  thumbnail_url?: string | null;
+  effective_status?: string | null;
+  ad_set_id?: string | null;
+  ad_set_name?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  pill: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  frequency: number | null;
+  fatigued: boolean;
+  series: AdsSeriesPoint[];
+}
+
+export interface AdsAdList {
+  ads: AdsAdRow[];
+  currency?: string | null;
+  days: number;
+  start?: string | null;
+  end: string;
+}
+
 export interface FunnelCreativeAd {
   id: string;
   meta_ad_id: string;
@@ -1970,6 +2027,29 @@ class ApiClient {
     return response.data as AdsBreakdown;
   }
 
+  async getAdsAdSets(range: { start?: string; end: string; campaignIds?: string[] }) {
+    const response = await this.client.get('/marketing-intel/ads/ad-sets', {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.campaignIds?.length ? { campaign_ids: range.campaignIds.join(',') } : {}),
+      },
+    });
+    return response.data as AdsAdSetList;
+  }
+
+  async getAdsAds(range: { start?: string; end: string; adSetIds?: string[]; campaignIds?: string[] }) {
+    const response = await this.client.get('/marketing-intel/ads/ads', {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.adSetIds?.length ? { ad_set_ids: range.adSetIds.join(',') } : {}),
+        ...(!range.adSetIds?.length && range.campaignIds?.length ? { campaign_ids: range.campaignIds.join(',') } : {}),
+      },
+    });
+    return response.data as AdsAdList;
+  }
+
   async ackAdsAlert(alertId: string) {
     const response = await this.client.post(`/marketing-intel/ads/alerts/${alertId}/ack`);
     return response.data as AdsAlert;
@@ -3242,6 +3322,8 @@ class ApiClient {
 
   async deleteOrganization(orgId: string) {
     const response = await this.client.delete(`/admin/organizations/${orgId}`);
+    cache.delete(CACHE_KEYS.ADMIN_ORGANIZATIONS);
+    cache.delete(CACHE_KEYS.ADMIN_HEALTH);
     return response.data;
   }
 

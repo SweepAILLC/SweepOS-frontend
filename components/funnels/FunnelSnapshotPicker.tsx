@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import { orgIdFromAccessToken } from '@/lib/orgScope';
-import FunnelSimulatorModal, { scenarioInScope } from '@/components/portal/FunnelSimulatorModal';
+import { scenarioInScope } from '@/components/portal/FunnelSimulatorModal';
 import type { FunnelSimulatorScenario, SimulatorMode } from '@/types/funnelSimulator';
 
 /**
@@ -18,6 +18,10 @@ interface FunnelSnapshotPickerProps {
   /** What the select's "no snapshot" option means in this view. */
   noneLabel: string;
   onChange: (scenario: FunnelSimulatorScenario | null) => void;
+  /** Bump after saving a snapshot elsewhere (Targets) so the list refreshes. */
+  refreshKey?: number;
+  /** After a save, select this id if present. */
+  preferId?: string;
 }
 
 function activeKey(mode: SimulatorMode, funnelId: string | null): string {
@@ -41,10 +45,16 @@ function writeActive(key: string, id: string) {
   }
 }
 
-export default function FunnelSnapshotPicker({ mode, funnelId, noneLabel, onChange }: FunnelSnapshotPickerProps) {
+export default function FunnelSnapshotPicker({
+  mode,
+  funnelId,
+  noneLabel,
+  onChange,
+  refreshKey = 0,
+  preferId,
+}: FunnelSnapshotPickerProps) {
   const [rows, setRows] = useState<FunnelSimulatorScenario[]>([]);
   const [activeId, setActiveId] = useState('');
-  const [editor, setEditor] = useState<{ scenarioId?: string } | null>(null);
   const key = activeKey(mode, funnelId);
 
   const select = useCallback(
@@ -59,12 +69,12 @@ export default function FunnelSnapshotPicker({ mode, funnelId, noneLabel, onChan
   );
 
   const load = useCallback(
-    async (preferId?: string) => {
+    async (pickId?: string) => {
       try {
         const all = await apiClient.listFunnelSimulatorScenarios();
         const scoped = all.filter((r) => scenarioInScope(r, { mode, funnelId }));
         setRows(scoped);
-        select(preferId ?? readActive(key), scoped);
+        select(pickId ?? readActive(key), scoped);
       } catch {
         setRows([]);
         select('', []);
@@ -76,6 +86,13 @@ export default function FunnelSnapshotPicker({ mode, funnelId, noneLabel, onChan
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (refreshKey === 0) return;
+    void load(preferId);
+    // refreshKey is the trigger; preferId is the post-save selection.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const selectId = `snapshot-${mode}-${funnelId ?? 'all'}`;
 
@@ -97,32 +114,6 @@ export default function FunnelSnapshotPicker({ mode, funnelId, noneLabel, onChan
           </option>
         ))}
       </select>
-      {activeId ? (
-        <button
-          type="button"
-          onClick={() => setEditor({ scenarioId: activeId })}
-          className="rounded-md px-2 py-1 text-[11px] font-medium text-gray-600 dark:text-gray-300 hover:bg-white/10"
-        >
-          Edit
-        </button>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => setEditor({})}
-        className="rounded-md border border-violet-400/40 bg-violet-500/10 px-2 py-1 text-[11px] font-medium text-violet-700 dark:text-violet-300 hover:bg-violet-500/20"
-      >
-        + Snapshot
-      </button>
-      {editor ? (
-        <FunnelSimulatorModal
-          scope={{ mode, funnelId }}
-          initialScenarioId={editor.scenarioId}
-          startFresh={!editor.scenarioId}
-          onSaved={(row) => void load(row.id)}
-          onDeleted={(id) => void load(id === activeId ? '' : activeId)}
-          onClose={() => setEditor(null)}
-        />
-      ) : null}
     </div>
   );
 }
