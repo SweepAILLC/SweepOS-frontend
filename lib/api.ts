@@ -14,6 +14,15 @@ import type {
   CloseSurveySubmitPayload,
   CloseSurveySubmitResponse,
 } from '@/types/closeSurvey';
+import type {
+  OnboardingSurveyDashboardResponse,
+  OnboardingSurveyEntryLinkResponse,
+  OnboardingSurveyMetaResponse,
+  OnboardingSurveyOptionsResponse,
+  OnboardingSurveyOptionsUpdatePayload,
+  OnboardingSurveySubmitPayload,
+  OnboardingSurveySubmitResponse,
+} from '@/types/onboardingSurvey';
 import {
   cache,
   CACHE_KEYS,
@@ -154,6 +163,8 @@ export interface InstagramStatus {
 }
 
 export interface InstagramPostCard {
+  /** instagram_media.id (UUID) — target for the transcribe endpoint, not ig_media_id. */
+  id?: string;
   ig_media_id: string;
   permalink?: string | null;
   thumbnail_url?: string | null;
@@ -164,6 +175,16 @@ export interface InstagramPostCard {
   reach?: number | null;
   saved?: number | null;
   views?: number | null;
+  transcript?: string | null;
+  /** 'unavailable' | 'ok' | 'failed' */
+  transcript_status?: string | null;
+}
+
+export interface InstagramTranscriptResponse {
+  media_id: string;
+  status: string; // ok | failed | unavailable
+  transcript?: string | null;
+  error?: string | null;
 }
 
 export interface InstagramTrendPoint {
@@ -329,6 +350,63 @@ export interface AdsBreakdownAdSet {
   bench_target: number;
   series: AdsSeriesPoint[];
   ads: AdsBreakdownAd[];
+}
+
+export interface AdsAdSetRow {
+  id: string;
+  meta_adset_id: string;
+  name?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  optimization_goal?: string | null;
+  effective_status?: string | null;
+  learning_stage?: string | null;
+  daily_budget_cents?: number | null;
+  pill: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  frequency: number | null;
+  active_ads: number;
+  bench_target: number;
+  series: AdsSeriesPoint[];
+}
+
+export interface AdsAdSetList {
+  ad_sets: AdsAdSetRow[];
+  currency?: string | null;
+  days: number;
+  start?: string | null;
+  end: string;
+}
+
+export interface AdsAdRow {
+  id: string;
+  meta_ad_id: string;
+  name?: string | null;
+  thumbnail_url?: string | null;
+  effective_status?: string | null;
+  ad_set_id?: string | null;
+  ad_set_name?: string | null;
+  campaign_id?: string | null;
+  campaign_name?: string | null;
+  pill: string;
+  spend_cents: number;
+  results: number;
+  cpr_cents: number | null;
+  ctr: number | null;
+  frequency: number | null;
+  fatigued: boolean;
+  series: AdsSeriesPoint[];
+}
+
+export interface AdsAdList {
+  ads: AdsAdRow[];
+  currency?: string | null;
+  days: number;
+  start?: string | null;
+  end: string;
 }
 
 export interface FunnelCreativeAd {
@@ -562,6 +640,12 @@ export interface PerformanceEmailDraftsResponse {
  */
 export type ContentStudioStageId = 'TOF' | 'MOF' | 'BOF';
 
+export interface ContentStudioPriorityReference {
+  rank: number;
+  selection_count: number | null;
+  permalink: string;
+}
+
 export interface ContentStudioStageConcept {
   id: string;
   format: 'long' | 'short';
@@ -570,6 +654,9 @@ export interface ContentStudioStageConcept {
   bullets: string[];
   why_for_icp: string;
   funnel_path_to_sale: string;
+  // Set when this concept replicates a post clients picked most in the onboarding survey's
+  // content-gallery step — see content_conversion_service.get_top_selected_content.
+  priority_reference?: ContentStudioPriorityReference | null;
 }
 
 export interface ContentStudioStage {
@@ -1805,6 +1892,11 @@ class ApiClient {
     return response.data as InstagramPerformance;
   }
 
+  async postInstagramTranscribeMedia(mediaId: string) {
+    const response = await this.client.post(`/instagram/media/${mediaId}/transcript`);
+    return response.data as InstagramTranscriptResponse;
+  }
+
   async postInstagramConnect() {
     const response = await this.client.post('/instagram/connect');
     return response.data as { redirect_url: string; connection_request_id?: string | null };
@@ -1935,6 +2027,29 @@ class ApiClient {
     return response.data as AdsBreakdown;
   }
 
+  async getAdsAdSets(range: { start?: string; end: string; campaignIds?: string[] }) {
+    const response = await this.client.get('/marketing-intel/ads/ad-sets', {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.campaignIds?.length ? { campaign_ids: range.campaignIds.join(',') } : {}),
+      },
+    });
+    return response.data as AdsAdSetList;
+  }
+
+  async getAdsAds(range: { start?: string; end: string; adSetIds?: string[]; campaignIds?: string[] }) {
+    const response = await this.client.get('/marketing-intel/ads/ads', {
+      params: {
+        ...(range.start ? { start: range.start } : {}),
+        end: range.end,
+        ...(range.adSetIds?.length ? { ad_set_ids: range.adSetIds.join(',') } : {}),
+        ...(!range.adSetIds?.length && range.campaignIds?.length ? { campaign_ids: range.campaignIds.join(',') } : {}),
+      },
+    });
+    return response.data as AdsAdList;
+  }
+
   async ackAdsAlert(alertId: string) {
     const response = await this.client.post(`/marketing-intel/ads/alerts/${alertId}/ack`);
     return response.data as AdsAlert;
@@ -1980,6 +2095,39 @@ class ApiClient {
   async getCloseSurveyEntryLink(regenerate = false) {
     const response = await this.client.get('/close-survey/entry-link', { params: { regenerate } });
     return response.data as CloseSurveyEntryLinkResponse;
+  }
+
+  async getOnboardingSurveyEntryLink(regenerate = false) {
+    const response = await this.client.get('/onboarding-survey/entry-link', {
+      params: { regenerate },
+    });
+    return response.data as OnboardingSurveyEntryLinkResponse;
+  }
+
+  async getOnboardingSurveyDashboard() {
+    const response = await this.client.get('/onboarding-survey/dashboard');
+    return response.data as OnboardingSurveyDashboardResponse;
+  }
+
+  async getOnboardingSurveyOptions() {
+    const response = await this.client.get('/onboarding-survey/options');
+    return response.data as OnboardingSurveyOptionsResponse;
+  }
+
+  async updateOnboardingSurveyOptions(body: OnboardingSurveyOptionsUpdatePayload) {
+    const response = await this.client.put('/onboarding-survey/options', body);
+    return response.data as OnboardingSurveyOptionsResponse;
+  }
+
+  // Public post-sale onboarding survey (no auth — org-wide tokenized link)
+  async getOnboardingSurveyMeta(token: string) {
+    const response = await this.client.get(`/onboarding-survey/public/${token}/meta`);
+    return response.data as OnboardingSurveyMetaResponse;
+  }
+
+  async submitOnboardingSurvey(token: string, body: OnboardingSurveySubmitPayload) {
+    const response = await this.client.post(`/onboarding-survey/public/${token}/submit`, body);
+    return response.data as OnboardingSurveySubmitResponse;
   }
 
   // Public post-sales close survey (no auth — tokenized link)
@@ -3174,6 +3322,8 @@ class ApiClient {
 
   async deleteOrganization(orgId: string) {
     const response = await this.client.delete(`/admin/organizations/${orgId}`);
+    cache.delete(CACHE_KEYS.ADMIN_ORGANIZATIONS);
+    cache.delete(CACHE_KEYS.ADMIN_HEALTH);
     return response.data;
   }
 

@@ -21,9 +21,11 @@ import type {
   OrganicDmInputs,
   PaidVslInputs,
   SimulatorInputs,
-  SimulatorLookback,
   SimulatorMode,
 } from '@/types/funnelSimulator';
+import type { Funnel } from '@/types/funnel';
+
+const SNAPSHOT_LOOKBACK_DAYS = 30;
 
 function lastScenarioKey(orgId?: string): string {
   return `sweepos:funnel-simulator:last-scenario:${orgId || orgIdFromAccessToken()}`;
@@ -80,6 +82,81 @@ export function scenarioInScope(
   if (row.mode !== scope.mode) return false;
   if (scope.mode === 'organic_dm') return true;
   return (row.funnel_id || null) === (scope.funnelId || null);
+}
+
+function funnelHref(domain: string | null | undefined, path?: string | null): string | null {
+  const p = (path || '').trim();
+  const host = (domain || '').trim().replace(/\/$/, '');
+  if (host && /^https?:\/\//i.test(host)) {
+    return p ? `${host}${p.startsWith('/') ? p : `/${p}`}` : host;
+  }
+  if (host) {
+    const origin = `https://${host}`;
+    return p ? `${origin}${p.startsWith('/') ? p : `/${p}`}` : origin;
+  }
+  return p || null;
+}
+
+function FunnelPageLinks({ funnelId }: { funnelId: string }) {
+  const [links, setLinks] = useState<{ href: string; label: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getFunnel(funnelId)
+      .then((funnel: Funnel) => {
+        if (cancelled) return;
+        const out: { href: string; label: string }[] = [];
+        const seen = new Set<string>();
+        const add = (href: string | null, label: string) => {
+          if (!href || seen.has(href)) return;
+          seen.add(href);
+          out.push({ href, label });
+        };
+        add(funnelHref(funnel.domain), funnel.domain || 'Website');
+        if (funnel.slug) add(funnelHref(funnel.domain, `/${funnel.slug.replace(/^\//, '')}`), `/${funnel.slug.replace(/^\//, '')}`);
+        const ghl = funnel.ghl_config;
+        if (ghl?.path) add(funnelHref(funnel.domain, ghl.path), ghl.name || ghl.path);
+        for (const step of ghl?.steps || []) {
+          if (!step.path) continue;
+          add(funnelHref(funnel.domain, step.path), step.name || step.path);
+        }
+        setLinks(out);
+      })
+      .catch(() => {
+        if (!cancelled) setLinks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [funnelId]);
+
+  if (!links.length) return null;
+  return (
+    <section className="mt-4 pt-4 border-t border-gray-200/50 dark:border-white/10">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+        Funnel links
+      </h3>
+      <ul className="mt-2 space-y-1">
+        {links.map((l) => (
+          <li key={l.href} className="min-w-0">
+            {/^https?:\/\//i.test(l.href) ? (
+              <a
+                href={l.href}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm text-indigo-600 dark:text-indigo-300 hover:underline break-all"
+              >
+                {l.label}
+              </a>
+            ) : (
+              <span className="text-sm text-gray-700 dark:text-gray-200 break-all">{l.label}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function NumField({
@@ -224,7 +301,6 @@ export default function FunnelSimulatorModal({
   const backdropRef = useRef<HTMLDivElement>(null);
   const [mounted, setMounted] = useState(false);
   const [mode, setMode] = useState<SimulatorMode>(scope?.mode ?? 'paid_vsl');
-  const [lookback, setLookback] = useState<SimulatorLookback>(90);
   const [funnelId, setFunnelId] = useState<string>(scope?.funnelId ?? '');
   const [inputs, setInputs] = useState<SimulatorInputs>(defaultSimulatorInputs);
   const [baselines, setBaselines] = useState<FunnelSimulatorBaselines | null>(null);
@@ -281,8 +357,8 @@ export default function FunnelSimulatorModal({
     setBaselineError(null);
     try {
       const data = await apiClient.getFunnelSimulatorBaselines({
-        days: lookback === 'mtd' ? 30 : lookback,
-        mtd: lookback === 'mtd',
+        days: SNAPSHOT_LOOKBACK_DAYS,
+        mtd: false,
         funnel_id: funnelId || null,
         orgId,
       });
@@ -296,7 +372,7 @@ export default function FunnelSimulatorModal({
     } finally {
       setLoadingBaselines(false);
     }
-  }, [funnelId, lookback, orgId]);
+  }, [funnelId, orgId]);
 
   useEffect(() => {
     void loadScenarios();
@@ -322,10 +398,6 @@ export default function FunnelSimulatorModal({
     setScenarioName(row.name);
     setMode(scope?.mode ?? row.mode);
     setFunnelId(scope ? scope.funnelId ?? '' : row.funnel_id || '');
-    const lb = row.lookback_days;
-    if (lb === 'mtd') setLookback('mtd');
-    else if (lb === '30') setLookback(30);
-    else setLookback(90);
     const next = defaultSimulatorInputs();
     if (row.inputs?.paid) next.paid = { ...next.paid, ...row.inputs.paid };
     if (row.inputs?.organic) next.organic = { ...next.organic, ...row.inputs.organic };
@@ -345,7 +417,7 @@ export default function FunnelSimulatorModal({
       name,
       mode,
       funnel_id: funnelId || null,
-      lookback_days: lookback,
+      lookback_days: SNAPSHOT_LOOKBACK_DAYS,
       inputs,
     };
     try {
@@ -383,7 +455,7 @@ export default function FunnelSimulatorModal({
         name: name.trim(),
         mode,
         funnel_id: funnelId || null,
-        lookback_days: lookback,
+        lookback_days: SNAPSHOT_LOOKBACK_DAYS,
         inputs,
       }, orgId);
       setScenarios((prev) => [row, ...prev]);
@@ -503,25 +575,7 @@ export default function FunnelSimulatorModal({
             ))}
           </select>
           )}
-          <div className="inline-flex rounded-md border border-gray-200 dark:border-white/10 p-0.5">
-            {([30, 90, 'mtd'] as SimulatorLookback[]).map((lb) => (
-              <button
-                key={String(lb)}
-                type="button"
-                onClick={() => {
-                  appliedOnce.current = false;
-                  setLookback(lb);
-                }}
-                className={`px-2 py-1 text-[11px] font-semibold rounded ${
-                  lookback === lb
-                    ? 'bg-sky-500/20 text-sky-800 dark:text-sky-200'
-                    : 'text-gray-500'
-                }`}
-              >
-                {lb === 'mtd' ? 'MTD' : `${lb}d`}
-              </button>
-            ))}
-          </div>
+          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 px-1">30d avg</span>
           <button
             type="button"
             onClick={() => baselines && setInputs((prev) => applyHistoric(prev, baselines))}
@@ -897,6 +951,7 @@ export default function FunnelSimulatorModal({
               </div>
             </>
           )}
+          {scope?.funnelId ? <FunnelPageLinks funnelId={scope.funnelId} /> : null}
         </div>
       </div>
     </div>,

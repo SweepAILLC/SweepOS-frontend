@@ -262,10 +262,6 @@ export default function SettingsPanel({
     if (!organizations.length) return;
     const org = organizations.find((o) => o.id === orgId);
     if (!org) return;
-    if (org.is_primary) {
-      setError('You cannot leave your primary organization.');
-      return;
-    }
     if (String(org.id) === String(currentOrgId)) {
       setError('Switch to another organization before leaving this one.');
       return;
@@ -501,7 +497,7 @@ export default function SettingsPanel({
                               )}
                             </span>
                           </button>
-                          {!org.is_primary && (
+                          {!isCurrent && (
                             <button
                               type="button"
                               onClick={() => handleLeaveOrg(org.id)}
