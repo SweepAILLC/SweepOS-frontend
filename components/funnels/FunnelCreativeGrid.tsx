@@ -1,35 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { FunnelCreativeAd, FunnelCreativeGrid as FunnelCreativeGridData, apiClient } from '@/lib/api';
+import { AdAttribution, FunnelCreativeAd, FunnelCreativeGrid as FunnelCreativeGridData, apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import { trendClass, trendOf } from '@/lib/kpiFormat';
 
 // Replaces the 23-metric sheet for a funnel that has linked campaigns: one
 // unified table, rows = creatives (ads), columns = metrics. Ad-native columns
-// (Spend/Results/CPR/CTR) are real, synced data. The 20 funnel-economics
-// columns (Leads, Close Rate, Cash Collected, CAC, ROAS, etc.) have no
-// attribution path down to an individual ad yet — shown as a static "—"
-// placeholder group, not computed, until the Content Engine PRD's UTM-to-ad
-// attribution exists. See docs/features/META_ADS_PERFORMANCE_PRD.md, "Creative grid".
+// (Spend/Results/CPR/CTR) are synced Meta data. The funnel columns (Leads through
+// Profit) come from per-ad attribution: leads are tied to an ad by the UTM they
+// opted in with. Visitors / Cost per LPV / LP Conv Rate have no per-ad source and
+// stay a static "—" group. See docs/features/META_ADS_PERFORMANCE_PRD.md, "Creative grid".
 
-const PENDING_ATTRIBUTION_COLUMNS = [
-  'Visitors',
-  'Cost per LPV',
-  'Leads',
-  'LP Conv Rate',
-  'Booked Calls',
-  'Lead to Book Rate',
-  'Live Calls',
-  'Show Rate',
-  'Deals Closed',
-  'Cash Collected',
-  'Cash Per Close',
-  'Cost per Lead',
-  'Cost per Booking',
-  'CAC',
-  'Profit',
-];
+type AttrColumn = {
+  label: string;
+  value: (a: AdAttribution) => string;
+};
+
+const NO_PER_AD_SOURCE_COLUMNS = ['Visitors', 'Cost per LPV', 'LP Conv Rate'];
 
 function money(cents?: number | null, currency?: string | null): string {
   if (cents == null || Number.isNaN(cents)) return '—';
@@ -53,6 +41,25 @@ function fmtNum(n?: number | null): string {
 function fmtPct(n?: number | null): string {
   // ctr/frequency on AdsSeriesPoint are already percent-scale (2.5 = 2.5%), not a fraction.
   return n == null || Number.isNaN(n) ? '—' : `${n.toFixed(2)}%`;
+}
+
+function attrColumns(currency?: string | null): AttrColumn[] {
+  const usd = (c: number | null) => money(c, currency);
+  return [
+    { label: 'Leads', value: (a) => fmtNum(a.leads) },
+    { label: 'Booked Calls', value: (a) => fmtNum(a.booked_calls) },
+    { label: 'Lead to Book Rate', value: (a) => fmtPct(a.lead_to_book_pct) },
+    { label: 'Live Calls', value: (a) => fmtNum(a.live_calls) },
+    { label: 'Show Rate', value: (a) => fmtPct(a.show_rate_pct) },
+    { label: 'Deals Closed', value: (a) => fmtNum(a.deals_closed) },
+    { label: 'Cash Collected', value: (a) => usd(a.cash_cents) },
+    { label: 'Cash Per Close', value: (a) => usd(a.cash_per_close_cents) },
+    { label: 'Cost per Lead', value: (a) => usd(a.cost_per_lead_cents) },
+    { label: 'Cost per Booking', value: (a) => usd(a.cost_per_booking_cents) },
+    { label: 'CAC', value: (a) => usd(a.cac_cents) },
+    { label: 'ROAS', value: (a) => (a.roas == null ? '—' : `${a.roas.toFixed(2)}x`) },
+    { label: 'Profit', value: (a) => usd(a.profit_cents) },
+  ];
 }
 
 /** Same up/down arrow the aggregate scorecard uses (lib/kpiFormat's trendOf/trendClass),
@@ -132,6 +139,8 @@ export default function FunnelCreativeGrid({
   }
 
   const currency = grid.currency;
+  const attrCols = attrColumns(currency);
+  const coverage = grid.attribution_coverage;
   const stickyCell = 'sticky left-0 z-10 bg-white dark:bg-gray-950';
 
   return (
@@ -166,11 +175,19 @@ export default function FunnelCreativeGrid({
             </th>
             <th
               scope="colgroup"
-              colSpan={PENDING_ATTRIBUTION_COLUMNS.length}
-              className="bg-gray-100 dark:bg-gray-900 text-left text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-500 py-1.5 pl-3 pr-3"
-              title="Needs per-ad UTM attribution (Content Engine PRD) — not built yet"
+              colSpan={attrCols.length}
+              className="bg-gray-100 dark:bg-gray-900 text-left text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-gray-300 py-1.5 pl-3 pr-3"
+              title="Leads are tied to an ad by the UTM (utm_content = ad id or ad name) they opted in with"
             >
-              Funnel metrics (pending ad-level attribution)
+              Funnel metrics (attributed by UTM)
+            </th>
+            <th
+              scope="colgroup"
+              colSpan={NO_PER_AD_SOURCE_COLUMNS.length}
+              className="bg-gray-100 dark:bg-gray-900 text-left text-[11px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-500 py-1.5 pl-3 pr-3"
+              title="Page visits are not tracked per ad"
+            >
+              Not tracked per ad
             </th>
           </tr>
           <tr className="text-[11px] uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -195,7 +212,12 @@ export default function FunnelCreativeGrid({
             <th scope="col" className="text-right font-medium py-1.5 px-2 whitespace-nowrap">
               CTR
             </th>
-            {PENDING_ATTRIBUTION_COLUMNS.map((label) => (
+            {attrCols.map((col) => (
+              <th key={col.label} scope="col" className="text-right font-medium py-1.5 px-2 whitespace-nowrap">
+                {col.label}
+              </th>
+            ))}
+            {NO_PER_AD_SOURCE_COLUMNS.map((label) => (
               <th key={label} scope="col" className="text-right font-medium py-1.5 px-2 whitespace-nowrap text-gray-400 dark:text-gray-600">
                 {label}
               </th>
@@ -237,7 +259,15 @@ export default function FunnelCreativeGrid({
               <td className="text-right py-1 px-2 tabular-nums border-t border-white/5 whitespace-nowrap text-gray-900 dark:text-gray-100">
                 {fmtPct(ad.ctr)}
               </td>
-              {PENDING_ATTRIBUTION_COLUMNS.map((label) => (
+              {attrCols.map((col) => (
+                <td
+                  key={col.label}
+                  className="text-right py-1 px-2 tabular-nums border-t border-white/5 whitespace-nowrap text-gray-900 dark:text-gray-100"
+                >
+                  {ad.attribution ? col.value(ad.attribution) : '—'}
+                </td>
+              ))}
+              {NO_PER_AD_SOURCE_COLUMNS.map((label) => (
                 <td
                   key={label}
                   className="text-right py-1 px-2 tabular-nums border-t border-white/5 whitespace-nowrap text-gray-400 dark:text-gray-600"
@@ -252,8 +282,11 @@ export default function FunnelCreativeGrid({
       </div>
       <p className="px-1 py-2 text-[10px] text-gray-500 dark:text-gray-400">
         Rows are individual ad creatives across this funnel&apos;s linked campaign(s), for the page&apos;s selected date range.
-        Spend/Results carry an arrow against the immediately-preceding period of equal length; the grayed columns
-        need per-ad lead/revenue attribution, not built yet.
+        Spend/Results carry an arrow against the immediately-preceding period of equal length. Leads, calls, closes and
+        cash are credited to an ad when the lead&apos;s UTM content is that ad&apos;s id or (unique) name
+        {coverage && coverage.total_paid_leads > 0
+          ? ` — ${coverage.attributed_leads} of ${coverage.total_paid_leads} paid leads in range matched an ad (${money(coverage.unattributed_cash_cents, currency)} cash from unmatched leads is not shown per ad).`
+          : '.'}
       </p>
     </div>
   );
