@@ -123,6 +123,9 @@ function buildOptimisticMergedClient(keep: Client, toRemove: Client[]): Client {
     if (c.last_name?.trim() && !merged.last_name?.trim()) merged.last_name = c.last_name;
     if (c.phone?.trim() && !merged.phone?.trim()) merged.phone = c.phone;
     if (c.instagram?.trim() && !merged.instagram?.trim()) merged.instagram = c.instagram;
+    if (c.dialed_at && (!merged.dialed_at || c.dialed_at < merged.dialed_at)) {
+      merged.dialed_at = c.dialed_at;
+    }
     if (c.stripe_customer_id?.trim() && !merged.stripe_customer_id?.trim()) {
       merged.stripe_customer_id = c.stripe_customer_id;
     }
@@ -168,6 +171,7 @@ function buildOptimisticMergedClient(keep: Client, toRemove: Client[]): Client {
 import { CALL_INSIGHTS_REANALYZED_EVENT, CLIENT_MERGED_EVENT } from './IntelligenceSection';
 import ShinyButton from '../ui/ShinyButton';
 import EmailComposer from '../brevo/EmailComposer';
+import SpeedToLeadModal from '@/components/client/SpeedToLeadModal';
 import { KanbanSkeleton } from '@/components/ui/SkeletonLoader';
 import { PremiumReveal } from '@/components/ui/PremiumMotion';
 import { COLUMN_STAGGER_MS } from '@/lib/premiumMotion';
@@ -288,6 +292,7 @@ export default function ClientKanbanBoard({
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
   const [brevoStatus, setBrevoStatus] = useState<BrevoStatus | null>(null);
   const [emailComposerOpen, setEmailComposerOpen] = useState(false);
+  const [speedToLeadOpen, setSpeedToLeadOpen] = useState(false);
   const [emailRecipients, setEmailRecipients] = useState<Array<{ email: string; name?: string }>>([]);
   const [emailComposerKey, setEmailComposerKey] = useState(0);
   const [healthScores, setHealthScores] = useState<Record<string, { score: number; grade: string }>>({});
@@ -942,6 +947,52 @@ export default function ClientKanbanBoard({
     await updateClientsStateBulk(Array.from(selectedClientIds), newColumnId);
   };
 
+  const changeClientDialed = async (client: Client) => {
+    const next = client.dialed_at ? null : new Date().toISOString();
+    const previous = client;
+    applyClientUpdate({
+      ...client,
+      dialed_at: next,
+      updated_at: new Date().toISOString(),
+    });
+    try {
+      const updated = await apiClient.updateClient(client.id, { dialed_at: next });
+      if (updated) applyClientUpdate(withNormalizedLifecycle(updated));
+    } catch (error) {
+      applyClientUpdate(previous);
+      console.error('Failed to update dialled state:', error);
+      alert('Failed to mark dialled. Please try again.');
+    }
+  };
+
+  const changeClientChannel = async (
+    client: Client,
+    channel: { source_channel: 'organic' | 'paid'; source_funnel_id: string | null },
+  ) => {
+    const currentChannel = client.source_channel === 'paid' ? 'paid' : 'organic';
+    if (currentChannel === channel.source_channel && (client.source_funnel_id ?? null) === channel.source_funnel_id) {
+      return;
+    }
+    const previous = client;
+    applyClientUpdate({
+      ...client,
+      source_channel: channel.source_channel,
+      source_funnel_id: channel.source_funnel_id,
+      updated_at: new Date().toISOString(),
+    });
+    try {
+      const updated = await apiClient.updateClient(client.id, {
+        source_channel: channel.source_channel,
+        source_funnel_id: channel.source_funnel_id,
+      });
+      if (updated) applyClientUpdate(withNormalizedLifecycle(updated));
+    } catch (error) {
+      applyClientUpdate(previous);
+      console.error('Failed to update channel:', error);
+      alert('Failed to update channel. Please try again.');
+    }
+  };
+
   const updateClientState = async (clientId: string, newColumnId: ColumnId, draggedClient?: Client) => {
     // If draggedClient is provided (from merged clients), use it directly
     // Otherwise, find the client in the raw clients array
@@ -1445,6 +1496,22 @@ export default function ClientKanbanBoard({
             </button>
             <button
               type="button"
+              onClick={() => setSpeedToLeadOpen(true)}
+              className="px-3 py-2 text-sm font-medium rounded-md glass-button-secondary hover:bg-white/20 flex items-center justify-center min-h-[44px] min-w-[44px]"
+              title="Speed to lead"
+              aria-label="Speed to lead"
+            >
+              <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
+                />
+              </svg>
+            </button>
+            <button
+              type="button"
               onClick={handleRefreshSync}
               disabled={syncingRefreshing}
               aria-busy={syncingRefreshing}
@@ -1762,6 +1829,9 @@ export default function ClientKanbanBoard({
                   )
                 : filteredClients
             }
+            onStageChange={(client, stage) => updateClientState(client.id, stage, client)}
+            onChannelChange={changeClientChannel}
+            onDialedChange={changeClientDialed}
             onClientDelete={handleDeleteClient}
             onClientClick={(client) => {
               const latest = clientsRef.current.find((c) => c.id === client.id) ?? client;
@@ -1823,6 +1893,7 @@ export default function ClientKanbanBoard({
                     onClientDelete={handleDeleteClient}
                     callInsightTags={callInsightTags}
                     onEmailColumn={handleEmailColumn}
+                    onDialedChange={changeClientDialed}
                   />
                 </PremiumReveal>
               );
@@ -1889,6 +1960,10 @@ export default function ClientKanbanBoard({
         />
       )}
 
+      {speedToLeadOpen ? (
+        <SpeedToLeadModal clients={clients} onClose={() => setSpeedToLeadOpen(false)} />
+      ) : null}
+
       {emailComposerOpen && emailRecipients.length > 0 && (
         <EmailComposer
           key={emailComposerKey}
@@ -1948,6 +2023,7 @@ interface KanbanColumnProps {
   onClientDelete?: (client: Client) => void;
   callInsightTags?: Record<string, { tags: string[]; headline: string }>;
   onEmailColumn?: (columnId: ColumnId) => void;
+  onDialedChange?: (client: Client) => void | Promise<void>;
 }
 
 function KanbanColumn({
@@ -1965,6 +2041,7 @@ function KanbanColumn({
   onClientDelete,
   callInsightTags = {},
   onEmailColumn,
+  onDialedChange,
 }: KanbanColumnProps) {
   const { setNodeRef } = useDroppable({ id });
   const isLeadColumn = isLeadPipelineColumn(id);
@@ -2016,6 +2093,7 @@ function KanbanColumn({
                 onToggleSelect={() => onToggleClientSelection(client.id)}
                 insightTags={callInsightTags[client.id]?.tags}
                 isLeadColumn={isLeadColumn}
+                onDialedChange={onDialedChange}
               />
             ))}
           </div>

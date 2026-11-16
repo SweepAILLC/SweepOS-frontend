@@ -21,7 +21,6 @@ import ContentAngleMapView from '@/components/portal/ContentAngleMapView';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiRepPerformancePanel from '@/components/kpi/KpiRepPerformancePanel';
 import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
-import OrgFunnelSimulatorSnapshots from '@/components/owner/OrgFunnelSimulatorSnapshots';
 import { formatProgramDateRange } from '@/lib/dashboardTimeRange';
 import type { DateWindowParams } from '@/lib/api';
 import { DateRangeProvider, useDateRange } from '@/contexts/DateRangeContext';
@@ -519,8 +518,6 @@ function OrgOwnerDashboardInner({
               )}
             </section>
           </div>
-
-          <OrgFunnelSimulatorSnapshots orgId={orgId} />
 
           {/* KPI Snapshot for this org */}
           <PortalKpiSnapshot isActive orgId={orgId} rangeStart={kpiRangeStart} rangeEnd={kpiRangeEnd} />

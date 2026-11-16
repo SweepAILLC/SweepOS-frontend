@@ -4,6 +4,7 @@ import { apiClient } from '@/lib/api';
 import { Funnel } from '@/types/funnel';
 import ShinyButton from './ui/ShinyButton';
 import GhlBadge from './funnels/GhlBadge';
+import FunnelSimulatorSnapshots from './funnels/FunnelSimulatorSnapshots';
 import { useLoading } from '@/contexts/LoadingContext';
 
 export default function FunnelListPanel() {
@@ -160,6 +161,8 @@ export default function FunnelListPanel() {
             </div>
           ))}
       </div>
+
+      <FunnelSimulatorSnapshots />
     </div>
   );
 }

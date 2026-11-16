@@ -217,10 +217,21 @@ export default function TerminalKpiRow() {
   const priorCash = financesSummary?.prior_period_revenue ?? null;
   const cashTrendPct = hasCompare ? pctChange(combinedCash, priorCash) : null;
 
-  const aovOrderCount = financesSummary?.combined.last_30_days_order_count ?? 0;
-  const aovValue = aovOrderCount > 0 ? combinedCash / aovOrderCount : null;
-  const priorOrders = financesSummary?.prior_period_order_count ?? 0;
-  const priorAov = priorOrders > 0 && priorCash != null ? priorCash / priorOrders : null;
+  // AOV counts first-time payments only (one per client, their earliest charge) so
+  // renewals/upsells don't dilute it. Falls back to all payments until the API returns the new fields.
+  const hasFirstTimeAov = financesSummary?.aov_first_time_order_count != null;
+  const aovOrderCount = hasFirstTimeAov
+    ? financesSummary?.aov_first_time_order_count ?? 0
+    : financesSummary?.combined.last_30_days_order_count ?? 0;
+  const aovRevenue = hasFirstTimeAov ? financesSummary?.aov_first_time_revenue ?? 0 : combinedCash;
+  const aovValue = aovOrderCount > 0 ? aovRevenue / aovOrderCount : null;
+  const priorFtOrders = hasFirstTimeAov
+    ? financesSummary?.prior_period_aov_first_time_order_count ?? 0
+    : financesSummary?.prior_period_order_count ?? 0;
+  const priorFtRevenue = hasFirstTimeAov
+    ? financesSummary?.prior_period_aov_first_time_revenue ?? null
+    : priorCash;
+  const priorAov = priorFtOrders > 0 && priorFtRevenue != null ? priorFtRevenue / priorFtOrders : null;
   const aovTrendPct = hasCompare ? pctChange(aovValue, priorAov) : null;
 
   const ppDelta = (cur: number | null | undefined, prev: number | null | undefined) =>

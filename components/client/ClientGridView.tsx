@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiClient } from '@/lib/api';
 import { Client, ClientBookingStatus, ClientGridDetail } from '@/types/client';
-import { PIPELINE_COLUMNS } from '@/lib/pipelineColumns';
+import { PIPELINE_COLUMNS, type PipelineColumnId } from '@/lib/pipelineColumns';
 import LeadAnswersCell from '@/components/funnels/LeadAnswersCell';
 import { channelLabel, useFunnelNames } from '@/lib/funnelNames';
+import InstagramProfileLink from '@/components/client/InstagramProfileLink';
+import DialedButton from '@/components/client/DialedButton';
+import { formatSpeed, speedToLeadSeconds } from '@/lib/speedToLead';
 
 type SortKey = 'name' | 'email' | 'phone' | 'stage' | 'channel' | 'created_at' | 'revenue' | 'booking';
 type SortDir = 'asc' | 'desc';
@@ -40,17 +43,47 @@ function bookingSortValue(detail?: ClientGridDetail): number {
   return detail?.booking_at ? Date.parse(detail.booking_at) || 0 : 0;
 }
 
+export type GridChannelPatch = {
+  source_channel: 'organic' | 'paid';
+  source_funnel_id: string | null;
+};
+
 interface ClientGridViewProps {
   clients: Client[];
   onClientClick: (client: Client) => void;
   /** Board's delete handler (confirms, then removes optimistically). */
   onClientDelete?: (client: Client) => void;
+  onStageChange?: (client: Client, stage: PipelineColumnId) => void | Promise<void>;
+  onChannelChange?: (client: Client, channel: GridChannelPatch) => void | Promise<void>;
+  onDialedChange?: (client: Client) => void | Promise<void>;
+}
+
+function channelValue(client: Client): string {
+  if (client.source_channel === 'paid') {
+    return client.source_funnel_id ? `funnel:${client.source_funnel_id}` : 'paid';
+  }
+  return 'organic';
+}
+
+function channelPatch(value: string): GridChannelPatch {
+  if (value.startsWith('funnel:')) {
+    return { source_channel: 'paid', source_funnel_id: value.slice('funnel:'.length) };
+  }
+  if (value === 'paid') return { source_channel: 'paid', source_funnel_id: null };
+  return { source_channel: 'organic', source_funnel_id: null };
 }
 
 /** Sortable table view over the same filtered pipeline data the Kanban board
  * reads. UTM, funnel metadata, and booking status come from one
  * `/clients/grid-details` call for the whole org, keyed by client id. */
-export default function ClientGridView({ clients, onClientClick, onClientDelete }: ClientGridViewProps) {
+export default function ClientGridView({
+  clients,
+  onClientClick,
+  onClientDelete,
+  onStageChange,
+  onChannelChange,
+  onDialedChange,
+}: ClientGridViewProps) {
   const [sortKey, setSortKey] = useState<SortKey>('created_at');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [details, setDetails] = useState<Record<string, ClientGridDetail>>({});
@@ -185,8 +218,19 @@ export default function ClientGridView({ clients, onClientClick, onClientDelete 
                 onClick={() => onClientClick(c)}
                 className="cursor-pointer hover:bg-primary-500/5 transition-colors"
               >
-                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 min-w-0 max-w-[220px] truncate">
-                  {displayName(c)}
+                <td className="px-3 py-2 text-sm font-medium text-gray-900 dark:text-gray-100 min-w-0 max-w-[220px]">
+                  <span className="flex items-center gap-1.5 min-w-0">
+                    <span className="truncate">{displayName(c)}</span>
+                    <InstagramProfileLink instagram={c.instagram} />
+                    <DialedButton
+                      dialed={Boolean(c.dialed_at)}
+                      speedLabel={(() => {
+                        const speed = speedToLeadSeconds(c);
+                        return speed == null ? undefined : formatSpeed(speed);
+                      })()}
+                      onToggle={() => onDialedChange?.(c)}
+                    />
+                  </span>
                 </td>
                 <td
                   className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 max-w-[240px] truncate"
@@ -201,20 +245,63 @@ export default function ClientGridView({ clients, onClientClick, onClientDelete 
                 >
                   {c.phone?.trim() || '—'}
                 </td>
-                <td className="px-3 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                  {COLUMN_TITLE_BY_ID[c.lifecycle_state] || c.lifecycle_state}
+                <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    aria-label={`Stage for ${displayName(c)}`}
+                    value={PIPELINE_COLUMNS.some((col) => col.id === c.lifecycle_state) ? c.lifecycle_state : ''}
+                    disabled={!onStageChange}
+                    onChange={(e) => {
+                      const next = e.target.value as PipelineColumnId;
+                      if (!next || next === c.lifecycle_state) return;
+                      void onStageChange?.(c, next);
+                    }}
+                    className="max-w-[9rem] cursor-pointer rounded border border-gray-300/70 bg-gray-500/10 px-1.5 py-0.5 text-xs font-medium text-gray-700 dark:border-gray-600 dark:text-gray-200"
+                  >
+                    {!PIPELINE_COLUMNS.some((col) => col.id === c.lifecycle_state) ? (
+                      <option value="">{COLUMN_TITLE_BY_ID[c.lifecycle_state] || c.lifecycle_state}</option>
+                    ) : null}
+                    {PIPELINE_COLUMNS.map((col) => (
+                      <option key={col.id} value={col.id}>
+                        {col.title}
+                      </option>
+                    ))}
+                  </select>
                 </td>
-                <td className="px-3 py-2 text-sm whitespace-nowrap">
-                  <span
+                <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    aria-label={`Channel for ${displayName(c)}`}
                     title={isPaid ? `Paid · ${channelLabel(c, funnelNames)}` : 'Organic'}
-                    className={`inline-block max-w-[12rem] truncate align-middle text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded border ${
+                    value={channelValue(c)}
+                    disabled={!onChannelChange}
+                    onChange={(e) => {
+                      const next = channelPatch(e.target.value);
+                      if (
+                        (c.source_channel === 'paid' ? 'paid' : 'organic') === next.source_channel &&
+                        (c.source_funnel_id ?? null) === next.source_funnel_id
+                      ) {
+                        return;
+                      }
+                      void onChannelChange?.(c, next);
+                    }}
+                    className={`max-w-[12rem] cursor-pointer truncate rounded border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
                       isPaid
                         ? 'border-purple-500/40 bg-purple-500/10 text-purple-700 dark:text-purple-300'
                         : 'border-gray-300/60 bg-gray-500/10 text-gray-600 dark:text-gray-300'
                     }`}
                   >
-                    {channelLabel(c, funnelNames)}
-                  </span>
+                    <option value="organic">Organic</option>
+                    <option value="paid">Paid</option>
+                    {c.source_channel === 'paid' && c.source_funnel_id && !funnelNames[c.source_funnel_id] ? (
+                      <option value={`funnel:${c.source_funnel_id}`}>{channelLabel(c, funnelNames)}</option>
+                    ) : null}
+                    {Object.entries(funnelNames)
+                      .sort((a, b) => a[1].localeCompare(b[1]))
+                      .map(([id, name]) => (
+                      <option key={id} value={`funnel:${id}`}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 whitespace-nowrap">
                   {c.created_at ? new Date(c.created_at).toLocaleDateString() : '—'}

@@ -407,6 +407,13 @@ export interface FinancesCombinedSummary {
   manual?: FinancesSourceSlice;
   prior_period_revenue?: number | null;
   prior_period_order_count?: number | null;
+  /** AOV = first-time payments only (one per client, their earliest charge) — excludes renewals/upsells. */
+  aov_first_time_revenue?: number;
+  aov_first_time_order_count?: number;
+  aov_mtd_first_time_revenue?: number;
+  aov_mtd_first_time_order_count?: number;
+  prior_period_aov_first_time_revenue?: number | null;
+  prior_period_aov_first_time_order_count?: number | null;
 }
 
 export interface FinancesTimelinePoint {
