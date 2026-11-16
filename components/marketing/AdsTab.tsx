@@ -257,8 +257,6 @@ export default function AdsTab() {
   const [slots, setSlots] = useState<[string | null, string | null]>([null, null]);
   const [pairLayout, setPairLayout] = useState(false);
   const [funnels, setFunnels] = useState<{ id: string; name: string }[]>([]);
-  const [adAccounts, setAdAccounts] = useState<{ id: string; name: string | null; current: boolean }[]>([]);
-  const [switchingAccount, setSwitchingAccount] = useState(false);
   const fadeTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
@@ -311,34 +309,6 @@ export default function AdsTab() {
       .then((data) => setFunnels(data.funnels.map((f) => ({ id: f.funnel_id, name: f.funnel_name }))))
       .catch(() => setFunnels([]));
   }, []);
-
-  useEffect(() => {
-    if (!dash?.connected) {
-      setAdAccounts([]);
-      return;
-    }
-    apiClient
-      .getMetaAdsAdAccounts()
-      .then((data) => setAdAccounts(data.accounts))
-      .catch(() => setAdAccounts([]));
-  }, [dash?.connected]);
-
-  const handleAdAccountSwitch = useCallback(
-    async (adAccountId: string) => {
-      setSwitchingAccount(true);
-      try {
-        await apiClient.setMetaAdsAdAccount(adAccountId);
-        setAdAccounts((prev) => prev.map((a) => ({ ...a, current: a.id === adAccountId })));
-        setSyncMessage('Switching ad account — syncing now, numbers will update shortly.');
-        await load();
-      } catch (e) {
-        setError(formatApiError(e));
-      } finally {
-        setSwitchingAccount(false);
-      }
-    },
-    [load]
-  );
 
   const handleFunnelLink = useCallback(
     async (metaCampaignId: string, funnelId: string | null) => {
@@ -603,30 +573,6 @@ export default function AdsTab() {
           </div>
         </section>
       )}
-
-      {isAdmin && adAccounts.length > 1 ? (
-        <section className="glass-card rounded-xl p-4 border border-gray-200/50 dark:border-gray-700/50 space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Ad account</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Connect picked one automatically — switch here if it&apos;s the wrong business/portfolio. Campaigns from
-              the account you leave stay synced but stop showing until you switch back.
-            </p>
-          </div>
-          <select
-            value={adAccounts.find((a) => a.current)?.id || ''}
-            onChange={(e) => void handleAdAccountSwitch(e.target.value)}
-            disabled={switchingAccount}
-            className="text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-2.5 py-1.5 disabled:opacity-50"
-          >
-            {adAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name || a.id}
-              </option>
-            ))}
-          </select>
-        </section>
-      ) : null}
 
       {isAdmin ? (
         <section className="glass-card rounded-xl p-4 border border-gray-200/50 dark:border-gray-700/50 space-y-3">

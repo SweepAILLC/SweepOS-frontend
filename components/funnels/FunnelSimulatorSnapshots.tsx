@@ -12,10 +12,6 @@ import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
 import ShinyButton from '@/components/ui/ShinyButton';
 
-type Props = {
-  orgId: string;
-};
-
 function scenarioOutputs(row: FunnelSimulatorScenario) {
   const inputs = defaultSimulatorInputs();
   if (row.inputs?.paid) inputs.paid = { ...inputs.paid, ...row.inputs.paid };
@@ -43,7 +39,8 @@ function Metric({ label, value, positive }: { label: string; value: string; posi
   );
 }
 
-export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
+/** Saved funnel-simulator scenarios for the current org, at the bottom of the Funnels tab. */
+export default function FunnelSimulatorSnapshots() {
   const [rows, setRows] = useState<FunnelSimulatorScenario[]>([]);
   const [loading, setLoading] = useState(true);
   const [simulatorOpen, setSimulatorOpen] = useState(false);
@@ -52,14 +49,14 @@ export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await apiClient.listFunnelSimulatorScenarios(orgId);
+      const list = await apiClient.listFunnelSimulatorScenarios();
       setRows(Array.isArray(list) ? list : []);
     } catch {
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [orgId]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -82,24 +79,18 @@ export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
   };
 
   return (
-    <section className="glass-card p-4 rounded-xl border border-gray-200 dark:border-white/10 space-y-3">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 digitized-text">
-            Funnel simulator snapshots
-          </h3>
-          <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-            Saved scenarios for this org. Create or edit from here — clients also see them in their portal.
-          </p>
-        </div>
-        <ShinyButton onClick={openNew} className="px-3 py-1.5 text-sm">
-          New snapshot
-        </ShinyButton>
+    <div className="mt-8">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Funnel simulator snapshots</h2>
+        <ShinyButton onClick={openNew}>+ New Snapshot</ShinyButton>
       </div>
       {loading ? (
-        <p className="text-sm text-gray-500">Loading…</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading…</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-500">No snapshots yet. Create one to model this org’s funnel.</p>
+        <div className="glass-card p-4 flex flex-col items-center justify-center text-center">
+          <p className="text-gray-600 dark:text-gray-300 mb-4">No snapshots yet</p>
+          <ShinyButton onClick={openNew}>Create Your First Snapshot</ShinyButton>
+        </div>
       ) : (
         <div className="space-y-3">
           {rows.map((row) => {
@@ -110,7 +101,7 @@ export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
                 key={row.id}
                 type="button"
                 onClick={() => openExisting(row.id)}
-                className="w-full text-left rounded-lg border border-gray-200/60 dark:border-white/10 px-3 py-3 space-y-2 hover:border-violet-400/50 dark:hover:border-violet-400/40"
+                className="w-full text-left glass-card neon-glow p-4 hover:shadow-lg transition-shadow space-y-2"
               >
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{row.name}</p>
@@ -141,12 +132,11 @@ export default function OrgFunnelSimulatorSnapshots({ orgId }: Props) {
       )}
       {simulatorOpen ? (
         <FunnelSimulatorModal
-          orgId={orgId}
           initialScenarioId={editScenarioId}
           startFresh={!editScenarioId}
           onClose={closeSimulator}
         />
       ) : null}
-    </section>
+    </div>
   );
 }

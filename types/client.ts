@@ -7,6 +7,8 @@ export interface Client {
   emails?: string[];
   phone?: string;
   instagram?: string;
+  /** Set when the lead is marked dialled from the pipeline. */
+  dialed_at?: string | null;
   lifecycle_state: 'cold_lead' | 'nurturing' | 'qualified' | 'booked' | 'active' | 'offboarding' | 'dead';
   source_channel?: 'organic' | 'paid' | null;
   source_funnel_id?: string | null;
@@ -92,4 +94,5 @@ export interface ClientGridDetail {
   answers: Record<string, unknown>;
   booking_status: ClientBookingStatus;
   booking_at?: string | null;
+  closed_at?: string | null;
 }

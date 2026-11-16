@@ -8,6 +8,9 @@ import { channelLabel, useFunnelNames } from '@/lib/funnelNames';
 import { insightChipClass } from '@/lib/callInsightChips';
 import { BALANCE_DUE_CHIP_CLASS, hasOutstandingOfferBalance } from '@/lib/clientOfferBalance';
 import { isProgramProgressVisible } from '@/lib/clientProgram';
+import InstagramProfileLink from '@/components/client/InstagramProfileLink';
+import DialedButton from '@/components/client/DialedButton';
+import { formatSpeed, speedToLeadSeconds } from '@/lib/speedToLead';
 
 const MERGE_DROP_ID = (id: string) => `merge-${id}`;
 
@@ -27,6 +30,7 @@ interface ClientCardProps {
   insightTags?: string[];
   /** Cold / warm lead columns: show follow-up timer instead of program progress */
   isLeadColumn?: boolean;
+  onDialedChange?: (client: Client) => void | Promise<void>;
 }
 
 function ClientCard({
@@ -39,6 +43,7 @@ function ClientCard({
   onToggleSelect,
   insightTags = undefined,
   isLeadColumn = false,
+  onDialedChange,
 }: ClientCardProps) {
   const sortableId = client.id;
 
@@ -171,8 +176,17 @@ function ClientCard({
 
         {/* Clickable content */}
         <div onClick={handleClick} className="min-w-0">
-          <div className="font-medium text-gray-900 dark:text-gray-100 min-w-0 truncate" title={displayTitle}>
-            {displayTitle}
+          <div className="flex items-center gap-1.5 min-w-0 font-medium text-gray-900 dark:text-gray-100" title={displayTitle}>
+            <span className="truncate">{displayTitle}</span>
+            <InstagramProfileLink instagram={client.instagram} />
+            <DialedButton
+              dialed={Boolean(client.dialed_at)}
+              speedLabel={(() => {
+                const speed = speedToLeadSeconds(client);
+                return speed == null ? undefined : formatSpeed(speed);
+              })()}
+              onToggle={() => onDialedChange?.(client)}
+            />
           </div>
           {showEmailSubline && (
             <div className="text-sm text-gray-500 dark:text-gray-400 mt-1 min-w-0 truncate" title={client.email}>
