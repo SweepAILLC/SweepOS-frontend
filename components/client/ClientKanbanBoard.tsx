@@ -300,6 +300,7 @@ export default function ClientKanbanBoard({
   const [dragBatchCount, setDragBatchCount] = useState(0);
   const [dragBatchIds, setDragBatchIds] = useState<Set<string>>(() => new Set());
   const [selectedClientIds, setSelectedClientIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [filtersDropdownOpen, setFiltersDropdownOpen] = useState(false);
   const filtersDropdownRef = useRef<HTMLDivElement>(null);
   const dragBatchRef = useRef<Set<string>>(new Set());
@@ -1437,6 +1438,64 @@ export default function ClientKanbanBoard({
     }
   };
 
+  const handleDeleteSelected = async () => {
+    if (bulkDeleting) return;
+    const ids = Array.from(selectedClientIds);
+    if (ids.length === 0) return;
+    const count = ids.length;
+    const confirmMessage =
+      `Permanently delete ${count} selected client${count === 1 ? '' : 's'}? ` +
+      'Their payments, call history and notes will be unlinked. This cannot be undone.';
+    if (!window.confirm(confirmMessage)) return;
+
+    setBulkDeleting(true);
+    const previousClients = clientsRef.current;
+    const previousSelected = selectedClient;
+    const idSet = new Set(ids);
+
+    const remaining = previousClients.filter((c) => !idSet.has(c.id));
+    for (const id of ids) removePipelineClient(id);
+    clientsRef.current = remaining;
+    setClients(remaining);
+    if (selectedClient && idSet.has(selectedClient.id)) {
+      setIsDrawerOpen(false);
+      setSelectedClient(null);
+    }
+
+    // Reuse the single-delete endpoint (it unlinks related rows safely) a few at a time.
+    const failed = new Map<string, string>();
+    const queue = [...ids];
+    const worker = async () => {
+      for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
+        try {
+          await apiClient.deleteClient(id, false);
+        } catch (error: any) {
+          if (error?.response?.status === 404) continue; // already gone
+          failed.set(id, error?.response?.data?.detail || 'Delete failed');
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+
+    if (failed.size > 0) {
+      const restored = previousClients.filter((c) => failed.has(c.id));
+      const merged = [...clientsRef.current, ...restored.filter((c) => !clientsRef.current.some((x) => x.id === c.id))];
+      clientsRef.current = merged;
+      setClients(merged);
+      setPipelineClients(merged);
+      if (previousSelected && failed.has(previousSelected.id)) {
+        setSelectedClient(previousSelected);
+        setIsDrawerOpen(true);
+      }
+      alert(
+        `Deleted ${count - failed.size} of ${count} clients. ${failed.size} could not be deleted and were restored: ` +
+          `${Array.from(new Set(failed.values())).join('; ')}`,
+      );
+    }
+    setSelectedClientIds(new Set(failed.keys()));
+    setBulkDeleting(false);
+  };
+
   const handleClientCreated = useCallback((created: Client) => {
     applyClientUpdate(created);
     setIsCreateModalOpen(false);
@@ -1604,6 +1663,15 @@ export default function ClientKanbanBoard({
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              onClick={() => void handleDeleteSelected()}
+              disabled={bulkDeleting}
+              className="rounded-md border border-red-500/50 bg-red-500/10 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-500/20 disabled:opacity-50 dark:text-red-300"
+              aria-label={`Delete ${selectedClientIds.size} selected clients`}
+            >
+              {bulkDeleting ? 'Deleting…' : `Delete ${selectedClientIds.size}`}
+            </button>
             <button
               type="button"
               onClick={clearClientSelection}
