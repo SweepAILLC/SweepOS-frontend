@@ -381,6 +381,30 @@ export interface AdsAdSetList {
   end: string;
 }
 
+/** Leads, calls, closes and cash tied to one ad through its lead UTM (backend ad_attribution). */
+export interface AdAttribution {
+  leads: number;
+  booked_calls: number;
+  live_calls: number;
+  deals_closed: number;
+  cash_cents: number;
+  lead_to_book_pct: number | null;
+  show_rate_pct: number | null;
+  cash_per_close_cents: number | null;
+  cost_per_lead_cents: number | null;
+  cost_per_booking_cents: number | null;
+  cac_cents: number | null;
+  roas: number | null;
+  profit_cents: number | null;
+}
+
+export interface AdAttributionCoverage {
+  attributed_leads: number;
+  total_paid_leads: number;
+  attributed_cash_cents: number;
+  unattributed_cash_cents: number;
+}
+
 export interface AdsAdRow {
   id: string;
   meta_ad_id: string;
@@ -399,10 +423,12 @@ export interface AdsAdRow {
   frequency: number | null;
   fatigued: boolean;
   series: AdsSeriesPoint[];
+  attribution?: AdAttribution | null;
 }
 
 export interface AdsAdList {
   ads: AdsAdRow[];
+  attribution_coverage?: AdAttributionCoverage | null;
   currency?: string | null;
   days: number;
   start?: string | null;
@@ -426,10 +452,12 @@ export interface FunnelCreativeAd {
   prior_results?: number | null;
   fatigued: boolean;
   series: AdsSeriesPoint[];
+  attribution?: AdAttribution | null;
 }
 
 export interface FunnelCreativeGrid {
   ads: FunnelCreativeAd[];
+  attribution_coverage?: AdAttributionCoverage | null;
   currency?: string | null;
   days: number;
   start?: string | null;

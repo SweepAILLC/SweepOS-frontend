@@ -500,18 +500,24 @@ export default function AdsEntityExplorer({
                   <th className="px-3 py-2 font-medium">CPR</th>
                   <th className="px-3 py-2 font-medium">CTR</th>
                   <th className="px-3 py-2 font-medium">Frequency</th>
+                  <th
+                    className="px-3 py-2 font-medium"
+                    title="Cash collected from leads whose UTM names this ad, for the selected range. ROAS = revenue / spend."
+                  >
+                    Revenue
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {adsLoading && !ads ? (
                   <tr>
-                    <td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={9} className="px-3 py-6 text-center text-sm text-gray-500">
                       Loading…
                     </td>
                   </tr>
                 ) : !visibleAds.length ? (
                   <tr>
-                    <td colSpan={8} className="px-3 py-6 text-center text-sm text-gray-500">
+                    <td colSpan={9} className="px-3 py-6 text-center text-sm text-gray-500">
                       {selectedAdsetIds.size || selectedCampaignIds.size
                         ? 'No ads for the checked rows.'
                         : 'No ads synced yet.'}
@@ -554,6 +560,19 @@ export default function AdsEntityExplorer({
                       <td className="px-3 py-2">{money(row.cpr_cents, currency)}</td>
                       <td className="px-3 py-2">{fmtPct(row.ctr)}</td>
                       <td className="px-3 py-2">{row.frequency != null ? row.frequency.toFixed(2) : '—'}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {row.attribution ? (
+                          <>
+                            <span className="text-gray-900 dark:text-gray-100">{money(row.attribution.cash_cents, currency)}</span>
+                            <span className="block text-[11px] text-gray-500">
+                              {row.attribution.roas != null ? `${row.attribution.roas.toFixed(2)}x ROAS · ` : ''}
+                              {row.attribution.deals_closed} closed
+                            </span>
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}
