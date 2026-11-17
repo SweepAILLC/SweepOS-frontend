@@ -20,14 +20,22 @@ import SharedTypingPad from '@/components/portal/SharedTypingPad';
 import ContentAngleMapView from '@/components/portal/ContentAngleMapView';
 import PortalKpiSnapshot from '@/components/portal/PortalKpiSnapshot';
 import KpiRepPerformancePanel from '@/components/kpi/KpiRepPerformancePanel';
-import OrgNoticeComposer from '@/components/owner/OrgNoticeComposer';
 import { formatProgramDateRange } from '@/lib/dashboardTimeRange';
-import type { DateWindowParams } from '@/lib/api';
+import { apiClient, type DateWindowParams } from '@/lib/api';
+import {
+  calComEventTypesToNodes,
+  calendlyEventTypesToNodes,
+  formatEventTypeDuration,
+  type CalendarEventTypeNode,
+} from '@/lib/calendarEventTypes';
 import { DateRangeProvider, useDateRange } from '@/contexts/DateRangeContext';
 import PageDateRange from '@/components/ui/PageDateRange';
 import { rangeTitle } from '@/lib/dateRange';
 import ShinyButton from '@/components/ui/ShinyButton';
 import ToggleSwitch from '@/components/ui/ToggleSwitch';
+import { ORG_TOGGLEABLE_TAB_IDS, sopLockKey } from '@/lib/tabAccess';
+import { useSopCategories } from '@/hooks/useSopCategories';
+import { sopColorStyle } from '@/lib/resources';
 
 const LIVE_POLL_MS = 30000;
 
@@ -301,6 +309,52 @@ function OrgOwnerDashboardInner({
   onToggleTabPermission,
   tabPermissionDisplayName,
 }: OrgOwnerDashboardModalProps) {
+  const lockableTabs = useMemo(
+    () =>
+      ORG_TOGGLEABLE_TAB_IDS.map(
+        (id) => orgTabPermissions.find((p) => p.tab_name === id) ?? { tab_name: id as string, enabled: true },
+      ),
+    [orgTabPermissions],
+  );
+  const [bookingLinks, setBookingLinks] = useState<Array<{ url: string; label: string; provider: string }>>([]);
+  const [loadingBookingLinks, setLoadingBookingLinks] = useState(false);
+  useEffect(() => {
+    if (!consultingTierInput) return;
+    let cancelled = false;
+    setLoadingBookingLinks(true);
+    const nodes = async (load: () => Promise<CalendarEventTypeNode[]>) => {
+      try {
+        return await load();
+      } catch {
+        return []; // provider not connected
+      }
+    };
+    void Promise.all([
+      nodes(async () => calComEventTypesToNodes((await apiClient.getCalComEventTypes())?.event_types ?? [])),
+      nodes(async () => calendlyEventTypesToNodes((await apiClient.getCalendlyEventTypes({ active: true }))?.collection ?? [])),
+    ]).then((groups) => {
+      if (cancelled) return;
+      const seen = new Set<string>();
+      const links: Array<{ url: string; label: string; provider: string }> = [];
+      for (const n of groups.flat()) {
+        if (!n.shareUrl || seen.has(n.shareUrl)) continue;
+        seen.add(n.shareUrl);
+        const dur = formatEventTypeDuration(n.durationMinutes);
+        links.push({
+          url: n.shareUrl,
+          provider: n.provider,
+          label: `${n.provider === 'calcom' ? 'Cal.com' : 'Calendly'} · ${n.label}${dur ? ` (${dur})` : ''}`,
+        });
+      }
+      setBookingLinks(links);
+      setLoadingBookingLinks(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultingTierInput]);
+  const { categories: sopCategories } = useSopCategories();
+  const moduleEnabled = (id: string) => orgTabPermissions.find((p) => p.tab_name === id)?.enabled !== false;
   const [refreshToken, setRefreshToken] = useState(0);
   const [liveRefreshing, setLiveRefreshing] = useState(false);
   const { range, params } = useDateRange();
@@ -383,8 +437,6 @@ function OrgOwnerDashboardInner({
       </header>
 
       <div className="space-y-5">
-          <OrgNoticeComposer orgId={orgId} />
-
           {/* Shared space — top for quick access */}
           <SharedTypingPad
             orgId={orgId}
@@ -416,36 +468,32 @@ function OrgOwnerDashboardInner({
                   className="w-28 px-3 py-1.5 glass-input rounded-md text-sm"
                 />
               </div>
-              <div className="flex items-center justify-between gap-3 py-1">
-                <div>
-                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Consulting</p>
-                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-                    Turns on the org portal and booking embed.
-                  </p>
-                </div>
-                <ToggleSwitch
-                  checked={Boolean(consultingTierInput)}
-                  onChange={(on) =>
-                    setConsultingTierInput(on ? consultingTierInput || 'core_consulting' : '')
-                  }
-                  onLabel="On"
-                  offLabel="Off"
-                />
-              </div>
               {consultingTierInput ? (
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-900 dark:text-gray-100">
                     Consultant booking link
                   </label>
-                  <input
-                    type="url"
+                  <select
                     value={bookingUrlInput}
                     onChange={(e) => setBookingUrlInput(e.target.value)}
-                    placeholder="https://cal.com/your-user/30min"
                     className="w-full px-3 py-2 glass-input rounded-md text-sm"
-                  />
+                  >
+                    <option value="">No booking link</option>
+                    {bookingUrlInput && !bookingLinks.some((l) => l.url === bookingUrlInput) ? (
+                      <option value={bookingUrlInput}>{bookingUrlInput} (current)</option>
+                    ) : null}
+                    {bookingLinks.map((l) => (
+                      <option key={`${l.provider}-${l.url}`} value={l.url}>
+                        {l.label}
+                      </option>
+                    ))}
+                  </select>
                   <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                    General Cal.com (or similar) event link — embedded in the org portal so teams can book in-place.
+                    {loadingBookingLinks
+                      ? 'Loading your calendar links…'
+                      : bookingLinks.length === 0
+                        ? 'No Cal.com or Calendly event links found. Connect a calendar in Settings.'
+                        : 'Your connected Cal.com and Calendly event links — embedded in the org portal so teams can book in-place.'}
                   </p>
                 </div>
               ) : null}
@@ -493,29 +541,94 @@ function OrgOwnerDashboardInner({
               </h3>
               <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
                 Off = tab stays in their nav but shows a locked upgrade screen. On = full access.
+                Terminal, Pipeline, Funnels, Call Library and Intelligence are always on.
               </p>
               {loadingTabPermissions ? (
                 <p className="text-sm text-gray-500">Loading…</p>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {orgTabPermissions.map((permission) => (
-                    <label
+                <div className="space-y-2">
+                  {lockableTabs.map((permission) => (
+                    <div
                       key={permission.tab_name}
-                      className="flex items-center justify-between gap-3 py-2.5 px-3 rounded-lg border border-gray-200/60 dark:border-white/10 cursor-pointer"
+                      className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg border border-gray-200/60 dark:border-white/10"
                     >
                       <span className="text-sm text-gray-900 dark:text-gray-100">
                         {tabPermissionDisplayName(permission.tab_name)}
                       </span>
-                      <input
-                        type="checkbox"
+                      <ToggleSwitch
                         checked={permission.enabled}
-                        onChange={(e) => onToggleTabPermission(permission.tab_name, e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-violet-600"
+                        onChange={(on) => onToggleTabPermission(permission.tab_name, on)}
+                        id={`tab-${permission.tab_name}`}
+                        onLabel="On"
+                        offLabel="Off"
                       />
-                    </label>
+                    </div>
                   ))}
                 </div>
               )}
+              <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between gap-3 py-2 px-3 rounded-lg border border-gray-200/60 dark:border-white/10">
+                <div>
+                  <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Consulting</p>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    Turns on the org portal. Click Save under Seats & consulting to apply.
+                  </p>
+                </div>
+                <ToggleSwitch
+                  checked={Boolean(consultingTierInput)}
+                  onChange={(on) =>
+                    setConsultingTierInput(on ? consultingTierInput || 'core_consulting' : '')
+                  }
+                  onLabel="On"
+                  offLabel="Off"
+                />
+              </div>
+              {consultingTierInput ? (
+                <details className="group rounded-lg border border-gray-200/60 dark:border-white/10">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-medium text-gray-900 dark:text-gray-100">
+                    <span>
+                      SOP categories
+                      <span className="ml-2 text-[11px] font-normal text-gray-500 dark:text-gray-400">
+                        {sopCategories.filter((c) => moduleEnabled(sopLockKey(c.slug))).length} of {sopCategories.length} on
+                      </span>
+                    </span>
+                    <svg
+                      className="h-4 w-4 text-gray-400 transition-transform group-open:rotate-180"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                      aria-hidden
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </summary>
+                  <div className="space-y-1 border-t border-gray-200/60 dark:border-white/10 px-3 py-2">
+                    <p className="pb-1 text-[11px] text-gray-500 dark:text-gray-400">
+                      Off shows the category blurred behind a lock in this org&apos;s SOP library. Applies immediately.
+                    </p>
+                    {loadingTabPermissions ? (
+                      <p className="text-sm text-gray-500">Loading…</p>
+                    ) : (
+                      sopCategories.map((c) => (
+                        <div key={c.slug} className="flex items-center justify-between gap-3 py-1.5">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className={`h-2.5 w-2.5 flex-shrink-0 rounded-full ${sopColorStyle(c.color).dot}`} />
+                            <p className="truncate text-sm text-gray-900 dark:text-gray-100">{c.label}</p>
+                          </div>
+                          <ToggleSwitch
+                            checked={moduleEnabled(sopLockKey(c.slug))}
+                            onChange={(on) => onToggleTabPermission(sopLockKey(c.slug), on)}
+                            id={`sop-${c.slug}`}
+                            onLabel="On"
+                            offLabel="Off"
+                          />
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </details>
+              ) : null}
+              </div>
             </section>
           </div>
 

@@ -23,6 +23,8 @@ export interface Resource {
   isBuiltin?: boolean;
   updatedAt?: string | null;
   sortOrder?: number | null;
+  /** Redacted stand-in: this SOP's category is locked for the org. */
+  locked?: boolean;
 }
 
 /** Owner-managed SOP category (served by GET /resources/sop-categories). */
@@ -31,6 +33,8 @@ export interface SopCategoryDef {
   label: string;
   color: SopColorKey;
   sort_order?: number;
+  /** True when the system owner locked this category for the current org. */
+  locked?: boolean;
 }
 
 export type SopColorKey =
@@ -188,6 +192,7 @@ export function docMetaToResource(row: {
   is_builtin: boolean;
   updated_at: string | null;
   sort_order?: number | null;
+  locked?: boolean;
 }): Resource {
   return {
     id: row.resource_id,
@@ -207,6 +212,7 @@ export function docMetaToResource(row: {
     isBuiltin: row.is_builtin,
     updatedAt: row.updated_at,
     sortOrder: row.sort_order ?? null,
+    locked: row.locked === true,
   };
 }
 

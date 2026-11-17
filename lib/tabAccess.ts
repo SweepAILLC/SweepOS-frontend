@@ -28,18 +28,27 @@ export const MAIN_NAV_TAB_IDS: TabId[] = [
   'resources',
 ];
 
-/** Tabs the owner can toggle for an org (aligned with AVAILABLE_TABS on the backend). */
+/** Tabs the owner can lock per org (aligned with AVAILABLE_TABS on the backend). */
 export const ORG_TOGGLEABLE_TAB_IDS: TabId[] = [
-  'terminal',
-  'pipeline',
-  'funnels',
   'content_studio',
-  'call_library',
   'kpi_command_center',
   'automations',
   'resources',
+];
+
+/** Base product tabs every org always has; permission rows for these are ignored. */
+export const ALWAYS_ON_TAB_IDS: TabId[] = [
+  'terminal',
+  'pipeline',
+  'funnels',
+  'call_library',
   'intelligence',
 ];
+
+/** Permission key for locking one SOP category for an org (matches SOP_LOCK_PREFIX on the backend). */
+export function sopLockKey(slug: string): string {
+  return `sop:${slug}`;
+}
 
 export const CONSULTING_TIERS = ['pro_consulting', 'core_consulting'] as const;
 
@@ -154,9 +163,7 @@ export function canAccessTab(
   if (roleLower === 'member' && tab === 'intelligence') {
     return false;
   }
-  if (tab === 'pipeline') {
-    return permissionFlag(ctx.tabPermissions, 'pipeline', 'clients');
-  }
+  if ((ALWAYS_ON_TAB_IDS as string[]).includes(tab)) return true;
   if (tab === 'finances') {
     return permissionFlag(ctx.tabPermissions, 'finances', 'stripe');
   }
