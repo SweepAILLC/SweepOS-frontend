@@ -30,6 +30,7 @@ import PortalSopDrawer, {
   SOP_DRAWER_WIDTH_COLLAPSED,
   SOP_DRAWER_WIDTH_OPEN,
 } from '@/components/portal/PortalSopDrawer';
+import { ORG_TOGGLEABLE_TAB_IDS } from '@/lib/tabAccess';
 import { healthTrendPeriodsWithFinancesCash } from '@/lib/healthTrendMetrics';
 import type { DateWindowParams } from '@/lib/api';
 
@@ -338,15 +339,7 @@ export default function AdminPanel() {
       console.error('Failed to load tab permissions:', err);
       // Set defaults if loading fails — keep in sync with backend AVAILABLE_TABS
       setOrgTabPermissions([
-        { tab_name: 'terminal', enabled: true },
-        { tab_name: 'pipeline', enabled: true },
-        { tab_name: 'funnels', enabled: true },
-        { tab_name: 'content_studio', enabled: true },
-        { tab_name: 'call_library', enabled: true },
-        { tab_name: 'kpi_command_center', enabled: true },
-        { tab_name: 'automations', enabled: true },
-        { tab_name: 'resources', enabled: true },
-        { tab_name: 'intelligence', enabled: true },
+        ...ORG_TOGGLEABLE_TAB_IDS.map((tab) => ({ tab_name: tab as string, enabled: true })),
       ]);
     } finally {
       setLoadingTabPermissions(false);
@@ -355,9 +348,15 @@ export default function AdminPanel() {
 
   const handleToggleTabPermission = async (orgId: string, tabName: string, enabled: boolean) => {
     try {
+      // Optimistic: flip the switch now, roll back if the save fails.
+      setOrgTabPermissions((prev) =>
+        prev.some((p) => p.tab_name === tabName)
+          ? prev.map((p) => (p.tab_name === tabName ? { ...p, enabled } : p))
+          : [...prev, { tab_name: tabName, enabled }],
+      );
       await apiClient.updateOrganizationTabPermission(orgId, tabName, { enabled });
-      await loadOrgTabPermissions(orgId);
     } catch (err: any) {
+      await loadOrgTabPermissions(orgId);
       setError(err.response?.data?.detail || err.message || 'Failed to update tab permission');
     }
   };

@@ -540,6 +540,7 @@ export interface ResourceDocSummary {
   is_builtin: boolean;
   updated_at: string | null;
   sort_order?: number | null;
+  locked?: boolean;
 }
 
 export interface ResourceDoc extends ResourceDocSummary {
@@ -3895,8 +3896,11 @@ class ApiClient {
 
   // ----- Resources tab -------------------------------------------------------
 
-  async listDocs(): Promise<ResourceDocSummary[]> {
-    const response = await this.client.get('/resources/docs');
+  /** includeLocked: also return redacted placeholders for SOPs in categories locked for this org. */
+  async listDocs(opts?: { includeLocked?: boolean }): Promise<ResourceDocSummary[]> {
+    const response = await this.client.get('/resources/docs', {
+      params: opts?.includeLocked ? { include_locked: true } : undefined,
+    });
     return response.data as ResourceDocSummary[];
   }
 
