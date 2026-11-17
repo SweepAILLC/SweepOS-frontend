@@ -1,7 +1,8 @@
 /** Shared types and helpers for platform docs / SOPs / AI skills. */
 
 export type ResourceCategory = 'AI Skill' | 'SOP' | 'Template' | 'Guide';
-export type SopCategory = 'foundations' | 'marketing' | 'sales' | 'operations' | 'fulfillment';
+/** Category slug — defined by the owner-managed category list. */
+export type SopCategory = string;
 
 export interface Resource {
   id: string;
@@ -24,53 +25,110 @@ export interface Resource {
   sortOrder?: number | null;
 }
 
-export const SOP_CATEGORY_COLORS: Record<
-  SopCategory,
-  { badge: string; pillActive: string; heading: string }
-> = {
-  foundations: {
-    badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+/** Owner-managed SOP category (served by GET /resources/sop-categories). */
+export interface SopCategoryDef {
+  slug: string;
+  label: string;
+  color: SopColorKey;
+  sort_order?: number;
+}
+
+export type SopColorKey =
+  | 'amber'
+  | 'pink'
+  | 'emerald'
+  | 'sky'
+  | 'orange'
+  | 'violet'
+  | 'rose'
+  | 'teal'
+  | 'indigo'
+  | 'slate';
+
+export interface SopColorStyle {
+  badge: string;
+  pillActive: string;
+  heading: string;
+  dot: string;
+}
+
+// Full class names are written out so Tailwind's JIT can see them.
+export const SOP_COLOR_STYLES: Record<SopColorKey, SopColorStyle> = {
+  amber: {
+    badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25',
     pillActive: 'bg-amber-600 text-white shadow-md',
-    heading: 'text-amber-500 dark:text-amber-400',
+    heading: 'text-amber-600 dark:text-amber-400',
+    dot: 'bg-amber-500',
   },
-  marketing: {
+  pink: {
     badge: 'bg-pink-500/15 text-pink-700 dark:text-pink-300 border-pink-500/25',
     pillActive: 'bg-pink-600 text-white shadow-md',
-    // Match Content Studio short-form / marketing SOP title pink
     heading: 'text-pink-700 dark:text-pink-300',
+    dot: 'bg-pink-500',
   },
-  sales: {
-    badge: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+  emerald: {
+    badge: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25',
     pillActive: 'bg-emerald-600 text-white shadow-md',
-    heading: 'text-emerald-500 dark:text-emerald-400',
+    heading: 'text-emerald-600 dark:text-emerald-400',
+    dot: 'bg-emerald-500',
   },
-  operations: {
-    badge: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
+  sky: {
+    badge: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/25',
     pillActive: 'bg-sky-600 text-white shadow-md',
-    heading: 'text-sky-500 dark:text-sky-400',
+    heading: 'text-sky-600 dark:text-sky-400',
+    dot: 'bg-sky-500',
   },
-  fulfillment: {
-    badge: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  orange: {
+    badge: 'bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25',
     pillActive: 'bg-orange-600 text-white shadow-md',
-    heading: 'text-orange-500 dark:text-orange-400',
+    heading: 'text-orange-600 dark:text-orange-400',
+    dot: 'bg-orange-500',
+  },
+  violet: {
+    badge: 'bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25',
+    pillActive: 'bg-violet-600 text-white shadow-md',
+    heading: 'text-violet-600 dark:text-violet-400',
+    dot: 'bg-violet-500',
+  },
+  rose: {
+    badge: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25',
+    pillActive: 'bg-rose-600 text-white shadow-md',
+    heading: 'text-rose-600 dark:text-rose-400',
+    dot: 'bg-rose-500',
+  },
+  teal: {
+    badge: 'bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/25',
+    pillActive: 'bg-teal-600 text-white shadow-md',
+    heading: 'text-teal-600 dark:text-teal-400',
+    dot: 'bg-teal-500',
+  },
+  indigo: {
+    badge: 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/25',
+    pillActive: 'bg-indigo-600 text-white shadow-md',
+    heading: 'text-indigo-600 dark:text-indigo-400',
+    dot: 'bg-indigo-500',
+  },
+  slate: {
+    badge: 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/25',
+    pillActive: 'bg-slate-600 text-white shadow-md',
+    heading: 'text-slate-600 dark:text-slate-400',
+    dot: 'bg-slate-500',
   },
 };
 
-export const SOP_CATEGORY_LABELS: Record<SopCategory, string> = {
-  foundations: 'Foundations',
-  marketing: 'Marketing',
-  sales: 'Sales',
-  operations: 'Operations',
-  fulfillment: 'Fulfillment',
-};
+export const SOP_COLOR_KEYS = Object.keys(SOP_COLOR_STYLES) as SopColorKey[];
 
-/** Display order for consulting SOP tracks. */
-export const SOP_ROW_ORDER: SopCategory[] = [
-  'foundations',
-  'marketing',
-  'sales',
-  'fulfillment',
-  'operations',
+export function sopColorStyle(color: string | null | undefined): SopColorStyle {
+  return SOP_COLOR_STYLES[(color as SopColorKey) || 'sky'] ?? SOP_COLOR_STYLES.sky;
+}
+
+/** Shown only until (or if) the category list fails to load. */
+export const DEFAULT_SOP_CATEGORIES: SopCategoryDef[] = [
+  { slug: 'foundations', label: 'Foundations', color: 'amber' },
+  { slug: 'marketing', label: 'Marketing', color: 'pink' },
+  { slug: 'sales', label: 'Sales', color: 'emerald' },
+  { slug: 'fulfillment', label: 'Fulfillment', color: 'orange' },
+  { slug: 'operations', label: 'Operations', color: 'sky' },
 ];
 
 export const CATEGORY_STYLES: Record<ResourceCategory, { badge: string; bg: string }> = {
@@ -439,7 +497,7 @@ function toFigmaEmbedUrl(url: URL): string | null {
   return out.toString();
 }
 
-/** Best-effort public thumbnail URL for common video hosts (YouTube / Vimeo / Loom). */
+/** Best-effort public thumbnail URL for YouTube / Vimeo. Loom is resolved via the API. */
 export function toVideoThumbnailUrl(raw: string | null | undefined): string | null {
   if (!raw) return null;
   try {
@@ -463,14 +521,7 @@ export function toVideoThumbnailUrl(raw: string | null | undefined): string | nu
       const id = host === 'player.vimeo.com' && parts[0] === 'video' ? parts[1] : parts[0];
       return id && /^\d+$/.test(id) ? `https://vumbnail.com/${encodeURIComponent(id)}.jpg` : null;
     }
-    if (host === 'loom.com') {
-      const parts = url.pathname.split('/').filter(Boolean);
-      const id =
-        (parts[0] === 'share' || parts[0] === 'embed') && parts[1] ? parts[1] : null;
-      return id
-        ? `https://cdn.loom.com/sessions/thumbnails/${encodeURIComponent(id)}-with-play.gif`
-        : null;
-    }
+    // Loom thumbnails are resolved server-side (POST /resources/video-thumbnails).
     if (host === 'fathom.video' || host.endsWith('.fathom.video')) {
       // Fathom does not expose a stable public thumbnail CDN; callers should use the badge.
       return null;

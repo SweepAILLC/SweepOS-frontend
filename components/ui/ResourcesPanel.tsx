@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { apiClient } from '@/lib/api';
+import { useSopCategories } from '@/hooks/useSopCategories';
 import {
   CATEGORY_STYLES,
   ORG_LIBRARY_TAGS,
   RESOURCE_MD_STYLES,
-  SOP_CATEGORY_COLORS,
-  SOP_CATEGORY_LABELS,
   copyToClipboard,
   renderMarkdown,
   toMediaEmbedUrl,
@@ -52,6 +51,7 @@ interface ResourceModalProps {
 }
 
 export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: ResourceModalProps) {
+  const { categories: sopCategories, labelFor, styleFor } = useSopCategories();
   const isEditableDoc = resource.category === 'SOP' || resource.category === 'AI Skill' || resource.category === 'Guide' || resource.category === 'Template';
   const canEdit = canEditDocs && isEditableDoc;
 
@@ -246,9 +246,9 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
         <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/40 dark:border-white/8">
           <div className="flex items-center gap-3 min-w-0">
             <CategoryBadge category={resource.category} />
-            {resource.category === 'SOP' && resource.sopCategory && (
-              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${SOP_CATEGORY_COLORS[resource.sopCategory].badge}`}>
-                {SOP_CATEGORY_LABELS[resource.sopCategory]}
+            {resource.category === 'SOP' && resource.sopCategory && labelFor(resource.sopCategory) && (
+              <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold border ${styleFor(resource.sopCategory).badge}`}>
+                {labelFor(resource.sopCategory)}
               </span>
             )}
             {editing ? (
@@ -315,8 +315,8 @@ export function ResourceModal({ resource, canEditDocs, onClose, onSaved }: Resou
                     className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                   >
                     <option value="">Uncategorized</option>
-                    {Object.entries(SOP_CATEGORY_LABELS).map(([value, label]) => (
-                      <option key={value} value={value}>{label}</option>
+                    {sopCategories.map((c) => (
+                      <option key={c.slug} value={c.slug}>{c.label}</option>
                     ))}
                   </select>
                 </div>
@@ -476,6 +476,7 @@ interface CreateSopModalProps {
 }
 
 export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
+  const { categories: sopCategories } = useSopCategories();
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [content, setContent] = useState('# New SOP\n\n');
@@ -580,8 +581,8 @@ export function CreateSopModal({ onClose, onCreated }: CreateSopModalProps) {
               className="w-full text-sm bg-gray-800/60 border border-gray-600/40 rounded-lg px-3 py-2 text-gray-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
             >
               <option value="">Uncategorized</option>
-              {Object.entries(SOP_CATEGORY_LABELS).map(([value, label]) => (
-                <option key={value} value={value}>{label}</option>
+              {sopCategories.map((c) => (
+                <option key={c.slug} value={c.slug}>{c.label}</option>
               ))}
             </select>
           </div>

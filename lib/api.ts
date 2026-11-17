@@ -1,6 +1,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import Cookies from 'js-cookie';
 import type { Client, ClientGridDetail } from '@/types/client';
+import type { SopCategoryDef } from '@/lib/resources';
 import type {
   FunnelSimulatorBaselines,
   FunnelSimulatorScenario,
@@ -3943,6 +3944,43 @@ class ApiClient {
   async reorderDocs(resourceIds: string[]): Promise<ResourceDocSummary[]> {
     const response = await this.client.post('/resources/docs/reorder', { resource_ids: resourceIds });
     return response.data as ResourceDocSummary[];
+  }
+
+  // ----- SOP categories (owner-managed) --------------------------------------
+
+  async listSopCategories(): Promise<SopCategoryDef[]> {
+    const response = await this.client.get('/resources/sop-categories');
+    return response.data as SopCategoryDef[];
+  }
+
+  async createSopCategory(body: { label: string; color?: string }): Promise<SopCategoryDef> {
+    const response = await this.client.post('/resources/sop-categories', body);
+    return response.data as SopCategoryDef;
+  }
+
+  async updateSopCategory(
+    slug: string,
+    body: { label?: string; color?: string }
+  ): Promise<SopCategoryDef> {
+    const response = await this.client.put(`/resources/sop-categories/${encodeURIComponent(slug)}`, body);
+    return response.data as SopCategoryDef;
+  }
+
+  async deleteSopCategory(
+    slug: string
+  ): Promise<{ slug: string; deleted: boolean; uncategorized_docs: number }> {
+    const response = await this.client.delete(`/resources/sop-categories/${encodeURIComponent(slug)}`);
+    return response.data as { slug: string; deleted: boolean; uncategorized_docs: number };
+  }
+
+  async reorderSopCategories(slugs: string[]): Promise<SopCategoryDef[]> {
+    const response = await this.client.post('/resources/sop-categories/reorder', { slugs });
+    return response.data as SopCategoryDef[];
+  }
+
+  async getVideoThumbnails(urls: string[]): Promise<Record<string, string | null>> {
+    const response = await this.client.post('/resources/video-thumbnails', { urls });
+    return (response.data as { thumbnails: Record<string, string | null> }).thumbnails;
   }
 
   // ----- Org Resource Library ------------------------------------------------

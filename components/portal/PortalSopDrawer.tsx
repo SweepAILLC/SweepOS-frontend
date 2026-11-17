@@ -22,22 +22,22 @@ import { apiClient } from '@/lib/api';
 import { MAIN_ORG_ID } from '@/lib/orgScope';
 import {
   RESOURCE_MD_STYLES,
-  SOP_CATEGORY_COLORS,
-  SOP_CATEGORY_LABELS,
-  SOP_ROW_ORDER,
   copyToClipboard,
   docMetaToResource,
   isSopResource,
   mergeDocsWithAiSkills,
   renderMarkdown,
-  toVideoThumbnailUrl,
   toMediaEmbedUrl,
   getMediaEmbedKind,
   resourceEmbedUrls,
+  sopColorStyle,
   type Resource,
-  type SopCategory,
+  type SopColorStyle,
 } from '@/lib/resources';
+import { useSopCategories } from '@/hooks/useSopCategories';
 import { CreateSopModal, ResourceModal } from '@/components/ui/ResourcesPanel';
+import SopThumb from '@/components/portal/SopThumb';
+import SopCategoryManager from '@/components/portal/SopCategoryManager';
 
 /** Collapsed rail / open panel widths — keep in sync with OrgPortalPanel padding. */
 export const SOP_DRAWER_WIDTH_COLLAPSED = '3.75rem';
@@ -53,143 +53,75 @@ type PortalSopDrawerProps = {
   allowManage?: boolean;
 };
 
-type SopGroupKey = SopCategory | 'uncategorized';
+const UNCATEGORIZED = 'uncategorized';
+type SopGroupKey = string;
 
 function SopRowBody({
   sop,
+  loomThumbs,
   onOpen,
   dragHandle,
 }: {
   sop: Resource;
+  loomThumbs: Record<string, string | null>;
   onOpen: (sop: Resource) => void;
   dragHandle?: ReactNode;
 }) {
-  const urls = resourceEmbedUrls(sop);
-  const kinds = urls.map((u) => getMediaEmbedKind(u));
-  const showLoomBadge = kinds.includes('loom');
-  const showFathomBadge = kinds.includes('fathom');
-  const showFigmaBadge = kinds.includes('figma');
-  // Prefer a Loom/YouTube thumb when present (even if Figma is listed first).
-  const thumbSource =
-    urls.find((u, i) => kinds[i] === 'loom' || kinds[i] === 'video') || urls[0] || null;
-  const thumbKind = getMediaEmbedKind(thumbSource);
-  const thumb =
-    thumbKind === 'video' || thumbKind === 'loom' ? toVideoThumbnailUrl(thumbSource) : null;
-  const extraCount = Math.max(0, urls.length - 1);
-
+  // Fixed row height + fixed thumbnail slot: every row is the same size regardless of content.
   return (
-    <div className="flex items-stretch gap-0.5 rounded-md border border-transparent hover:border-sky-300/50 hover:bg-sky-50/80 dark:hover:bg-sky-950/30 transition-colors">
+    <div className="flex h-[68px] items-center rounded-lg border border-gray-200/70 dark:border-white/10 bg-white dark:bg-white/[0.03] transition-colors hover:border-sky-300/60 hover:bg-sky-50/70 dark:hover:bg-sky-950/30">
       {dragHandle}
       <button
         type="button"
         onClick={() => onOpen(sop)}
-        className="min-w-0 flex-1 text-left px-2.5 py-2"
+        className="flex h-full min-w-0 flex-1 items-center gap-3 px-2.5 text-left"
       >
-        <span className="block text-xs font-semibold text-gray-900 dark:text-gray-100 line-clamp-1">
-          {sop.title}
-        </span>
-        <span className="mt-0.5 flex items-start gap-2">
-          <span className="min-w-0 flex-1 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2">
+        <SopThumb urls={resourceEmbedUrls(sop)} loomThumbs={loomThumbs} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold text-gray-900 dark:text-gray-100">{sop.title}</span>
+          <span className="mt-0.5 block text-[11px] leading-snug text-gray-500 dark:text-gray-400 line-clamp-2">
             {sop.description}
           </span>
-          {thumb ? (
-            <span
-              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-gray-200/70 dark:border-white/10 bg-black/40"
-              title={showLoomBadge ? 'Loom video embedded' : 'Video embedded'}
-            >
-              <img
-                src={thumb}
-                alt=""
-                loading="lazy"
-                className="h-full w-full object-cover"
-                onError={(e) => {
-                  (e.currentTarget.parentElement as HTMLElement | null)?.style.setProperty(
-                    'display',
-                    'none'
-                  );
-                }}
-              />
-              <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/25">
-                <svg className="w-3.5 h-3.5 text-white/90 drop-shadow" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                  <path d="M6.5 4.5v11l9-5.5-9-5.5z" />
-                </svg>
-              </span>
-              {showLoomBadge ? (
-                <span className="absolute bottom-0.5 left-0.5 rounded px-0.5 text-[7px] font-bold uppercase tracking-wide bg-violet-600/90 text-white">
-                  Loom
-                </span>
-              ) : null}
-              {extraCount > 0 ? (
-                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
-                  +{extraCount}
-                </span>
-              ) : null}
-            </span>
-          ) : showLoomBadge ? (
-            <span
-              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-violet-500/30 bg-gradient-to-br from-violet-500/25 via-fuchsia-500/15 to-indigo-500/20 flex flex-col items-center justify-center gap-0.5"
-              title="Loom video embedded"
-            >
-              <svg className="w-4 h-4 text-violet-300" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                <path d="M12 2a5 5 0 015 5v1.1A5 5 0 0119.9 12 5 5 0 0117 16.9V18a5 5 0 11-10 0v-1.1A5 5 0 014.1 12 5 5 0 017 7.1V6a5 5 0 015-4zm0 7a3 3 0 100 6 3 3 0 000-6z" />
-              </svg>
-              <span className="text-[8px] font-bold uppercase tracking-wide text-violet-200/90">Loom</span>
-              {extraCount > 0 ? (
-                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
-                  +{extraCount}
-                </span>
-              ) : null}
-            </span>
-          ) : showFathomBadge ? (
-            <span
-              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-teal-500/30 bg-gradient-to-br from-teal-500/25 via-cyan-500/15 to-emerald-500/20 flex flex-col items-center justify-center gap-0.5"
-              title="Fathom recording embedded"
-            >
-              <svg className="w-4 h-4 text-teal-300" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-                <path d="M6.5 4.5v11l9-5.5-9-5.5z" />
-              </svg>
-              <span className="text-[8px] font-bold uppercase tracking-wide text-teal-200/90">Fathom</span>
-              {extraCount > 0 ? (
-                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
-                  +{extraCount}
-                </span>
-              ) : null}
-            </span>
-          ) : showFigmaBadge ? (
-            <span
-              className="relative flex-shrink-0 w-16 h-10 overflow-hidden rounded border border-fuchsia-500/30 bg-gradient-to-br from-fuchsia-500/20 via-violet-500/15 to-sky-500/20 flex flex-col items-center justify-center gap-0.5"
-              title="Figma board embedded"
-            >
-              <svg className="w-4 h-4 text-fuchsia-400" viewBox="0 0 38 57" fill="currentColor" aria-hidden>
-                <path d="M19 28.5a9.5 9.5 0 1 1 19 0 9.5 9.5 0 0 1-19 0z" />
-                <path d="M0 47.5A9.5 9.5 0 0 1 9.5 38H19v9.5a9.5 9.5 0 1 1-19 0z" />
-                <path d="M19 0v19h9.5a9.5 9.5 0 1 0 0-19H19z" />
-                <path d="M0 9.5A9.5 9.5 0 0 0 9.5 19H19V0H9.5A9.5 9.5 0 0 0 0 9.5z" />
-                <path d="M0 28.5A9.5 9.5 0 0 0 9.5 38H19V19H9.5A9.5 9.5 0 0 0 0 28.5z" />
-              </svg>
-              <span className="text-[8px] font-bold uppercase tracking-wide text-fuchsia-300/90">Figma</span>
-              {extraCount > 0 ? (
-                <span className="absolute top-0.5 right-0.5 rounded-full bg-black/70 text-white text-[8px] font-bold px-1 leading-4">
-                  +{extraCount}
-                </span>
-              ) : null}
-            </span>
-          ) : null}
         </span>
+        <svg
+          className="h-3.5 w-3.5 flex-shrink-0 text-gray-300 dark:text-gray-600"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
       </button>
     </div>
   );
 }
 
-function PlainSopRow({ sop, onOpen }: { sop: Resource; onOpen: (sop: Resource) => void }) {
+function PlainSopRow({
+  sop,
+  loomThumbs,
+  onOpen,
+}: {
+  sop: Resource;
+  loomThumbs: Record<string, string | null>;
+  onOpen: (sop: Resource) => void;
+}) {
   return (
     <li>
-      <SopRowBody sop={sop} onOpen={onOpen} />
+      <SopRowBody sop={sop} loomThumbs={loomThumbs} onOpen={onOpen} />
     </li>
   );
 }
 
-function SortableSopRow({ sop, onOpen }: { sop: Resource; onOpen: (sop: Resource) => void }) {
+function SortableSopRow({
+  sop,
+  loomThumbs,
+  onOpen,
+}: {
+  sop: Resource;
+  loomThumbs: Record<string, string | null>;
+  onOpen: (sop: Resource) => void;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: sop.id,
   });
@@ -204,11 +136,12 @@ function SortableSopRow({ sop, onOpen }: { sop: Resource; onOpen: (sop: Resource
     <li ref={setNodeRef} style={style} className={isDragging ? 'relative z-10' : undefined}>
       <SopRowBody
         sop={sop}
+        loomThumbs={loomThumbs}
         onOpen={onOpen}
         dragHandle={
           <button
             type="button"
-            className="flex-shrink-0 px-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-grab active:cursor-grabbing touch-none"
+            className="flex h-full flex-shrink-0 items-center pl-2 text-gray-300 hover:text-gray-600 dark:text-gray-600 dark:hover:text-gray-200 cursor-grab active:cursor-grabbing touch-none"
             aria-label={`Drag to reorder ${sop.title}`}
             title="Drag to reorder"
             {...attributes}
@@ -226,14 +159,23 @@ function SortableSopRow({ sop, onOpen }: { sop: Resource; onOpen: (sop: Resource
 
 function SopCategoryList({
   groupKey,
+  label,
+  style,
   rows,
+  loomThumbs,
   canReorder,
+  showEmpty,
   onOpen,
   onReorderGroup,
 }: {
   groupKey: SopGroupKey;
+  label: string;
+  style: SopColorStyle;
   rows: Resource[];
+  loomThumbs: Record<string, string | null>;
   canReorder: boolean;
+  /** Owners see empty categories so newly created ones are visible. */
+  showEmpty: boolean;
   onOpen: (sop: Resource) => void;
   onReorderGroup: (groupKey: SopGroupKey, activeId: string, overId: string) => void;
 }) {
@@ -242,36 +184,44 @@ function SopCategoryList({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !showEmpty) return null;
 
-  const heading =
-    groupKey === 'uncategorized' ? (
-      <h4 className="text-[10px] font-bold uppercase tracking-wider mb-1.5 text-gray-500">
-        Uncategorized
-      </h4>
-    ) : (
-      <h4
-        className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${SOP_CATEGORY_COLORS[groupKey].heading}`}
-      >
-        {SOP_CATEGORY_LABELS[groupKey]}
-      </h4>
+  const heading = (
+    <div className="mb-2 flex items-center gap-2 border-b border-gray-200/70 dark:border-white/10 pb-1.5">
+      <span className={`h-2 w-2 flex-shrink-0 rounded-full ${style.dot}`} />
+      <h4 className={`text-[11px] font-bold uppercase tracking-wider ${style.heading}`}>{label}</h4>
+      <span className="rounded-full bg-gray-100 dark:bg-white/10 px-1.5 text-[10px] font-semibold leading-4 text-gray-500 dark:text-gray-400">
+        {rows.length}
+      </span>
+    </div>
+  );
+
+  if (rows.length === 0) {
+    return (
+      <section>
+        {heading}
+        <p className="rounded-lg border border-dashed border-gray-200 dark:border-white/10 px-3 py-3 text-center text-[11px] text-gray-400">
+          No SOPs in this category yet.
+        </p>
+      </section>
     );
+  }
 
   if (!canReorder) {
     return (
-      <div>
+      <section>
         {heading}
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {rows.map((sop) => (
-            <PlainSopRow key={sop.id} sop={sop} onOpen={onOpen} />
+            <PlainSopRow key={sop.id} sop={sop} loomThumbs={loomThumbs} onOpen={onOpen} />
           ))}
         </ul>
-      </div>
+      </section>
     );
   }
 
   return (
-    <div>
+    <section>
       {heading}
       <DndContext
         sensors={sensors}
@@ -283,14 +233,14 @@ function SopCategoryList({
         }}
       >
         <SortableContext items={rows.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-          <ul className="space-y-1">
+          <ul className="space-y-1.5">
             {rows.map((sop) => (
-              <SortableSopRow key={sop.id} sop={sop} onOpen={onOpen} />
+              <SortableSopRow key={sop.id} sop={sop} loomThumbs={loomThumbs} onOpen={onOpen} />
             ))}
           </ul>
         </SortableContext>
       </DndContext>
-    </div>
+    </section>
   );
 }
 
@@ -313,6 +263,9 @@ export default function PortalSopDrawer({
   const [showCreate, setShowCreate] = useState(false);
   const [editResource, setEditResource] = useState<Resource | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [showCategories, setShowCategories] = useState(false);
+  const [loomThumbs, setLoomThumbs] = useState<Record<string, string | null>>({});
+  const { categories, reload: reloadCategories, labelFor, styleFor } = useSopCategories(isActive);
 
   const loadDocs = useCallback(async () => {
     try {
@@ -366,31 +319,66 @@ export default function PortalSopDrawer({
       (r) =>
         r.title.toLowerCase().includes(q) ||
         r.description.toLowerCase().includes(q) ||
-        (r.sopCategory && SOP_CATEGORY_LABELS[r.sopCategory].toLowerCase().includes(q))
+        labelFor(r.sopCategory).toLowerCase().includes(q)
     );
-  }, [docs, search]);
+  }, [docs, search, labelFor]);
 
   const grouped = useMemo(() => {
     const byCat = new Map<SopGroupKey, Resource[]>();
-    for (const cat of SOP_ROW_ORDER) byCat.set(cat, []);
-    byCat.set('uncategorized', []);
+    for (const cat of categories) byCat.set(cat.slug, []);
+    byCat.set(UNCATEGORIZED, []);
     for (const sop of sops) {
-      const key: SopGroupKey =
-        sop.sopCategory && SOP_ROW_ORDER.includes(sop.sopCategory) ? sop.sopCategory : 'uncategorized';
+      const key = sop.sopCategory && byCat.has(sop.sopCategory) ? sop.sopCategory : UNCATEGORIZED;
       byCat.get(key)!.push(sop);
     }
     return byCat;
-  }, [sops]);
+  }, [sops, categories]);
+
+  const sopCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const sop of mergeDocsWithAiSkills(docs).filter(isSopResource)) {
+      if (sop.sopCategory) counts[sop.sopCategory] = (counts[sop.sopCategory] || 0) + 1;
+    }
+    return counts;
+  }, [docs]);
+
+  // Resolve Loom thumbnails server-side (Loom has no stable public thumbnail URL).
+  useEffect(() => {
+    const wanted = new Set<string>();
+    for (const doc of docs) {
+      for (const url of resourceEmbedUrls(doc)) {
+        if (getMediaEmbedKind(url) === 'loom' && !(url in loomThumbs)) wanted.add(url);
+      }
+    }
+    if (wanted.size === 0) return;
+    let cancelled = false;
+    apiClient
+      .getVideoThumbnails(Array.from(wanted))
+      .then((map) => {
+        if (!cancelled) setLoomThumbs((prev) => ({ ...prev, ...map }));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLoomThumbs((prev) => {
+          const next = { ...prev };
+          wanted.forEach((u) => (next[u] = null));
+          return next;
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docs, loomThumbs]);
 
   const canReorder = canManage && !search.trim() && !reordering;
 
   const persistFullOrder = useCallback(
     async (nextGrouped: Map<SopGroupKey, Resource[]>) => {
       const orderedIds: string[] = [];
-      for (const cat of SOP_ROW_ORDER) {
-        for (const sop of nextGrouped.get(cat) || []) orderedIds.push(sop.id);
+      for (const cat of categories) {
+        for (const sop of nextGrouped.get(cat.slug) || []) orderedIds.push(sop.id);
       }
-      for (const sop of nextGrouped.get('uncategorized') || []) orderedIds.push(sop.id);
+      for (const sop of nextGrouped.get(UNCATEGORIZED) || []) orderedIds.push(sop.id);
 
       // Optimistic local update so the list feels immediate.
       setDocs((prev) => {
@@ -416,7 +404,7 @@ export default function PortalSopDrawer({
         setReordering(false);
       }
     },
-    [loadDocs]
+    [loadDocs, categories]
   );
 
   const handleReorderGroup = useCallback(
@@ -555,7 +543,7 @@ export default function PortalSopDrawer({
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
                     {canManage
                       ? 'Drag handles to reorder · notes stay open'
-                      : 'Foundations → Operations · notes stay open'}
+                      : 'Grouped by category · notes stay open'}
                   </p>
                 ) : null}
               </div>
@@ -607,20 +595,28 @@ export default function PortalSopDrawer({
                     </p>
                   ) : (
                     <>
-                      {SOP_ROW_ORDER.map((cat) => (
+                      {categories.map((cat) => (
                         <SopCategoryList
-                          key={cat}
-                          groupKey={cat}
-                          rows={grouped.get(cat) || []}
+                          key={cat.slug}
+                          groupKey={cat.slug}
+                          label={cat.label}
+                          style={sopColorStyle(cat.color)}
+                          rows={grouped.get(cat.slug) || []}
+                          loomThumbs={loomThumbs}
                           canReorder={canReorder}
+                          showEmpty={canManage && !search.trim()}
                           onOpen={setActiveSop}
                           onReorderGroup={handleReorderGroup}
                         />
                       ))}
                       <SopCategoryList
-                        groupKey="uncategorized"
-                        rows={grouped.get('uncategorized') || []}
+                        groupKey={UNCATEGORIZED}
+                        label="Uncategorized"
+                        style={sopColorStyle('slate')}
+                        rows={grouped.get(UNCATEGORIZED) || []}
+                        loomThumbs={loomThumbs}
                         canReorder={canReorder}
+                        showEmpty={false}
                         onOpen={setActiveSop}
                         onReorderGroup={handleReorderGroup}
                       />
@@ -660,6 +656,13 @@ export default function PortalSopDrawer({
                           </svg>
                           New SOP
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowCategories(true)}
+                          className="w-full inline-flex items-center justify-center gap-1.5 rounded-md border border-gray-300 dark:border-white/15 hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-200 text-xs font-semibold px-3 py-2"
+                        >
+                          Manage categories
+                        </button>
                       </div>
                     ) : null}
                   </div>
@@ -667,13 +670,13 @@ export default function PortalSopDrawer({
               </>
             ) : (
               <div className="flex-1 overflow-y-auto px-3 py-3">
-                {activeSop.sopCategory ? (
+                {labelFor(activeSop.sopCategory) ? (
                   <span
                     className={`inline-flex mb-2 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
-                      SOP_CATEGORY_COLORS[activeSop.sopCategory].badge
+                      styleFor(activeSop.sopCategory).badge
                     }`}
                   >
-                    {SOP_CATEGORY_LABELS[activeSop.sopCategory]}
+                    {labelFor(activeSop.sopCategory)}
                   </span>
                 ) : null}
                 <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">{activeSop.description}</p>
@@ -738,6 +741,17 @@ export default function PortalSopDrawer({
           </div>
         )}
       </aside>
+
+      {showCategories && canManage ? (
+        <SopCategoryManager
+          categories={categories}
+          counts={sopCounts}
+          onClose={() => setShowCategories(false)}
+          onChanged={async () => {
+            await Promise.all([reloadCategories(), loadDocs()]);
+          }}
+        />
+      ) : null}
 
       {showCreate && canManage ? (
         <CreateSopModal onClose={() => setShowCreate(false)} onCreated={(id) => void handleCreated(id)} />
