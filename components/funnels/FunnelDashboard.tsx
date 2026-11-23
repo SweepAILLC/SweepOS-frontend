@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import {
   Area,
   AreaChart,
@@ -27,11 +28,16 @@ import FunnelStepDropoff from '@/components/funnels/FunnelStepDropoff';
 import FunnelAdPerformanceDrawer from '@/components/funnels/FunnelAdPerformanceDrawer';
 import FunnelSnapshotPicker from '@/components/funnels/FunnelSnapshotPicker';
 import FunnelSimulatorModal from '@/components/portal/FunnelSimulatorModal';
+import ScalePlannerPanel from '@/components/funnels/ScalePlannerPanel';
+import { breakEvenRoas } from '@/lib/scalePlanner';
+import type { BusinessEconomics } from '@/types/businessEconomics';
 import { paidSnapshotWeeklyBenchmarks, scenarioInputs } from '@/lib/funnelSimulator';
 import type { FunnelSimulatorScenario } from '@/types/funnelSimulator';
 import type {
   Funnel,
   FunnelDashboardResponse,
+  FunnelScorecard,
+  FunnelScorecardMetric,
   FunnelTrackingStatus,
   FunnelWithSteps,
 } from '@/types/funnel';
@@ -219,6 +225,55 @@ interface FunnelDashboardProps {
   onBack?: () => void;
 }
 
+/**
+ * Append "Break-even ROAS" and "Gap vs break-even" rows to the scorecard's economics
+ * group, from the org's business economics (fixed costs prorated to 7/30 per week).
+ * Owners/admins only — members get no economics profile, so no rows.
+ */
+function withBreakEvenRows(scorecard: FunnelScorecard | null, econ: BusinessEconomics | null): FunnelScorecard | null {
+  if (!scorecard || !econ?.configured) return scorecard;
+  const spend = scorecard.metrics.find((m) => m.key === 'ad_spend');
+  const roas = scorecard.metrics.find((m) => m.key === 'roas');
+  if (!spend || !roas) return scorecard;
+  const weeklyFixed =
+    ((econ.fixed_monthly_costs ?? 0) + (econ.include_living_in_breakeven ? econ.living_expenses ?? 0 : 0)) * (7 / 30);
+  const be = spend.values.map((s) => (s != null && s > 0 ? breakEvenRoas(s, weeklyFixed, econ.variable_cost_pct) : null));
+  const gap = be.map((b, i) => {
+    const r = roas.values[i];
+    return b != null && r != null && b > 0 ? (r - b) / b : null;
+  });
+  const avg = (vals: Array<number | null>) => {
+    const done = vals.filter((v, i): v is number => v != null && !scorecard.weeks[i]?.not_started);
+    return done.length ? done.reduce((a, b) => a + b, 0) / done.length : null;
+  };
+  const rows: FunnelScorecardMetric[] = [
+    {
+      key: 'breakeven_roas',
+      label: 'Break-even ROAS',
+      group: 'economics',
+      format: 'ratio',
+      better: 'neutral',
+      values: be,
+      benchmark: avg(be),
+      range_average: avg(be),
+    },
+    {
+      key: 'roas_gap',
+      label: 'Gap vs Break-even',
+      group: 'economics',
+      format: 'pct',
+      better: 'up',
+      values: gap,
+      benchmark: avg(gap),
+      range_average: avg(gap),
+    },
+  ];
+  const at = scorecard.metrics.findIndex((m) => m.key === 'roas');
+  const metrics = [...scorecard.metrics];
+  metrics.splice(at + 1, 0, ...rows);
+  return { ...scorecard, metrics };
+}
+
 export default function FunnelDashboard({
   initialFunnelId = null,
   initialChannel = null,
@@ -270,6 +325,31 @@ export default function FunnelDashboard({
   const [paidSnapshot, setPaidSnapshot] = useState<FunnelSimulatorScenario | null>(null);
   const [organicSnapshot, setOrganicSnapshot] = useState<FunnelSimulatorScenario | null>(null);
   const [snapshotTick, setSnapshotTick] = useState(0);
+  // Scorecard (default) or the Scale Planner (break-even, spend vs profit, goal path).
+  const router = useRouter();
+  const [view, setView] = useState<'scorecard' | 'planner'>(
+    router.query.funnelView === 'planner' ? 'planner' : 'scorecard'
+  );
+  // Terminal's Scale readiness card deep-links here with ?funnelView=planner.
+  useEffect(() => {
+    if (router.query.funnelView === 'planner') setView('planner');
+  }, [router.query.funnelView]);
+  // Owners/admins: business economics for the scorecard's break-even rows (403 for members → none).
+  const [economics, setEconomics] = useState<BusinessEconomics | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    apiClient
+      .getBusinessEconomics()
+      .then((row) => {
+        if (!cancelled) setEconomics(row);
+      })
+      .catch(() => {
+        if (!cancelled) setEconomics(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Funnels never offer "All time" (the scorecard needs a start), so start is always set.
   const start = range.start ?? range.end;
@@ -350,7 +430,11 @@ export default function FunnelDashboard({
         : 'All channels';
 
   const summary = data?.summary ?? null;
-  const scorecard = data?.scorecard ?? null;
+  const scorecard = useMemo(
+    // Fixed costs are org-wide, so break-even only means something on the all-funnels view.
+    () => (funnelId ? data?.scorecard ?? null : withBreakEvenRows(data?.scorecard ?? null, economics)),
+    [data?.scorecard, economics, funnelId]
+  );
   const tracking = TRACKING[data?.tracking.status ?? 'no_funnels'];
   const vslWatch = data?.vsl_watch ?? null;
 
@@ -421,6 +505,31 @@ export default function FunnelDashboard({
             {tracking.label}
           </span>
           )}
+          {isOrganicView ? null : (
+            <div className="inline-flex rounded-lg border border-white/10 bg-white/5 p-0.5" role="tablist" aria-label="Funnel view">
+              {(
+                [
+                  ['scorecard', 'Scorecard'],
+                  ['planner', '📈 Scale Planner'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={view === id}
+                  onClick={() => setView(id)}
+                  className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                    view === id
+                      ? 'bg-indigo-500/20 text-indigo-700 dark:text-indigo-200'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-white/10'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             type="button"
             onClick={() => setTargetsOpen(true)}
@@ -466,6 +575,12 @@ export default function FunnelDashboard({
           </div>
           <KpiCommandCenterPanel variant="organic" organicModel={organicSnapshot} />
         </>
+      ) : view === 'planner' ? (
+        <ScalePlannerPanel
+          onOpenEconomics={() =>
+            void router.push({ pathname: '/', query: { tab: 'settings', section: 'economics' } })
+          }
+        />
       ) : (
         <>
       {error ? (

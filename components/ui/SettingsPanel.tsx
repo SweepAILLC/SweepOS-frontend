@@ -10,6 +10,7 @@ import TeamSettingsView from '@/components/team/TeamSettingsView';
 import IntegrationsPanel from '@/components/ui/IntegrationsPanel';
 import NotificationSettingsCard from '@/components/ui/NotificationSettingsCard';
 import OrgTimezoneCard from '@/components/ui/OrgTimezoneCard';
+import BusinessEconomicsSettings from '@/components/ui/BusinessEconomicsSettings';
 import { startOnboardingTour, subscribeSettingsTourSection } from '@/lib/onboardingTour';
 
 type SettingsSection =
@@ -19,7 +20,8 @@ type SettingsSection =
   | 'profile'
   | 'privacy'
   | 'integrations'
-  | 'notifications';
+  | 'notifications'
+  | 'economics';
 
 interface OrgOption {
   id: string;
@@ -33,6 +35,7 @@ const SIDEBAR_ITEMS: { id: SettingsSection; label: string; adminOnly?: boolean }
   { id: 'team', label: 'Team', adminOnly: true },
   { id: 'integrations', label: 'Integrations', adminOnly: true },
   { id: 'notifications', label: 'Notifications', adminOnly: true },
+  { id: 'economics', label: 'Business economics', adminOnly: true },
   { id: 'profile', label: 'Profile' },
   { id: 'privacy', label: 'Privacy & Data' },
 ];
@@ -152,7 +155,7 @@ export default function SettingsPanel({
         setSection('profile');
       } else if (
         typeof sectionQ === 'string' &&
-        ['appearance', 'accounts', 'team', 'profile', 'privacy', 'integrations', 'notifications'].includes(sectionQ)
+        ['appearance', 'accounts', 'team', 'profile', 'privacy', 'integrations', 'notifications', 'economics'].includes(sectionQ)
       ) {
         setSection(sectionQ as SettingsSection);
       }
@@ -199,7 +202,7 @@ export default function SettingsPanel({
     if (
       !loading &&
       ((section === 'integrations' && !canSeeIntegrations) ||
-        (section === 'notifications' && !isAdminOrOwner))
+        ((section === 'notifications' || section === 'economics') && !isAdminOrOwner))
     ) {
       setSection('appearance');
     }
@@ -667,6 +670,8 @@ export default function SettingsPanel({
               <OrgTimezoneCard orgId={currentOrgId} />
             </div>
           )}
+
+          {section === 'economics' && isAdminOrOwner && <BusinessEconomicsSettings />}
 
           {section === 'privacy' && (
             <form onSubmit={handleSubmit} className="space-y-6">

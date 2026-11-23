@@ -10,6 +10,7 @@ export function playbookSection(playbook?: string | null): PlaybookSection {
   if (playbook === 'scaling') return SECTIONS[1];
   if (playbook === 'surplus') return SECTIONS[2];
   if (playbook === 'quality') return SECTIONS[3];
+  if (playbook === 'kill') return SECTIONS[4];
   return SECTIONS[0];
 }
 
@@ -53,6 +54,16 @@ const SECTIONS: PlaybookSection[] = [
       'A cheap lead can still be the wrong lead. If sales says the people from the “winning” ads are a poor fit, treat those ads as losers even when cost per result looks fine.',
       'Duplicate the ad set, remove that messaging, and do not scale it. Cost per result does not measure lead quality — call feedback does.',
       'This check is manual. Sweep cannot hear the sales floor. Run it whenever a scale or fatigue alert lands on ads that book calls.',
+    ],
+  },
+  {
+    id: 'playbook-kill',
+    title: 'Kill rule',
+    steps: [
+      'Set a target cost per booked call (Settings → Business economics). Call funnels for high-ticket offers usually land at $100–$300.',
+      'Any ad that spends 3x that target without a single result gets turned off. Don’t wait for it to "warm up".',
+      'Move its budget to an ad that is already booking calls, inside the same ad set, so the algorithm keeps its learning.',
+      'Replace it with a new hook on a proven message, not a whole new concept: a small change restarts learning cheaply.',
     ],
   },
 ];

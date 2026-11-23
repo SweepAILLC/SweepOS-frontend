@@ -32,6 +32,9 @@ const ALERT_LABEL: Record<string, string> = {
   learning_limited: 'Learning limited',
   spend_concentration: 'Spend concentration',
   creative_bench_low: 'Creative bench low',
+  no_result_kill: 'Kill — no results',
+  scale_test_failed: 'Scale test failed',
+  scale_test_passed: 'Scale test passed',
 };
 
 function money(cents?: number | null, currency?: string | null): string {
