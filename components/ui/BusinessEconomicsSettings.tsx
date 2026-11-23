@@ -79,9 +79,12 @@ function toNum(s: string): number | null {
 export default function BusinessEconomicsSettings({
   asOrgId,
   onSaved,
+  embedded = false,
 }: {
   asOrgId?: string;
   onSaved?: (row: BusinessEconomics) => void;
+  /** Inside the Scale Planner's "Your business" card: no page heading. */
+  embedded?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,14 +180,20 @@ export default function BusinessEconomicsSettings({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Business economics</h2>
-        <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-          Powers the Scale Planner (Funnels tab): break-even ROAS, how much you can safely spend, and the
-          bulk / hold / cut verdict. Reserves and living costs are encrypted and only owners and admins can see
-          them.
+      {embedded ? (
+        <p className="text-xs text-gray-600 dark:text-gray-400">
+          Saved for the whole business — every funnel, the scorecard&apos;s break-even rows, the Terminal card and
+          the Kill ad alert use these. Reserves and living costs are encrypted and only owners and admins see them.
         </p>
-      </div>
+      ) : (
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Business economics</h2>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
+            Powers the Scale Planner: break-even ROAS, how much you can safely spend, and the bulk / hold / cut
+            verdict. Reserves and living costs are encrypted and only owners and admins can see them.
+          </p>
+        </div>
+      )}
 
       <section className="glass-card rounded-xl border border-gray-200/60 dark:border-white/10 p-4 space-y-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Costs</h3>

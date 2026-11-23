@@ -28,6 +28,7 @@ import {
   usd0,
   type PlannerInputs,
 } from '@/lib/scalePlanner';
+import BusinessEconomicsSettings from '@/components/ui/BusinessEconomicsSettings';
 import type { BusinessEconomics, ScaleReadinessResponse, ScaleVerdict } from '@/types/businessEconomics';
 
 /**
@@ -37,8 +38,11 @@ import type { BusinessEconomics, ScaleReadinessResponse, ScaleVerdict } from '@/
  *     decaying as spend grows, plus the worst case (ROAS at the worst week seen).
  *  3. Goal path — grow spend X% a month: when profit reaches the goal, and the lowest
  *     the cash cushion gets on the way.
- * Prefilled from the last 4 complete weeks of paid data + Settings → Business economics;
- * every input can be overridden for what-ifs. Nothing here is saved except via Settings.
+ * With a funnel selected, the scenario is prefilled from that funnel's last 4 complete weeks,
+ * with the business's fixed costs split by its share of paid spend; with none, all paid funnels.
+ * The verdict, runway and recommended spend stay business-wide — the cash cushion isn't per funnel.
+ * "Your business" (fixed costs, reserves, risk) is saved for the whole org; the scenario
+ * inputs are what-ifs and are not saved.
  */
 
 const PROFIT_COLOR = '#10b981';
@@ -170,13 +174,17 @@ function Card({
 
 export default function ScalePlannerPanel({
   asOrgId,
-  onOpenEconomics,
+  funnelId = null,
+  funnelName = null,
 }: {
   /** System owner viewing another org. */
   asOrgId?: string;
-  /** Jump to Settings → Business economics. */
-  onOpenEconomics?: () => void;
+  /** One funnel's numbers; null = all paid funnels. */
+  funnelId?: string | null;
+  funnelName?: string | null;
 }) {
+  const [businessOpen, setBusinessOpen] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const [readiness, setReadiness] = useState<ScaleReadinessResponse | null>(null);
   const [econ, setEcon] = useState<BusinessEconomics | null>(null);
   const [restricted, setRestricted] = useState(false);
@@ -195,14 +203,17 @@ export default function ScalePlannerPanel({
   const [growthPct, setGrowthPct] = useState(30);
 
   const prefill = useCallback((r: ScaleReadinessResponse | null, e: BusinessEconomics | null) => {
-    const fixed = (e?.fixed_monthly_costs ?? 0) + (e?.include_living_in_breakeven ? e?.living_expenses ?? 0 : 0);
+    const orgFixed = (e?.fixed_monthly_costs ?? 0) + (e?.include_living_in_breakeven ? e?.living_expenses ?? 0 : 0);
+    const f = r?.funnel ?? null;
+    // One funnel: its own spend/ROAS and its share of fixed costs. Recurring cash isn't per funnel.
+    const fixed = f ? f.allocated_fixed_monthly : orgFixed;
     setDraft({
-      monthlySpend: str(r?.trailing.monthly_spend),
-      roas: str(r?.trailing.roas, 2),
+      monthlySpend: str(f ? f.monthly_spend : r?.trailing.monthly_spend),
+      roas: str(f ? f.roas : r?.trailing.roas, 2),
       fixedMonthly: fixed > 0 ? str(fixed) : '',
       variablePct: str(e?.variable_cost_pct, 1),
-      recurringCash: str(e?.monthly_recurring_cash),
-      worstRoas: str(r?.trailing.worst_week_roas, 2),
+      recurringCash: f ? '' : str(e?.monthly_recurring_cash),
+      worstRoas: str(f ? f.worst_week_roas : r?.trailing.worst_week_roas, 2),
       decay: str(e?.roas_decay ?? null, 2),
     });
   }, []);
@@ -210,7 +221,7 @@ export default function ScalePlannerPanel({
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    Promise.allSettled([apiClient.getScaleReadiness(asOrgId), apiClient.getBusinessEconomics(asOrgId)]).then(
+    Promise.allSettled([apiClient.getScaleReadiness(asOrgId, funnelId), apiClient.getBusinessEconomics(asOrgId)]).then(
       ([r, e]) => {
         if (cancelled) return;
         const rv = r.status === 'fulfilled' ? r.value : null;
@@ -228,7 +239,7 @@ export default function ScalePlannerPanel({
     return () => {
       cancelled = true;
     };
-  }, [asOrgId, prefill]);
+  }, [asOrgId, funnelId, reloadKey, prefill]);
 
   const set = (k: keyof Draft) => (v: string) => setDraft((d) => ({ ...d, [k]: v }));
 
@@ -274,7 +285,10 @@ export default function ScalePlannerPanel({
 
   const verdict = readiness?.readiness.verdict ?? 'unknown';
   const vs = VERDICT_STYLE[verdict];
-  const volatility = readiness?.trailing.cost_per_booking_volatility_pct ?? null;
+  const slice = readiness?.funnel ?? null;
+  const volatility = (slice ?? readiness?.trailing)?.cost_per_booking_volatility_pct ?? null;
+  const weeksWithSpend = (slice ?? readiness?.trailing)?.weeks_with_spend ?? 0;
+  const scopeLabel = funnelId ? funnelName || 'this funnel' : 'all paid funnels';
   const r = readiness?.readiness;
 
   if (loading) {
@@ -297,7 +311,7 @@ export default function ScalePlannerPanel({
                   {vs.label}
                 </span>
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Last 4 complete weeks · {r?.risk_tolerance ?? 'balanced'} risk
+                  {funnelId ? 'Whole business · ' : ''}Last 4 complete weeks · {r?.risk_tolerance ?? 'balanced'} risk
                 </span>
               </div>
               <p className="text-sm text-gray-700 dark:text-gray-200">{vs.blurb}</p>
@@ -311,13 +325,9 @@ export default function ScalePlannerPanel({
               {readiness && !readiness.configured ? (
                 <p className="text-xs text-amber-700 dark:text-amber-300">
                   Fixed costs and reserves aren&apos;t set yet, so break-even and runway are rough.{' '}
-                  {onOpenEconomics ? (
-                    <button type="button" className="underline font-semibold" onClick={onOpenEconomics}>
-                      Add business economics
-                    </button>
-                  ) : (
-                    'Add them in Settings → Business economics.'
-                  )}
+                  <button type="button" className="underline font-semibold" onClick={() => setBusinessOpen(true)}>
+                    Add your business numbers
+                  </button>
                 </p>
               ) : null}
             </div>
@@ -349,10 +359,59 @@ export default function ScalePlannerPanel({
         )}
       </section>
 
-      {/* Inputs */}
+      {slice ? (
+        <section className="glass-card rounded-xl border border-white/10 p-4">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {scopeLabel} · last 4 weeks
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <Stat label="Spend / month" value={usd0(slice.monthly_spend)} sub={`${slice.spend_share_pct}% of paid spend`} />
+            <Stat label="ROAS" value={ratio2(slice.roas)} />
+            <Stat label="Break-even" value={ratio2(slice.breakeven_roas)} sub={`${usd0(slice.allocated_fixed_monthly)} of fixed costs`} />
+            <Stat
+              label="Gap"
+              value={slice.gap ? `${slice.gap.gap_pct > 0 ? '+' : ''}${slice.gap.gap_pct}%` : '—'}
+              sub={slice.gap ? ZONE_STYLE[slice.gap.zone].label : undefined}
+              tone={slice.gap ? (slice.gap.gap_pct >= 0 ? 'good' : 'bad') : undefined}
+            />
+            <Stat label="Worst week" value={ratio2(slice.worst_week_roas)} />
+          </div>
+        </section>
+      ) : null}
+
+      {/* Your business: saved, org-wide */}
+      {restricted ? null : (
+        <section className="glass-card rounded-xl border border-white/10">
+          <button
+            type="button"
+            onClick={() => setBusinessOpen((o) => !o)}
+            aria-expanded={businessOpen}
+            className="w-full flex items-center justify-between gap-2 px-4 py-3 text-left"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-gray-900 dark:text-gray-100">Your business</span>
+              <span className="block text-xs text-gray-500 dark:text-gray-400 truncate">
+                {econ?.configured
+                  ? `Fixed costs ${usd0(econ.fixed_monthly_costs)}/mo · variable ${econ.variable_cost_pct ?? 0}% · ${econ.risk_tolerance} risk · saved for every funnel`
+                  : 'Fixed costs, reserves and risk — needed for a real break-even and verdict'}
+              </span>
+            </span>
+            <span className="text-xs text-gray-500" aria-hidden>
+              {businessOpen ? '▲' : '▼'}
+            </span>
+          </button>
+          {businessOpen ? (
+            <div className="border-t border-white/10 px-4 py-4">
+              <BusinessEconomicsSettings asOrgId={asOrgId} embedded onSaved={() => setReloadKey((k) => k + 1)} />
+            </div>
+          ) : null}
+        </section>
+      )}
+
+      {/* Scenario inputs: what-ifs, never saved */}
       <Card
-        title="Your numbers"
-        subtitle="Prefilled from the last 4 weeks of paid ads + Business economics. Change any to run a what-if."
+        title="Scenario"
+        subtitle={`Prefilled from ${scopeLabel}${funnelId ? ' (fixed costs split by its share of spend)' : ''}. Changes here are what-ifs and aren't saved.`}
         action={
           <button
             type="button"
@@ -597,7 +656,7 @@ export default function ScalePlannerPanel({
               <Stat
                 label="Cost per booking volatility"
                 value={volatility != null ? `±${volatility}%` : '—'}
-                sub={`${readiness?.trailing.weeks_with_spend ?? 0} weeks with spend`}
+                sub={`${weeksWithSpend} weeks with spend · ${scopeLabel}`}
               />
               <p className="mt-3 text-xs text-gray-600 dark:text-gray-400">
                 {volatility == null

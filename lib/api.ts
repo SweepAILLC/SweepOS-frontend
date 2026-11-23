@@ -3981,9 +3981,12 @@ class ApiClient {
     return response.data as BusinessEconomics;
   }
 
-  async getScaleReadiness(asOrgId?: string): Promise<ScaleReadinessResponse> {
+  async getScaleReadiness(asOrgId?: string, funnelId?: string | null): Promise<ScaleReadinessResponse> {
+    const params: Record<string, string> = {};
+    if (asOrgId) params.as_org_id = asOrgId;
+    if (funnelId) params.funnel_id = funnelId;
     const response = await this.client.get('/business-economics/readiness', {
-      params: asOrgId ? { as_org_id: asOrgId } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     });
     return response.data as ScaleReadinessResponse;
   }

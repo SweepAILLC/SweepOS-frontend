@@ -78,7 +78,7 @@ export default function ScaleReadinessCard() {
         </div>
       </dl>
       {!data.configured ? (
-        <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">Add business economics in Settings for a real verdict.</p>
+        <p className="mt-2 text-[11px] text-amber-700 dark:text-amber-300">Add your business numbers in the Scale Planner for a real verdict.</p>
       ) : null}
     </button>
   );

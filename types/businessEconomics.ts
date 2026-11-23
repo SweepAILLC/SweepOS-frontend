@@ -56,5 +56,21 @@ export interface ScaleReadinessResponse {
     weeks: string[];
   };
   readiness: ScaleReadiness;
+  /** Present when the planner asked for one funnel: its own numbers, fixed costs split by spend share. */
+  funnel: ScaleFunnelSlice | null;
   target_cost_per_call: number | null;
+}
+
+export interface ScaleFunnelSlice {
+  funnel_id: string;
+  monthly_spend: number;
+  monthly_cash: number;
+  roas: number | null;
+  worst_week_roas: number | null;
+  cost_per_booking_volatility_pct: number | null;
+  weeks_with_spend: number;
+  spend_share_pct: number;
+  allocated_fixed_monthly: number;
+  breakeven_roas: number | null;
+  gap: { gap_pct: number; zone: GapZoneName } | null;
 }

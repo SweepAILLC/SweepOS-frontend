@@ -576,11 +576,7 @@ export default function FunnelDashboard({
           <KpiCommandCenterPanel variant="organic" organicModel={organicSnapshot} />
         </>
       ) : view === 'planner' ? (
-        <ScalePlannerPanel
-          onOpenEconomics={() =>
-            void router.push({ pathname: '/', query: { tab: 'settings', section: 'economics' } })
-          }
-        />
+        <ScalePlannerPanel funnelId={funnelId} funnelName={funnelId ? viewTitle : null} />
       ) : (
         <>
       {error ? (
