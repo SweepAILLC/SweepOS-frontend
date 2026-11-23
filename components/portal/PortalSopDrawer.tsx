@@ -51,6 +51,8 @@ type PortalSopDrawerProps = {
   onOpenChange: (open: boolean) => void;
   /** When true, system owners in Sweep Internal can create/edit/reorder SOPs. Client portals must leave this off. */
   allowManage?: boolean;
+  /** System owner previewing an org: that org's SOP locks apply. */
+  asOrgId?: string;
 };
 
 const UNCATEGORIZED = 'uncategorized';
@@ -309,6 +311,7 @@ export default function PortalSopDrawer({
   open,
   onOpenChange,
   allowManage = false,
+  asOrgId,
 }: PortalSopDrawerProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -325,16 +328,16 @@ export default function PortalSopDrawer({
   const [reordering, setReordering] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [loomThumbs, setLoomThumbs] = useState<Record<string, string | null>>({});
-  const { categories, reload: reloadCategories, labelFor, styleFor } = useSopCategories(isActive);
+  const { categories, reload: reloadCategories, labelFor, styleFor } = useSopCategories(isActive, asOrgId);
 
   const loadDocs = useCallback(async () => {
     try {
-      const rows = await apiClient.listDocs({ includeLocked: true });
+      const rows = await apiClient.listDocs({ includeLocked: true, asOrgId });
       setDocs(rows.map(docMetaToResource));
     } catch {
       setDocs([]);
     }
-  }, []);
+  }, [asOrgId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -493,7 +496,7 @@ export default function PortalSopDrawer({
     (async () => {
       setContentLoading(true);
       try {
-        const doc = await apiClient.getDoc(activeSop.id);
+        const doc = await apiClient.getDoc(activeSop.id, { asOrgId });
         if (cancelled) return;
         setContent(doc.content || '');
         const fromDoc =
@@ -520,7 +523,7 @@ export default function PortalSopDrawer({
     return () => {
       cancelled = true;
     };
-  }, [activeSop]);
+  }, [activeSop, asOrgId]);
 
   const collapse = () => {
     onOpenChange(false);

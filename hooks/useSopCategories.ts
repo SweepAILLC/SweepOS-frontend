@@ -3,20 +3,20 @@ import { apiClient } from '@/lib/api';
 import { DEFAULT_SOP_CATEGORIES, sopColorStyle, type SopCategoryDef } from '@/lib/resources';
 
 /** Loads the owner-managed SOP category list (falls back to defaults if the request fails). */
-export function useSopCategories(enabled = true) {
+export function useSopCategories(enabled = true, asOrgId?: string) {
   const [categories, setCategories] = useState<SopCategoryDef[]>(DEFAULT_SOP_CATEGORIES);
   const [loaded, setLoaded] = useState(false);
 
   const reload = useCallback(async () => {
     try {
-      const rows = await apiClient.listSopCategories();
+      const rows = await apiClient.listSopCategories({ asOrgId });
       setCategories(rows);
     } catch {
       /* keep whatever we have */
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [asOrgId]);
 
   useEffect(() => {
     if (enabled) void reload();

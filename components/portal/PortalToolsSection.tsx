@@ -22,11 +22,14 @@ const CONTENT_ANGLE_MAP_TILE: Resource = {
 type PortalToolsSectionProps = {
   isActive?: boolean;
   organizationName?: string | null;
+  /** System owner previewing an org: that org's SOP locks and angle map. */
+  asOrgId?: string;
 };
 
 export default function PortalToolsSection({
   isActive = true,
   organizationName,
+  asOrgId,
 }: PortalToolsSectionProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,12 +39,12 @@ export default function PortalToolsSection({
 
   const loadDocs = useCallback(async () => {
     try {
-      const rows = await apiClient.listDocs();
+      const rows = await apiClient.listDocs({ asOrgId });
       setDocs(rows.map(docMetaToResource));
     } catch {
       setDocs([]);
     }
-  }, []);
+  }, [asOrgId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -144,6 +147,7 @@ export default function PortalToolsSection({
       {angleMapOpen ? (
         <ContentAngleMapModal
           organizationName={organizationName}
+          orgId={asOrgId}
           onClose={() => setAngleMapOpen(false)}
         />
       ) : null}
