@@ -11,6 +11,7 @@ import {
 } from '@/lib/resources';
 import { ResourceModal } from '@/components/ui/ResourcesPanel';
 import ContentAngleMapModal from '@/components/portal/ContentAngleMapModal';
+import ScalePlannerModal from '@/components/portal/ScalePlannerModal';
 
 const CONTENT_ANGLE_MAP_TILE: Resource = {
   id: 'content-angle-map',
@@ -19,29 +20,40 @@ const CONTENT_ANGLE_MAP_TILE: Resource = {
   category: 'Template',
 };
 
+const SCALE_PLANNER_TILE: Resource = {
+  id: 'scale-planner',
+  title: 'Scale Planner',
+  description: 'Break-even ROAS, how much ad spend you can safely add, and the spend path to your profit goal.',
+  category: 'Template',
+};
+
 type PortalToolsSectionProps = {
   isActive?: boolean;
   organizationName?: string | null;
+  /** System owner previewing an org: that org's SOP locks and angle map. */
+  asOrgId?: string;
 };
 
 export default function PortalToolsSection({
   isActive = true,
   organizationName,
+  asOrgId,
 }: PortalToolsSectionProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [openResource, setOpenResource] = useState<Resource | null>(null);
   const [angleMapOpen, setAngleMapOpen] = useState(false);
+  const [plannerOpen, setPlannerOpen] = useState(false);
 
   const loadDocs = useCallback(async () => {
     try {
-      const rows = await apiClient.listDocs();
+      const rows = await apiClient.listDocs({ asOrgId });
       setDocs(rows.map(docMetaToResource));
     } catch {
       setDocs([]);
     }
-  }, []);
+  }, [asOrgId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -58,6 +70,7 @@ export default function PortalToolsSection({
 
   const tools = useMemo(() => {
     const all = [
+      SCALE_PLANNER_TILE,
       CONTENT_ANGLE_MAP_TILE,
       ...mergeDocsWithAiSkills(docs).filter(isToolResource),
     ];
@@ -121,7 +134,8 @@ export default function PortalToolsSection({
                 key={resource.id}
                 type="button"
                 onClick={() => {
-                  if (resource.id === 'content-angle-map') setAngleMapOpen(true);
+                  if (resource.id === 'scale-planner') setPlannerOpen(true);
+                  else if (resource.id === 'content-angle-map') setAngleMapOpen(true);
                   else setOpenResource(resource);
                 }}
                 className={`text-left rounded-lg border border-gray-200/60 dark:border-white/10 bg-gradient-to-br ${styles.bg} p-3.5 hover:border-sky-400/40 transition-colors`}
@@ -144,7 +158,16 @@ export default function PortalToolsSection({
       {angleMapOpen ? (
         <ContentAngleMapModal
           organizationName={organizationName}
+          orgId={asOrgId}
           onClose={() => setAngleMapOpen(false)}
+        />
+      ) : null}
+
+      {plannerOpen ? (
+        <ScalePlannerModal
+          organizationName={organizationName}
+          asOrgId={asOrgId}
+          onClose={() => setPlannerOpen(false)}
         />
       ) : null}
 

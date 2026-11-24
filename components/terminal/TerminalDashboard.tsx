@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import TerminalUnifiedTrendChart from '@/components/terminal/TerminalUnifiedTrendChart';
 import UpcomingAppointmentsList from '@/components/terminal/UpcomingAppointmentsList';
 import TerminalKpiRow from '@/components/terminal/TerminalKpiRow';
+import ScaleReadinessCard from '@/components/terminal/ScaleReadinessCard';
 import TerminalFinanceCollapsibles from '@/components/terminal/TerminalFinanceCollapsibles';
 import TerminalBookingsTable from '@/components/terminal/TerminalBookingsTable';
 import { PremiumReveal } from '@/components/ui/PremiumMotion';
@@ -179,6 +180,7 @@ export default function TerminalDashboard({ showPriorities = true }: TerminalDas
             <TerminalUnifiedTrendChart />
           </PremiumReveal>
           <div className="flex flex-col gap-4 min-w-0">
+            <ScaleReadinessCard />
             <PremiumReveal delayMs={TERMINAL_STAGGER.sidebar} className="glass-card p-4 min-w-0">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-baseline justify-between gap-2">
                 Upcoming Appointments

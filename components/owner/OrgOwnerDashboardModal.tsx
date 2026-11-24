@@ -36,6 +36,7 @@ import ToggleSwitch from '@/components/ui/ToggleSwitch';
 import { ORG_TOGGLEABLE_TAB_IDS, sopLockKey } from '@/lib/tabAccess';
 import { useSopCategories } from '@/hooks/useSopCategories';
 import { sopColorStyle } from '@/lib/resources';
+import OrgPortalPreview from '@/components/owner/OrgPortalPreview';
 
 const LIVE_POLL_MS = 30000;
 
@@ -388,13 +389,17 @@ function OrgOwnerDashboardInner({
     };
   }, [onRefreshDashboard, win]);
 
+  // Owner org view: the org's portal as the org sees it (full-screen overlay).
+  const [previewOpen, setPreviewOpen] = useState(false);
+
   useEffect(() => {
+    if (previewOpen) return; // the preview owns Escape while open
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, previewOpen]);
 
   // KPI snapshot + By Rep panel read the same header range as every other metric here.
   const kpiRangeStart = range.start ?? '2000-01-01';
@@ -433,8 +438,27 @@ function OrgOwnerDashboardInner({
             </p>
           </div>
         </div>
-        <PageDateRange caption="Applies to every metric on this dashboard" />
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setPreviewOpen(true)}
+            title="Open this org's portal exactly as they see it"
+            className="inline-flex items-center gap-1.5 rounded-md border border-amber-400/50 bg-amber-500/10 px-2.5 py-1.5 text-xs font-semibold text-amber-800 dark:text-amber-200 hover:bg-amber-500/20"
+          >
+            <span aria-hidden>👁</span> View as org
+          </button>
+          <PageDateRange caption="Applies to every metric on this dashboard" />
+        </div>
       </header>
+      {previewOpen ? (
+        <OrgPortalPreview
+          orgId={orgId}
+          organizationName={dashboardData.organization_name}
+          consultingTier={consultingTierInput || null}
+          bookingUrl={bookingUrlInput.trim() || null}
+          onClose={() => setPreviewOpen(false)}
+        />
+      ) : null}
 
       <div className="space-y-5">
           {/* Shared space — top for quick access */}

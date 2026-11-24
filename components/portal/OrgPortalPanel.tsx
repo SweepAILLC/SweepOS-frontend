@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { ConsultingTier } from '@/types/admin';
-import { listPortalNotices, markPortalNoticeRead } from '@/lib/consultingNotices';
+import { listOwnerNotices, listPortalNotices, markPortalNoticeRead } from '@/lib/consultingNotices';
 import SharedTypingPad from '@/components/portal/SharedTypingPad';
 import PortalBookingEmbed from '@/components/portal/PortalBookingEmbed';
 import PortalSopDrawer, {
@@ -16,6 +16,11 @@ export interface OrgPortalPanelProps {
   consultingTier: ConsultingTier | null;
   bookingUrl: string | null;
   isActive?: boolean;
+  /**
+   * System owner previewing this org's portal (owner org view). Data loads for that
+   * org — its shared pads, SOP locks, angle map — and notices are read-only.
+   */
+  previewOrgId?: string;
 }
 
 function tierLabel(tier: ConsultingTier | null): string | null {
@@ -29,6 +34,7 @@ export default function OrgPortalPanel({
   consultingTier,
   bookingUrl,
   isActive = true,
+  previewOrgId,
 }: OrgPortalPanelProps) {
   const label = tierLabel(consultingTier);
   const canBook = Boolean(bookingUrl?.trim());
@@ -38,7 +44,12 @@ export default function OrgPortalPanel({
   useEffect(() => {
     if (!isActive) return;
     let cancelled = false;
-    listPortalNotices()
+    const load = previewOrgId
+      ? listOwnerNotices().then((rows) =>
+          rows.filter((n) => n.org_id === previewOrgId).slice(0, 3).map((n) => ({ ...n, read: false }))
+        )
+      : listPortalNotices();
+    load
       .then((rows) => {
         if (!cancelled) setNotices(rows);
       })
@@ -48,7 +59,7 @@ export default function OrgPortalPanel({
     return () => {
       cancelled = true;
     };
-  }, [isActive]);
+  }, [isActive, previewOrgId]);
 
   return (
     <div className="w-full min-h-[calc(100vh-1.5rem)]">
@@ -94,6 +105,7 @@ export default function OrgPortalPanel({
                       <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">{n.title}</p>
                       <p className="text-sm text-amber-900/80 dark:text-amber-100/80 mt-1 whitespace-pre-wrap">{n.body}</p>
                     </div>
+                    {previewOrgId ? null : (
                     <button
                       type="button"
                       className="text-xs text-amber-800 dark:text-amber-200 shrink-0"
@@ -104,6 +116,7 @@ export default function OrgPortalPanel({
                     >
                       Dismiss
                     </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -113,6 +126,7 @@ export default function OrgPortalPanel({
         <div className="pr-2">
           <SharedTypingPad
             isActive={isActive}
+            orgId={previewOrgId}
             title="Shared space"
             subtitle="Live shared notes with your consultant — updates appear within about a second."
           />
@@ -137,11 +151,11 @@ export default function OrgPortalPanel({
         </div>
 
         <div className="pr-2">
-          <PortalToolsSection isActive={isActive} organizationName={organizationName} />
+          <PortalToolsSection isActive={isActive} organizationName={organizationName} asOrgId={previewOrgId} />
         </div>
       </div>
 
-      <PortalSopDrawer isActive={isActive} open={drawerOpen} onOpenChange={setDrawerOpen} />
+      <PortalSopDrawer isActive={isActive} open={drawerOpen} onOpenChange={setDrawerOpen} asOrgId={previewOrgId} />
     </div>
   );
 }

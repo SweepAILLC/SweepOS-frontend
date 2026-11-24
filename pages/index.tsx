@@ -396,8 +396,8 @@ export default function Dashboard() {
           router.replace({ pathname: '/', query: { tab: 'funnels', funnelId: fidParam } }, undefined, { shallow: true });
         } else if (tabValue === 'settings' && (router.query.section || router.query.google || router.query.google_error)) {
           // Keep settings deep-link query for SettingsPanel
-        } else if (tabValue === 'funnels' && router.query.channel) {
-          // Keep ?tab=funnels&channel=… for FunnelDashboard's channel preselect.
+        } else if (tabValue === 'funnels' && (router.query.channel || router.query.funnelView)) {
+          // Keep ?tab=funnels&channel=… / &funnelView=planner for FunnelDashboard's preselect.
         } else if (tabValue === 'content_studio') {
           // Keep ?tab=content_studio&sub=… for Marketing Intel (Organic | Ads).
           // Stripping the query here snapped every sub-tab click back to Overview.

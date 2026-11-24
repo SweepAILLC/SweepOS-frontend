@@ -1,4 +1,5 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import type { BusinessEconomics, BusinessEconomicsInput, ScaleReadinessResponse } from '@/types/businessEconomics';
 import Cookies from 'js-cookie';
 import type { Client, ClientGridDetail } from '@/types/client';
 import type { SopCategoryDef } from '@/lib/resources';
@@ -3897,15 +3898,21 @@ class ApiClient {
   // ----- Resources tab -------------------------------------------------------
 
   /** includeLocked: also return redacted placeholders for SOPs in categories locked for this org. */
-  async listDocs(opts?: { includeLocked?: boolean }): Promise<ResourceDocSummary[]> {
+  /** `asOrgId`: system owners previewing an org's portal see that org's SOP locks. */
+  async listDocs(opts?: { includeLocked?: boolean; asOrgId?: string }): Promise<ResourceDocSummary[]> {
+    const params: Record<string, string | boolean> = {};
+    if (opts?.includeLocked) params.include_locked = true;
+    if (opts?.asOrgId) params.as_org_id = opts.asOrgId;
     const response = await this.client.get('/resources/docs', {
-      params: opts?.includeLocked ? { include_locked: true } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     });
     return response.data as ResourceDocSummary[];
   }
 
-  async getDoc(resourceId: string): Promise<ResourceDoc> {
-    const response = await this.client.get(`/resources/docs/${resourceId}`);
+  async getDoc(resourceId: string, opts?: { asOrgId?: string }): Promise<ResourceDoc> {
+    const response = await this.client.get(`/resources/docs/${resourceId}`, {
+      params: opts?.asOrgId ? { as_org_id: opts.asOrgId } : undefined,
+    });
     return response.data as ResourceDoc;
   }
 
@@ -3952,9 +3959,36 @@ class ApiClient {
 
   // ----- SOP categories (owner-managed) --------------------------------------
 
-  async listSopCategories(): Promise<SopCategoryDef[]> {
-    const response = await this.client.get('/resources/sop-categories');
+  async listSopCategories(opts?: { asOrgId?: string }): Promise<SopCategoryDef[]> {
+    const response = await this.client.get('/resources/sop-categories', {
+      params: opts?.asOrgId ? { as_org_id: opts.asOrgId } : undefined,
+    });
     return response.data as SopCategoryDef[];
+  }
+
+  // Scale Planner — business economics (owners/admins; system owners pass asOrgId)
+  async getBusinessEconomics(asOrgId?: string): Promise<BusinessEconomics> {
+    const response = await this.client.get('/business-economics', {
+      params: asOrgId ? { as_org_id: asOrgId } : undefined,
+    });
+    return response.data as BusinessEconomics;
+  }
+
+  async putBusinessEconomics(body: BusinessEconomicsInput, asOrgId?: string): Promise<BusinessEconomics> {
+    const response = await this.client.put('/business-economics', body, {
+      params: asOrgId ? { as_org_id: asOrgId } : undefined,
+    });
+    return response.data as BusinessEconomics;
+  }
+
+  async getScaleReadiness(asOrgId?: string, funnelId?: string | null): Promise<ScaleReadinessResponse> {
+    const params: Record<string, string> = {};
+    if (asOrgId) params.as_org_id = asOrgId;
+    if (funnelId) params.funnel_id = funnelId;
+    const response = await this.client.get('/business-economics/readiness', {
+      params: Object.keys(params).length ? params : undefined,
+    });
+    return response.data as ScaleReadinessResponse;
   }
 
   async createSopCategory(body: { label: string; color?: string }): Promise<SopCategoryDef> {

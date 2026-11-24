@@ -51,6 +51,8 @@ type PortalSopDrawerProps = {
   onOpenChange: (open: boolean) => void;
   /** When true, system owners in Sweep Internal can create/edit/reorder SOPs. Client portals must leave this off. */
   allowManage?: boolean;
+  /** System owner previewing an org: that org's SOP locks apply. */
+  asOrgId?: string;
 };
 
 const UNCATEGORIZED = 'uncategorized';
@@ -309,6 +311,7 @@ export default function PortalSopDrawer({
   open,
   onOpenChange,
   allowManage = false,
+  asOrgId,
 }: PortalSopDrawerProps) {
   const [docs, setDocs] = useState<Resource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -325,16 +328,16 @@ export default function PortalSopDrawer({
   const [reordering, setReordering] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [loomThumbs, setLoomThumbs] = useState<Record<string, string | null>>({});
-  const { categories, reload: reloadCategories, labelFor, styleFor } = useSopCategories(isActive);
+  const { categories, reload: reloadCategories, labelFor, styleFor } = useSopCategories(isActive, asOrgId);
 
   const loadDocs = useCallback(async () => {
     try {
-      const rows = await apiClient.listDocs({ includeLocked: true });
+      const rows = await apiClient.listDocs({ includeLocked: true, asOrgId });
       setDocs(rows.map(docMetaToResource));
     } catch {
       setDocs([]);
     }
-  }, []);
+  }, [asOrgId]);
 
   useEffect(() => {
     if (!isActive) return;
@@ -493,7 +496,7 @@ export default function PortalSopDrawer({
     (async () => {
       setContentLoading(true);
       try {
-        const doc = await apiClient.getDoc(activeSop.id);
+        const doc = await apiClient.getDoc(activeSop.id, { asOrgId });
         if (cancelled) return;
         setContent(doc.content || '');
         const fromDoc =
@@ -520,7 +523,7 @@ export default function PortalSopDrawer({
     return () => {
       cancelled = true;
     };
-  }, [activeSop]);
+  }, [activeSop, asOrgId]);
 
   const collapse = () => {
     onOpenChange(false);
@@ -560,8 +563,12 @@ export default function PortalSopDrawer({
       ) : null}
 
       <aside
-        className="fixed top-0 right-0 bottom-0 z-[46] flex flex-col border-l border-gray-200 dark:border-white/10 bg-white/95 dark:bg-gray-950/95 backdrop-blur shadow-[-8px_0_24px_rgba(0,0,0,0.06)] transition-[width] duration-300 ease-out"
-        style={{ width: open ? SOP_DRAWER_WIDTH_OPEN : SOP_DRAWER_WIDTH_COLLAPSED }}
+        className="fixed right-0 bottom-0 z-[46] flex flex-col border-l border-gray-200 dark:border-white/10 bg-white/95 dark:bg-gray-950/95 backdrop-blur shadow-[-8px_0_24px_rgba(0,0,0,0.06)] transition-[width] duration-300 ease-out"
+        style={{
+          width: open ? SOP_DRAWER_WIDTH_OPEN : SOP_DRAWER_WIDTH_COLLAPSED,
+          // The owner org view sets this to its banner height so the drawer starts below it.
+          top: 'var(--portal-overlay-top, 0px)',
+        }}
         aria-expanded={open}
       >
         {!open ? (
