@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import ContentAngleMapView from '@/components/portal/ContentAngleMapView';
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock';
 
 type Props = {
   onClose: () => void;
@@ -16,17 +17,16 @@ export default function ContentAngleMapModal({ onClose, organizationName, orgId 
 
   useEffect(() => {
     setMounted(true);
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    // Capture phase so Escape closes only this modal, not the owner org view underneath.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      e.stopImmediatePropagation();
+      onClose();
     };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener('keydown', onKey);
-    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [onClose]);
+  useBodyScrollLock();
 
   if (!mounted) return null;
 

@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ConsultingTier } from '@/types/admin';
 import OrgPortalPanel from '@/components/portal/OrgPortalPanel';
 import ScalePlannerPanel from '@/components/funnels/ScalePlannerPanel';
+import { useBodyScrollLock } from '@/hooks/useBodyScrollLock';
 
 /**
  * Owner org view: a system owner sees an org's portal the way that org sees it —
@@ -25,19 +26,28 @@ export default function OrgPortalPreview({
   onClose: () => void;
 }) {
   const [view, setView] = useState<'portal' | 'planner'>('portal');
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const [bannerHeight, setBannerHeight] = useState(0);
+
+  // The SOP drawer is position:fixed; push it below the banner so it can't cover Exit.
+  useEffect(() => {
+    const el = bannerRef.current;
+    if (!el) return;
+    const measure = () => setBannerHeight(el.getBoundingClientRect().height);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      document.body.style.overflow = prevOverflow;
-    };
+    return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+  useBodyScrollLock();
 
   return (
     <div
@@ -45,8 +55,9 @@ export default function OrgPortalPreview({
       role="dialog"
       aria-modal="true"
       aria-label={`${organizationName || 'Organization'} portal preview`}
+      style={{ '--portal-overlay-top': `${bannerHeight}px` } as CSSProperties}
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-amber-300/50 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-950/40 px-4 py-2">
+      <div ref={bannerRef} className="relative z-[50] flex flex-wrap items-center gap-3 border-b border-amber-300/50 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-950/40 px-4 py-2">
         <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-900 dark:text-amber-100">
           <span aria-hidden>👁</span> Viewing as {organizationName || 'this org'}
         </span>
