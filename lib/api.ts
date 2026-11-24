@@ -312,12 +312,40 @@ export interface AdsCampaignRow {
   funnel_id?: string | null;
 }
 
+export type AdsTargetSource = 'planner' | 'manual' | 'business_numbers';
+
+/** Scale Planner-derived targets (dollars). Null fields = not enough data yet. */
+export interface AdsSuggestedTargets {
+  min_roas: number | null;
+  marginal_breakeven_roas: number | null;
+  cash_per_booking: number | null;
+  target_cost_per_booking: number | null;
+  max_cost_per_booking: number | null;
+  lead_to_booking_rate: number | null;
+  target_cost_per_lead: number | null;
+  booked_calls: number | null;
+}
+
 export interface AdsDashboard {
   connected: boolean;
   app_configured: boolean;
   last_sync_at?: string | null;
   currency?: string | null;
-  settings: { target_cpr_cents?: number | null; min_roas?: number | null };
+  settings: {
+    /** Manual values: used when follow_planner is off (or the planner has no numbers yet). */
+    target_cpr_cents?: number | null;
+    min_roas?: number | null;
+    follow_planner?: boolean;
+    /** What the ad rules actually use right now. */
+    effective?: {
+      target_cpr_cents: number | null;
+      target_cpr_source: AdsTargetSource | null;
+      min_roas: number | null;
+      min_roas_source: AdsTargetSource | null;
+      marginal_breakeven_roas: number | null;
+    };
+    suggested?: AdsSuggestedTargets | null;
+  };
   kpis: { recent: AdsKpiWindow; prior: AdsKpiWindow; delta: Record<string, number | null> };
   campaigns: AdsCampaignRow[];
   alerts: AdsAlert[];
@@ -2093,7 +2121,12 @@ class ApiClient {
     return response.data as { ok: boolean; id: string; sweep_status: string | null };
   }
 
-  async putAdsSettings(body: { target_cpr_cents: number | null; min_roas: number | null }) {
+  async putAdsSettings(body: {
+    target_cpr_cents: number | null;
+    min_roas: number | null;
+    /** Omit to leave the Follow Scale Planner switch unchanged. */
+    follow_planner?: boolean;
+  }) {
     const response = await this.client.put('/marketing-intel/ads/settings', body);
     return response.data as { ok: boolean; target_cpr_cents: number | null; min_roas: number | null };
   }
