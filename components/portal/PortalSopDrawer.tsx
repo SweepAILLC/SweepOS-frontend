@@ -97,6 +97,66 @@ function SopRowBody({
   );
 }
 
+/** Section for a category the owner locked for this org: blurred placeholder rows under a lock. */
+function LockedCategorySection({
+  label,
+  style,
+  count,
+}: {
+  label: string;
+  style: SopColorStyle;
+  count: number;
+}) {
+  const placeholders = Math.min(3, Math.max(2, count));
+  return (
+    <section>
+      <div className="mb-2 flex items-center gap-2 border-b border-gray-200/70 dark:border-white/10 pb-1.5">
+        <span className={`h-2 w-2 flex-shrink-0 rounded-full ${style.dot}`} />
+        <h4 className={`text-[11px] font-bold uppercase tracking-wider ${style.heading}`}>{label}</h4>
+        <svg className="h-3 w-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-label="Locked">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+          />
+        </svg>
+      </div>
+      <div className="relative overflow-hidden rounded-lg">
+        <ul aria-hidden className="pointer-events-none select-none space-y-1.5 blur-sm opacity-60">
+          {Array.from({ length: placeholders }).map((_, i) => (
+            <li
+              key={i}
+              className="flex h-[68px] items-center gap-3 rounded-lg border border-gray-200/70 dark:border-white/10 bg-white dark:bg-white/[0.03] px-2.5"
+            >
+              <span className="h-[52px] w-20 flex-shrink-0 rounded-md bg-gray-200 dark:bg-white/10" />
+              <span className="min-w-0 flex-1 space-y-2">
+                <span className="block h-2.5 w-3/4 rounded bg-gray-300 dark:bg-white/20" />
+                <span className="block h-2 w-full rounded bg-gray-200 dark:bg-white/10" />
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-white/40 dark:bg-black/30 px-4 text-center">
+          <svg className="h-6 w-6 text-gray-500 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+            />
+          </svg>
+          <p className="text-xs font-semibold text-gray-900 dark:text-gray-100">{label} is locked</p>
+          <p className="text-[11px] leading-snug text-gray-700 dark:text-gray-300">
+            This feature isn&apos;t included in your current tier. To unlock <strong>{label}</strong>, speak with your
+            assigned consultant about upgrading your consulting tier.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PlainSopRow({
   sop,
   loomThumbs,
@@ -269,7 +329,7 @@ export default function PortalSopDrawer({
 
   const loadDocs = useCallback(async () => {
     try {
-      const rows = await apiClient.listDocs();
+      const rows = await apiClient.listDocs({ includeLocked: true });
       setDocs(rows.map(docMetaToResource));
     } catch {
       setDocs([]);
@@ -317,9 +377,10 @@ export default function PortalSopDrawer({
     if (!q) return all;
     return all.filter(
       (r) =>
-        r.title.toLowerCase().includes(q) ||
+        !r.locked &&
+        (r.title.toLowerCase().includes(q) ||
         r.description.toLowerCase().includes(q) ||
-        labelFor(r.sopCategory).toLowerCase().includes(q)
+        labelFor(r.sopCategory).toLowerCase().includes(q))
     );
   }, [docs, search, labelFor]);
 
@@ -595,7 +656,17 @@ export default function PortalSopDrawer({
                     </p>
                   ) : (
                     <>
-                      {categories.map((cat) => (
+                      {categories.map((cat) =>
+                        cat.locked ? (
+                          search.trim() ? null : (
+                            <LockedCategorySection
+                              key={cat.slug}
+                              label={cat.label}
+                              style={sopColorStyle(cat.color)}
+                              count={sopCounts[cat.slug] || 0}
+                            />
+                          )
+                        ) : (
                         <SopCategoryList
                           key={cat.slug}
                           groupKey={cat.slug}
@@ -608,7 +679,8 @@ export default function PortalSopDrawer({
                           onOpen={setActiveSop}
                           onReorderGroup={handleReorderGroup}
                         />
-                      ))}
+                        ),
+                      )}
                       <SopCategoryList
                         groupKey={UNCATEGORIZED}
                         label="Uncategorized"
