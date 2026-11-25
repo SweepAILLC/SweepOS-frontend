@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useRouter } from 'next/router';
 import { apiClient } from '@/lib/api';
 import { formatApiError } from '@/lib/apiError';
 import { formatYmd } from '@/lib/dateRange';
@@ -11,6 +12,7 @@ import type {
   OnboardingSurveyTopSelectedItem,
 } from '@/types/onboardingSurvey';
 import IdeasTab, { IdeasTabProps } from '@/components/marketing/IdeasTab';
+import MessagingMatrixSection from '@/components/marketing/MessagingMatrixSection';
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -118,9 +120,20 @@ function ResponseCard({ response }: { response: OnboardingSurveyResponseItem }) 
   );
 }
 
-type ContentEngineTabProps = IdeasTabProps & { ideasError: string | null };
+type ContentEngineView = 'ideas' | 'matrix' | 'onboarding';
 
-export default function ContentEngineTab({ ideasError, ...ideasProps }: ContentEngineTabProps) {
+const VIEWS: { id: ContentEngineView; label: string }[] = [
+  { id: 'ideas', label: 'Idea board' },
+  { id: 'matrix', label: 'Messaging Matrix' },
+  { id: 'onboarding', label: 'Onboarding data' },
+];
+
+function parseView(raw: string | string[] | undefined): ContentEngineView {
+  const v = Array.isArray(raw) ? raw[0] : raw;
+  return v === 'matrix' || v === 'onboarding' ? v : 'ideas';
+}
+
+function OnboardingDataView() {
   const [data, setData] = useState<OnboardingSurveyDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -224,20 +237,61 @@ export default function ContentEngineTab({ ideasError, ...ideasProps }: ContentE
         </div>
       </section>
 
-      <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Ideas</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+    </div>
+  );
+}
+
+type ContentEngineTabProps = IdeasTabProps & { ideasError: string | null };
+
+export default function ContentEngineTab({ ideasError, ...ideasProps }: ContentEngineTabProps) {
+  const router = useRouter();
+  // `view` is taken: pages/index.tsx clears any ?view= outside the KPI tab.
+  const view = parseView(router.query.ce);
+
+  const setView = (next: ContentEngineView) => {
+    void router.replace({ pathname: router.pathname, query: { ...router.query, ce: next } }, undefined, {
+      shallow: true,
+    });
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex gap-1 p-1 rounded-xl bg-gray-100/80 dark:bg-gray-800/60 w-fit max-w-full overflow-x-auto" role="tablist" aria-label="Content Engine">
+        {VIEWS.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            role="tab"
+            aria-selected={view === v.id}
+            onClick={() => setView(v.id)}
+            className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${
+              view === v.id
+                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
+                : 'text-gray-600 dark:text-gray-300'
+            }`}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'matrix' ? (
+        <MessagingMatrixSection />
+      ) : view === 'onboarding' ? (
+        <OnboardingDataView />
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 dark:text-gray-400">
             TOF / MOF / BOF concepts mined from calls and grounded in your top Instagram posts — not advice labels.
           </p>
-        </div>
         {ideasError ? (
           <div className="glass-card border border-red-500/30 text-red-700 dark:text-red-300 px-4 py-3 rounded-xl text-sm">
             {ideasError}
           </div>
         ) : null}
-        <IdeasTab {...ideasProps} />
-      </div>
+          <IdeasTab {...ideasProps} />
+        </div>
+      )}
     </div>
   );
 }
