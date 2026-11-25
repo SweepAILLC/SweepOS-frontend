@@ -9,6 +9,7 @@ import PageDateRange from '@/components/ui/PageDateRange';
 import { useDateRange } from '@/contexts/DateRangeContext';
 import { playbookSection } from '@/components/marketing/AdsPlaybooks';
 import AdsEntityExplorer from '@/components/marketing/AdsEntityExplorer';
+import AdsTargetsCard from '@/components/marketing/AdsTargetsCard';
 
 const SYNC_COOLDOWN_MS = 15 * 60 * 1000;
 
@@ -35,6 +36,8 @@ const ALERT_LABEL: Record<string, string> = {
   no_result_kill: 'Kill — no results',
   scale_test_failed: 'Scale test failed',
   scale_test_passed: 'Scale test passed',
+  roas_below_breakeven: 'ROAS below break-even',
+  roas_below_floor: 'ROAS under minimum',
 };
 
 function money(cents?: number | null, currency?: string | null): string {
@@ -252,8 +255,6 @@ export default function AdsTab() {
   const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
   const [, setTick] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [targetDollars, setTargetDollars] = useState('');
-  const [minRoas, setMinRoas] = useState('');
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [fadingId, setFadingId] = useState<string | null>(null);
   const [growId, setGrowId] = useState<string | null>(null);
@@ -324,14 +325,6 @@ export default function AdsTab() {
     },
     [load]
   );
-
-  useEffect(() => {
-    if (!dash) return;
-    setTargetDollars(
-      dash.settings.target_cpr_cents != null ? (dash.settings.target_cpr_cents / 100).toFixed(2) : ''
-    );
-    setMinRoas(dash.settings.min_roas != null ? String(dash.settings.min_roas) : '');
-  }, [dash]);
 
   useEffect(() => {
     if (cooldownUntil == null) return;
@@ -472,23 +465,6 @@ export default function AdsTab() {
     }
   };
 
-  const handleSettings = async () => {
-    setBusy('settings');
-    setError(null);
-    try {
-      const cents = targetDollars.trim() === '' ? null : Math.round(Number(targetDollars) * 100);
-      const roas = minRoas.trim() === '' ? null : Number(minRoas);
-      if (cents != null && Number.isNaN(cents)) throw new Error('Target cost per result must be a number');
-      if (roas != null && Number.isNaN(roas)) throw new Error('Minimum ROAS must be a number');
-      await apiClient.putAdsSettings({ target_cpr_cents: cents, min_roas: roas });
-      await load();
-    } catch (e) {
-      setError(formatApiError(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (loading && !dash) {
     return (
       <div className="space-y-4">
@@ -577,45 +553,8 @@ export default function AdsTab() {
         </section>
       )}
 
-      {isAdmin ? (
-        <section className="glass-card rounded-xl p-4 border border-gray-200/50 dark:border-gray-700/50 space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">Targets</h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-              Minimum ROAS is the floor your unit economics allow. This dashboard stores that floor. It does not compute live ROAS from funnel cash.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3 items-end">
-            <label className="text-xs text-gray-600 dark:text-gray-300 space-y-1">
-              <span className="block">Target cost per result</span>
-              <input
-                value={targetDollars}
-                onChange={(e) => setTargetDollars(e.target.value)}
-                inputMode="decimal"
-                placeholder="25.00"
-                className="w-32 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-2.5 py-1.5"
-              />
-            </label>
-            <label className="text-xs text-gray-600 dark:text-gray-300 space-y-1">
-              <span className="block">Minimum ROAS</span>
-              <input
-                value={minRoas}
-                onChange={(e) => setMinRoas(e.target.value)}
-                inputMode="decimal"
-                placeholder="2.5"
-                className="w-28 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-transparent px-2.5 py-1.5"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={() => void handleSettings()}
-              disabled={busy === 'settings' || !connected}
-              className="glass-button px-3 py-1.5 text-xs font-semibold rounded-lg disabled:opacity-50"
-            >
-              {busy === 'settings' ? 'Saving…' : 'Save targets'}
-            </button>
-          </div>
-        </section>
+      {isAdmin && dash ? (
+        <AdsTargetsCard settings={dash.settings} currency={dash.currency} connected={connected} onSaved={load} />
       ) : null}
 
       <section className="space-y-3">
