@@ -17,6 +17,7 @@ import PerformanceTab from '@/components/marketing/PerformanceTab';
 
 type SubTab = 'organic' | 'ads' | 'content_engine';
 
+// Sub-views are chosen from the sidebar (Navbar's Marketing Intel group); these labels title the page.
 const SUB_TABS: { id: SubTab; label: string }[] = [
   { id: 'organic', label: 'Organic' },
   { id: 'ads', label: 'Ads' },
@@ -133,14 +134,6 @@ export default function ContentStudioPanel() {
     });
   };
 
-  const setSub = (next: SubTab) => {
-    void router.replace(
-      { pathname: router.pathname, query: { ...router.query, tab: 'content_studio', sub: next } },
-      undefined,
-      { shallow: true }
-    );
-  };
-
   const headerBlurb = useMemo(() => {
     if (sub === 'ads') {
       return 'Fatigue, messaging ceiling, and scale signals from synced Meta Ads. Alerts recommend. Pause is the only write.';
@@ -163,25 +156,11 @@ export default function ContentStudioPanel() {
   return (
     <div className="max-w-6xl mx-auto w-full px-1 pb-12 space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">Marketing Intel</h2>
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Marketing Intel</p>
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+          {SUB_TABS.find((t) => t.id === sub)?.label}
+        </h2>
         <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{headerBlurb}</p>
-      </div>
-
-      <div className="flex gap-1 p-1 rounded-xl bg-gray-100/80 dark:bg-gray-800/60 w-fit">
-        {SUB_TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setSub(tab.id)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-lg ${
-              sub === tab.id
-                ? 'bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 shadow-sm'
-                : 'text-gray-600 dark:text-gray-300'
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
       </div>
 
       {sub === 'ads' ? (
