@@ -287,7 +287,7 @@ function AngleRows({
 
 export default function MessagingMatrixSection() {
   const [data, setData] = useState<MessagingMatrixResponse | null>(null);
-  const [hidden, setHidden] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [channel, setChannel] = useState<MessagingChannel | 'all'>('all');
   const [openId, setOpenId] = useState<string | null>(null);
@@ -303,7 +303,7 @@ export default function MessagingMatrixSection() {
       return res;
     } catch (e) {
       const status = (e as { response?: { status?: number } })?.response?.status;
-      if (status === 403) setHidden(true); // not a consulting-tier org
+      if (status === 403) setLocked(true); // not a consulting-tier org
       else setError(formatApiError(e));
       return null;
     }
@@ -360,7 +360,17 @@ export default function MessagingMatrixSection() {
     }
   };
 
-  if (hidden) return null;
+  if (locked) {
+    return (
+      <section className="space-y-2">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Messaging Matrix</h3>
+        <div className="glass-card rounded-xl px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
+          The Messaging Matrix is available on consulting plans. It scores the angles in your reels and Meta ads
+          by how that content actually performed.
+        </div>
+      </section>
+    );
+  }
 
   const angles: MessagingAngle[] = data?.angles ?? [];
 
