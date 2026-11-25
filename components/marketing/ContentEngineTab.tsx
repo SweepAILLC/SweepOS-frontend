@@ -11,6 +11,7 @@ import type {
   OnboardingSurveyTopSelectedItem,
 } from '@/types/onboardingSurvey';
 import IdeasTab, { IdeasTabProps } from '@/components/marketing/IdeasTab';
+import MessagingMatrixSection from '@/components/marketing/MessagingMatrixSection';
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -223,6 +224,10 @@ export default function ContentEngineTab({ ideasError, ...ideasProps }: ContentE
           )}
         </div>
       </section>
+
+      <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8">
+        <MessagingMatrixSection />
+      </div>
 
       <div className="border-t border-gray-200/50 dark:border-gray-700/50 pt-8 space-y-4">
         <div>

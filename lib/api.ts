@@ -2,6 +2,14 @@ import axios, { AxiosInstance, AxiosError } from 'axios';
 import type { BusinessEconomics, BusinessEconomicsInput, ScaleReadinessResponse } from '@/types/businessEconomics';
 import Cookies from 'js-cookie';
 import type { Client, ClientGridDetail } from '@/types/client';
+import type {
+  MessagingAngle,
+  MessagingAngleDetail,
+  MessagingAngleDraft,
+  MessagingChannel,
+  MessagingMatrixRefreshStatus,
+  MessagingMatrixResponse,
+} from '@/types/messagingMatrix';
 import type { SopCategoryDef } from '@/lib/resources';
 import type {
   FunnelSimulatorBaselines,
@@ -3474,6 +3482,38 @@ class ApiClient {
   async regenerateAdminContentAngleMap(orgId: string, body: { card: ContentAngleCard; full?: boolean }) {
     const response = await this.client.post(`/admin/organizations/${orgId}/content-angle-map/regenerate`, body);
     return response.data as ContentAngleMap;
+  }
+
+  // Messaging Matrix (Content Engine, consulting tier). Reads for any member;
+  // refresh / archive / recreate need an org admin or owner.
+  async getMessagingMatrix(params?: { channel?: MessagingChannel; min_samples?: number; include_archived?: boolean }) {
+    const response = await this.client.get('/content-studio/messaging-matrix', { params });
+    return response.data as MessagingMatrixResponse;
+  }
+
+  async getMessagingMatrixStatus() {
+    const response = await this.client.get('/content-studio/messaging-matrix/status');
+    return response.data as MessagingMatrixRefreshStatus;
+  }
+
+  async refreshMessagingMatrix() {
+    const response = await this.client.post('/content-studio/messaging-matrix/refresh');
+    return response.data as { queued: boolean; status: MessagingMatrixRefreshStatus };
+  }
+
+  async getMessagingAngle(angleId: string) {
+    const response = await this.client.get(`/content-studio/messaging-matrix/angles/${angleId}`);
+    return response.data as MessagingAngleDetail;
+  }
+
+  async setMessagingAngleStatus(angleId: string, status: 'active' | 'archived') {
+    const response = await this.client.patch(`/content-studio/messaging-matrix/angles/${angleId}`, { status });
+    return response.data as MessagingAngle;
+  }
+
+  async recreateMessagingAngle(angleId: string, channel: MessagingChannel) {
+    const response = await this.client.post(`/content-studio/messaging-matrix/angles/${angleId}/recreate`, { channel });
+    return response.data as MessagingAngleDraft;
   }
 
   // Funnel Simulator — omit orgId for the current user's own portal (self-service
